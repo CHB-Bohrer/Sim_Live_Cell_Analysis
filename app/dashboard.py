@@ -209,17 +209,25 @@ with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
         mode = st.selectbox("Trackastra mode", ["greedy", "greedy_nodiv", "ilp"], 0)
         go = st.form_submit_button("▶ Run simulation", type="primary", width="stretch")
 
-if go:
-    overrides = [
-        f"seed={seed}", f"acquisition.n_frames={n_frames}", f"acquisition.frame_interval_s={dt}",
-        f"cells.n_cells={n_cells}", f"cells.p_divide_per_frame={p_div}", f"geometry.fov_um=[{fov}, {fov}]",
-        f"geometry.cell_radius_um={radius}", f"motion.D_um2_s={D}", f"motion.drift_um_s={drift}",
-        f"geometry.shape.aspect_mean={aspect}", f"geometry.shape.deform_amp={deform}",
-        f"geometry.shape.persistence={persist}", f"optics.photons_per_px_s={photons}",
-        f"optics.read_noise_e={read_noise}", f"optics.pixel_size_nm={pix}", f"optics.NA={NA}",
-        f"tracking.mode={mode}", f"nucleus_texture.contrast={tex_c}", f"nucleus_texture.n_nucleoli={n_nuc}",
-        f"segmentation.method={seg_method}", f"motion.speed_scale={speed}"]
+with st.sidebar.expander("🔬 New single-cell loci run"):
+    st.caption("Uses configs/loci_demo.yaml: fine pixels, a few cells, two coloured loci per nucleus (stand-in "
+               "dynamics), then isolates every cell and locates the loci in each one in parallel (about 2 minutes).")
+    with st.form("loci_sim"):
+        l_seed = st.number_input("Random seed", 0, 10_000, 1, key="l_seed")
+        l_cells = st.slider("Cells in the field", 2, 20, 8, key="l_cells")
+        l_frames = st.slider("Frames", 20, 300, 120, key="l_frames")
+        l_dt = st.number_input("Frame interval (s)", 1, 600, 10, key="l_dt")
+        l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed")
+        l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot")
+        l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div")
+        go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
+
+
+def launch(overrides, config=None):
+    """Run scripts/run_tracking_demo.py in a separate process and stream its progress into the page."""
     cmd = [sys.executable, str(REPO_ROOT / "scripts" / "run_tracking_demo.py")]
+    if config:
+        cmd += ["--config", str(config)]
     for o in overrides:
         cmd += ["--set", o]
     with st.status("Running simulation…", expanded=True) as status:
@@ -241,6 +249,23 @@ if go:
             status.update(label="Failed", state="error")
             st.error("The simulation process failed. Last output:")
             st.code("\n".join(log[-40:]))
+
+
+if go:
+    launch([
+        f"seed={seed}", f"acquisition.n_frames={n_frames}", f"acquisition.frame_interval_s={dt}",
+        f"cells.n_cells={n_cells}", f"cells.p_divide_per_frame={p_div}", f"geometry.fov_um=[{fov}, {fov}]",
+        f"geometry.cell_radius_um={radius}", f"motion.D_um2_s={D}", f"motion.drift_um_s={drift}",
+        f"geometry.shape.aspect_mean={aspect}", f"geometry.shape.deform_amp={deform}",
+        f"geometry.shape.persistence={persist}", f"optics.photons_per_px_s={photons}",
+        f"optics.read_noise_e={read_noise}", f"optics.pixel_size_nm={pix}", f"optics.NA={NA}",
+        f"tracking.mode={mode}", f"nucleus_texture.contrast={tex_c}", f"nucleus_texture.n_nucleoli={n_nuc}",
+        f"segmentation.method={seg_method}", f"motion.speed_scale={speed}"])
+if go_loci:
+    launch([f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
+            f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
+            f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}"],
+           config=REPO_ROOT / "configs" / "loci_demo.yaml")
 
 runs = list_runs()
 if not runs:
@@ -268,8 +293,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 with tab_movie:
@@ -421,3 +446,9 @@ with tab_scan:
             summary = d.groupby(group_cols + [xcol])[list(SCAN_METRICS)].agg(["mean", "std"]).round(3)
             with st.expander("Table (mean and standard deviation over seeds)"):
                 st.dataframe(summary, width="stretch")
+
+# ----------------------------------------------------------------------------- single cells
+import cells_tab  # noqa: E402  (app/cells_tab.py)
+
+with tab_cells:
+    cells_tab.render(st, run_path, R["cfg"])

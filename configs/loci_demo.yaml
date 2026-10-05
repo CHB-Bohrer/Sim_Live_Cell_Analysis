@@ -1,0 +1,87 @@
+# Single-cell locus pipeline: cells + stand-in loci -> segment/track -> isolate each cell -> per-cell locus analysis.
+#   scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_demo.yaml
+# Locus imaging needs fine pixels (130 nm), so the field is smaller and holds fewer cells than tracking_demo.yaml.
+name: loci_demo
+seed: 1
+image_dtype: uint16        # store images as 16-bit integers like a real camera (float32 = double the memory)
+
+acquisition:
+  n_frames: 120
+  frame_interval_s: 10
+  exposure_s: 0.1
+
+geometry:
+  fov_um: [80, 80]
+  cell_radius_um: 6.0
+  shape:
+    aspect_mean: 1.25
+    aspect_std: 0.12
+    harmonics: [2, 3, 4, 5]
+    deform_amp: 0.07
+    persistence: 0.9
+    rot_diffusion_rad: 0.1
+
+cells:
+  n_cells: 8
+  p_divide_per_frame: 0.0
+  max_cells: 20
+
+motion:
+  speed_scale: 0.4          # cells move ~0.3 um per frame at this frame interval
+  D_um2_s: 0.03
+  drift_um_s: 0.008
+  heading_diffusion_rad: 0.3
+
+optics:                     # nuclear channel (NLS-GFP)
+  modality: widefield
+  wavelength_nm: 509
+  NA: 1.2
+  pixel_size_nm: 130
+  photons_per_px_s: 3000
+  brightness_cv: 0.3
+  bleach_tau_s: 20000
+  background_photons: 5
+  quantum_efficiency: 0.8
+  read_noise_e: 1.5
+  gain_adu_per_e: 1.0
+  offset_adu: 100
+
+nucleus_texture:
+  contrast: 0.30
+  correlation_um: 1.5
+  n_nucleoli: 2
+  nucleolus_depth: 0.55
+
+loci:                       # STAND-IN for stage 1 (polychrom): confined diffusion inside each nucleus
+  n_loci: 2
+  confinement_std: 0.10     # spread of locus position, in units of the nuclear radius (0.1 x 6 um = 0.6 um)
+  tau_s: 120                # relaxation time of the confined motion
+  wavelengths_nm: [580, 660]  # one colour channel per locus (locus0, locus1)
+  photons_per_locus_s: 6000   # photons per locus per second of exposure (x exposure_s = 600 per frame)
+  bleach_tau_s: 6000
+
+isolation:                  # stage 5: one single-cell movie per cell ID
+  sources: [truth, tracked_auto_masks]   # truth | tracked_gt_masks | tracked_auto_masks
+  margin: 0.3               # extra crop room around the largest cell (fraction of its radius)
+  n_workers: null           # null = CPU cores - 2 (max 8); 1 = no multiprocessing
+  min_frames: 1
+
+locus_analysis:             # placeholder analysis parameters (stage 6)
+  smooth_sigma_px: 1.0
+  min_snr: 5.0
+  min_sep_px: 4.0
+  dilate_px: 2
+
+segmentation:
+  method: cellpose
+  diameter_px: auto         # "auto" = 2 x nuclear radius / pixel size; or a number; or null for Cellpose default
+  flow_threshold: 0.4
+  cellprob_threshold: 0.0
+  smooth_px: 1.5
+  min_area_px: 20
+  min_distance_px: 5
+
+tracking:
+  tracker: trackastra
+  model: general_2d
+  mode: greedy

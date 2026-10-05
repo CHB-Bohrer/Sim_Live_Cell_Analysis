@@ -36,6 +36,17 @@ def _bound_radius(radius, aspect, amp, phase, harmonics):
     return out
 
 
+def nucleus_to_lab_um(row, xn, yn):
+    """Position(s) in the nucleus' own frame (units of its radius, ellipse axes u/v) -> lab (y_um, x_um).
+
+    Inverse of the mapping used by the renderer, so anything placed at fixed (xn, yn) rotates, stretches and
+    translates with the nucleus. `row`: a cells.csv row (itertuples or Series-like with the same fields).
+    """
+    c, s = np.cos(row.angle_rad), np.sin(row.angle_rad)
+    u, v = xn * row.radius_um * np.sqrt(row.aspect), yn * row.radius_um / np.sqrt(row.aspect)
+    return row.y_um + u * s + v * c, row.x_um + u * c - v * s
+
+
 def _new_shapes(n, sh, rng):
     k = len(sh["harmonics"])
     aspect = np.maximum(1.0, rng.normal(sh["aspect_mean"], sh["aspect_std"], n))

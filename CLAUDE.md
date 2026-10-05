@@ -50,12 +50,37 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
 
 ## Status (update this section every session)
 Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
-nuclear channel only (PSF blur, noise, bleaching, per-nucleus texture + nucleoli), stage 4 (Cellpose default,
-threshold-watershed baseline, Trackastra `general_2d` behind the `Tracker` adapter), stage 7a (CTC metrics via
-traccuracy + own identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, dashboard.
-NOT built: stage 1 (chromatin / polychrom), locus + MS2 channels, calibration, stage 5 (locus-to-cell linking),
-stage 6 (analysis), stage 7b (propagation of tracking errors into locus results), Ultrack/TrackMate adapters,
+(nuclear channel + one colour channel per locus: PSF blur, noise, bleaching, per-nucleus texture + nucleoli), stage 4
+(Cellpose default, threshold-watershed baseline, Trackastra `general_2d` behind the `Tracker` adapter), stage 5a
+(per-cell isolation: `stage5_linking/isolate.py`, `celldata.py`), stage 7a (CTC metrics via traccuracy + own
+identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, dashboard (tabs incl. Scans, Cells).
+STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per nucleus doing confined diffusion in
+the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/localize.py` (brightest-spot localizer, placeholder for
+the user's analysis). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
+NOT built: real stage 1 (polychrom/OpenMM) and MSD calibration, MS2 bursting, 3D z-stacks, the real stage 5 (link
+locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
+locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,
 density and frame-interval scans.
+
+## Single-cell isolation + per-cell analysis (stage 5a / 6)
+- `isolate_cells(images, labels, out_dir)` writes one fixed-size (S x S, centred on the centroid) movie per cell ID:
+  `stage5_cells/<source>/cells/cell_XXXX/{nucleus,locus0,locus1,mask}.tif + frames.csv`, plus `cell_table.csv` and
+  `cell_summary.csv` (lifetime, gaps, border contact, nearest-neighbour distance). `mask` holds only that cell's pixels.
+- Identity sources: `truth` (ground-truth IDs), `tracked_gt_masks`, `tracked_auto_masks` (tracker IDs). Running the
+  same analysis on each is how tracking errors will be propagated into locus results (stage 7b).
+- `map_cells(func, source_dir, n_workers)` runs `func(CellData, **kw) -> DataFrame` over all cells in a process
+  pool (one cell per worker; `func` must be a top-level function). Serial and parallel results are tested identical.
+- Each locus has its OWN colour channel (user's experiment: loci are different colours), so locus identity is unambiguous.
+  Same-colour loci that move farther per frame than their separation cannot be told apart (we saw ~140 swaps).
+- Memory (measured, loci_demo: 8 cells, 120 frames, 615x615 px, 3 channels): images stored as uint16 (`image_dtype`)
+  = 87 MB per channel for the full movie; per-cell crops ~28 MB per cell per identity source on disk; each analysis
+  worker peaks ~245 MB (mostly Python/libs); the MAIN process peaks ~2.1 GB during whole-movie segmentation/tracking
+  (that is the biggest consumer, not the per-cell work). Dashboard reads single TIFF pages only.
+  Scaling caveat: `CellData` loads a whole cell into RAM; for long 3D movies switch to lazy per-frame access.
+- Gotchas: tifffile treats stacks of exactly 3-4 frames as RGB, so always write with `photometric="minisblack"`;
+  Cellpose needs the right `diameter_px` at fine pixel sizes (`diameter_px: auto` in loci_demo.yaml; without it DET fell
+  to 0.946 at 130 nm/px); Streamlit does not reliably hot-reload helper modules (`app/cells_tab.py`), so restart the
+  dashboard after editing them.
 
 ## Findings so far (cell tracking only; simulated 2D nuclei, 5 seeds per setting)
 - Errors come from crowding x speed: touching, featureless-ish nuclei; Trackastra (greedy, divisions allowed) often

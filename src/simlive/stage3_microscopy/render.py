@@ -64,6 +64,48 @@ def _sample_texture(tex_map: np.ndarray, xn: np.ndarray, yn: np.ndarray) -> np.n
     return map_coordinates(tex_map, [to_grid(yn), to_grid(xn)], order=1, mode="nearest")
 
 
+def render_loci(loci: pd.DataFrame, cfg: dict, rng: np.random.Generator, locus_id: int = 0) -> np.ndarray:
+    """One locus colour channel: diffraction-limited spots (Gaussian PSF integrated over each pixel).
+
+    Each locus has its own colour/channel (`loci.wavelengths_nm[locus_id]`), so only rows of that locus are drawn.
+    Photons per spot = loci.photons_per_locus_s x exposure x photobleaching; then Poisson shot noise and camera
+    gain/read noise/offset, like the nuclear channel. Pixel centres sit at integer coordinates (pixel i spans i+-0.5).
+    """
+    from scipy.special import erf
+
+    opt, acq, lc = cfg["optics"], cfg["acquisition"], cfg["loci"]
+    loci = loci[loci.locus_id == locus_id]
+    px_um = opt["pixel_size_nm"] / 1000.0
+    ny, nx = (int(round(v / px_um)) for v in cfg["geometry"]["fov_um"])
+    T = acq["n_frames"]
+    sig = psf_sigma_px({**opt, "wavelength_nm": lc["wavelengths_nm"][locus_id]})
+    sig = max(sig, 0.3)
+    bleach_tau = lc.get("bleach_tau_s", opt.get("bleach_tau_s"))
+    bleach = np.exp(-acq["frame_interval_s"] * np.arange(T) / bleach_tau) if bleach_tau else np.ones(T)
+    photons_per_spot = lc["photons_per_locus_s"] * acq["exposure_s"]
+    half = int(np.ceil(4 * sig)) + 1
+    s2 = np.sqrt(2) * sig
+
+    img = np.zeros((T, ny, nx), np.float32)
+    for t, g in loci.groupby("t"):
+        clean = np.zeros((ny, nx), np.float32)
+        for r in g.itertuples():
+            cy, cx = r.y_um / px_um, r.x_um / px_um
+            y0, y1 = max(int(round(cy)) - half, 0), min(int(round(cy)) + half + 1, ny)
+            x0, x1 = max(int(round(cx)) - half, 0), min(int(round(cx)) + half + 1, nx)
+            if y1 <= y0 or x1 <= x0:
+                continue
+            ys, xs = np.arange(y0, y1), np.arange(x0, x1)
+            py = 0.5 * (erf((ys + 0.5 - cy) / s2) - erf((ys - 0.5 - cy) / s2))
+            px = 0.5 * (erf((xs + 0.5 - cx) / s2) - erf((xs - 0.5 - cx) / s2))
+            clean[y0:y1, x0:x1] += photons_per_spot * bleach[t] * np.outer(py, px)
+        photons = rng.poisson(clean + opt["background_photons"])
+        electrons = photons * opt.get("quantum_efficiency", 0.8)
+        img[t] = (electrons + rng.normal(0, opt["read_noise_e"], electrons.shape)) * opt.get("gain_adu_per_e", 1.0) \
+            + opt.get("offset_adu", 100.0)
+    return img.clip(0, 65535).astype(np.float32)
+
+
 def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
     opt, acq = cfg["optics"], cfg["acquisition"]
     px_um = opt["pixel_size_nm"] / 1000.0
