@@ -187,6 +187,7 @@ with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
         n_cells = st.slider("Initial cells", 3, 80, int(base["cells"]["n_cells"]))
         fov = st.slider("Field of view (µm, square)", 60, 400, int(base["geometry"]["fov_um"][0]))
         radius = st.slider("Nuclear radius (µm)", 3.0, 12.0, float(base["geometry"]["cell_radius_um"]), 0.5)
+        speed = st.slider("Speed scale (1 = default, 0.5 = half as fast)", 0.0, 2.0, float(base["motion"]["speed_scale"]), 0.05)
         D = st.number_input("Diffusion D (µm²/s)", 0.0, 1.0, float(base["motion"]["D_um2_s"]), 0.005, format="%.4f")
         drift = st.number_input("Directed speed (µm/s)", 0.0, 0.1, float(base["motion"]["drift_um_s"]), 0.002, format="%.4f")
         p_div = st.slider("Division probability per cell per frame", 0.0, 0.1, float(base["cells"]["p_divide_per_frame"]), 0.005)
@@ -217,7 +218,7 @@ if go:
         f"geometry.shape.persistence={persist}", f"optics.photons_per_px_s={photons}",
         f"optics.read_noise_e={read_noise}", f"optics.pixel_size_nm={pix}", f"optics.NA={NA}",
         f"tracking.mode={mode}", f"nucleus_texture.contrast={tex_c}", f"nucleus_texture.n_nucleoli={n_nuc}",
-        f"segmentation.method={seg_method}"]
+        f"segmentation.method={seg_method}", f"motion.speed_scale={speed}"]
     cmd = [sys.executable, str(REPO_ROOT / "scripts" / "run_tracking_demo.py")]
     for o in overrides:
         cmd += ["--set", o]
@@ -267,7 +268,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_cfg = st.tabs(["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 with tab_movie:
@@ -365,3 +367,57 @@ with tab_traj:
 with tab_cfg:
     st.code(yaml.safe_dump(R["cfg"], sort_keys=False), language="yaml")
     st.caption(f"Files for this run: {run_path}")
+
+# ----------------------------------------------------------------------------- scans
+SCAN_METRICS = {"CHOTA": "CHOTA (higher is better)", "LNK": "LNK (higher is better)",
+                "target_eff": "Target effectiveness (higher is better)", "id_switches": "ID switches (lower is better)",
+                "identity_kept": "Identity kept (higher is better)", "DET": "DET (higher is better)",
+                "TRA": "TRA (higher is better)"}
+with tab_scan:
+    scans = sorted((RUNS.parent / "sweeps").glob("*/results.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not scans:
+        st.info("No scans yet. Run one from a terminal, e.g.\n\n"
+                "`scripts\run.cmd python scripts\sweep.py --name speed --seeds 1-5 --grid motion.speed_scale=1,0.5,0.25`")
+    else:
+        sname = st.selectbox("Scan", [p.parent.name for p in scans])
+        sdf = pd.read_csv(RUNS.parent / "sweeps" / sname / "results.csv")
+        params = [c for c in sdf.columns if c not in {"seed", "masks", "run", *SCAN_METRICS}]
+        n_seeds = sdf.seed.nunique()
+        st.caption(f"{len(sdf) // 2} runs ({n_seeds} seeds per setting). Lines = mean over seeds, bars = ± 1 standard "
+                   "deviation across seeds, dots = individual seeds. Differences smaller than the bars are not reliable.")
+        c1, c2, c3 = st.columns(3)
+        metric = c1.selectbox("Metric", list(SCAN_METRICS), format_func=SCAN_METRICS.get)
+        masks_sel = c3.radio("Masks", ["auto_masks", "gt_masks", "both"], horizontal=True,
+                             format_func={"auto_masks": "Automatic segmentation", "gt_masks": "Ground-truth masks",
+                                          "both": "Both"}.get)
+        if not params:
+            st.warning("This scan has no varied settings to plot.")
+        else:
+            xcol = c2.selectbox("X axis", params)
+            others = [p for p in params if p != xcol]
+            d = sdf if masks_sel == "both" else sdf[sdf.masks == masks_sel]
+            group_cols = others + (["masks"] if masks_sel == "both" else [])
+            xs = sorted(d[xcol].unique(), key=lambda v: (isinstance(v, str), v))
+            xpos = {v: i for i, v in enumerate(xs)}
+            numeric = all(not isinstance(v, str) for v in xs)
+            fig, ax = plt.subplots(figsize=(9, 5))
+            groups = list(d.groupby(group_cols)) if group_cols else [((), d)]
+            for gi, (key, g) in enumerate(groups):
+                key = key if isinstance(key, tuple) else (key,)
+                label = ", ".join(f"{c}={v}" for c, v in zip(group_cols, key)) or "all runs"
+                col = plt.cm.tab10(gi % 10)
+                m = g.groupby(xcol)[metric].agg(["mean", "std"]).reindex(xs)
+                xv = [v if numeric else xpos[v] for v in xs]
+                ax.errorbar(xv, m["mean"], yerr=m["std"].fillna(0), marker="o", capsize=4, lw=2, color=col, label=label)
+                ax.scatter([v if numeric else xpos[v] for v in g[xcol]], g[metric], s=14, alpha=0.35, color=col)
+            if not numeric:
+                ax.set_xticks(range(len(xs))); ax.set_xticklabels([str(v) for v in xs])
+            ax.set_xlabel(xcol); ax.set_ylabel(SCAN_METRICS[metric])
+            ax.grid(alpha=0.3)
+            if len(groups) > 1:
+                ax.legend(fontsize=9)
+            st.pyplot(fig, width="stretch")
+            plt.close(fig)
+            summary = d.groupby(group_cols + [xcol])[list(SCAN_METRICS)].agg(["mean", "std"]).round(3)
+            with st.expander("Table (mean and standard deviation over seeds)"):
+                st.dataframe(summary, width="stretch")

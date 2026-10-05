@@ -49,8 +49,9 @@ def simulate_cells(cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
     harm = np.array(sh["harmonics"], float)
     n_frames, dt = cfg["acquisition"]["n_frames"], cfg["acquisition"]["frame_interval_s"]
     fov = np.array(g["fov_um"], float)  # (y, x)
-    sigma = np.sqrt(2 * m["D_um2_s"] * dt)
-    drift = m.get("drift_um_s", 0.0) * dt
+    scale = m.get("speed_scale", 1.0)  # multiplies every displacement: 0.5 = cells move half as far per frame
+    sigma = scale * np.sqrt(2 * m["D_um2_s"] * dt)
+    drift = scale * m.get("drift_um_s", 0.0) * dt
     rho_p = sh.get("persistence", 0.9)  # AR(1) memory of deformation per frame
 
     n0 = cfg["cells"]["n_cells"]

@@ -25,6 +25,7 @@ cells:
   max_cells: 45
 
 motion:                     # per-cell persistent random walk + collisions
+  speed_scale: 1.0          # multiplies all cell displacements (0.5 = half as far per frame, 0 = frozen)
   D_um2_s: 0.03             # diffusion coefficient; step sigma = sqrt(2 D dt) per axis
   drift_um_s: 0.008         # directed speed (0 = purely diffusive)
   heading_diffusion_rad: 0.3
