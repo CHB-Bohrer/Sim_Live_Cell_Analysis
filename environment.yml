@@ -1,0 +1,31 @@
+name: simlive
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pip
+  # OpenMM CUDA build. Pinned to CUDA 12.x: the 3090 driver (CUDA 13.2) runs 12.x runtimes,
+  # and OpenMM/CuPy/PyTorch wheels are most reliably available for 12.x.
+  - cuda-version=12.6
+  - openmm>=8.1
+  - cupy
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - h5py
+  - joblib
+  - cython
+  - pyyaml
+  - pytest
+  - pip:
+      # PyTorch CUDA wheels (conda's pytorch channel is deprecated).
+      - --extra-index-url https://download.pytorch.org/whl/cu126
+      - torch
+      - torchvision
+      # Installed after torch so pip keeps the CUDA build.
+      - trackastra
+      # polychrom is not on PyPI.
+      - git+https://github.com/open2c/polychrom.git
+      - -e .
