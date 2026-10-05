@@ -181,6 +181,8 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   units (`x_nm`, `t_s`). Calibration parameters are recorded in the run.
 - **Formats:** trajectories and tables as HDF5 or Parquet/CSV with a documented schema; images as TIFF/zarr; label
   masks as integer arrays whose value is the persistent cell ID.
-- **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. Prefer small deterministic tests with a
+- **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
+  CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 37 tests at 2026-10-05. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.

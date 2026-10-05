@@ -14,4 +14,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# GPU tests (torch/OpenMM/CuPy) and the numba/scikit-image tests cannot share one Python process on Windows (DLL / OpenMP
+# clashes), so plain `pytest` runs the CPU tests only; run the GPU ones with `pytest -m gpu` (or scripts\run_tests.cmd).
+addopts = "-m 'not gpu'"
 markers = ["gpu: requires the NVIDIA GPU"]
