@@ -77,6 +77,14 @@ density and frame-interval scans.
   worker peaks ~245 MB (mostly Python/libs); the MAIN process peaks ~2.1 GB during whole-movie segmentation/tracking
   (that is the biggest consumer, not the per-cell work). Dashboard reads single TIFF pages only.
   Scaling caveat: `CellData` loads a whole cell into RAM; for long 3D movies switch to lazy per-frame access.
+- Dashboard performance (fixed after the user found movies slow): (1) each tab body is an `@st.fragment`, so a widget
+  only re-runs its own tab (Streamlit otherwise re-runs ALL tabs on any click); (2) `load_run` uses
+  `st.cache_resource` (cache_data copied the whole movie on every interaction); (3) playback is an in-browser JS
+  player (`app/player.py`) fed by pre-rendered JPEG frames from `app/fastview.py` (numpy/PIL, ~44 ms/frame; matplotlib
+  was far too slow), gated behind a "Prepare player" toggle and cached; expanders stay open while their toggle is on.
+  Do not draw per-frame matplotlib figures for animation. Full-app reruns (e.g. sidebar selectbox) reset the active tab.
+- The stand-in loci (`toy_loci.py`) are INVENTED, not from polychrom or data: confinement 0.1 x nuclear radius, relaxation
+  time 120 s, 600 photons/locus/frame are guesses. Never present their statistics as physical results.
 - Gotchas: tifffile treats stacks of exactly 3-4 frames as RGB, so always write with `photometric="minisblack"`;
   Cellpose needs the right `diameter_px` at fine pixel sizes (`diameter_px: auto` in loci_demo.yaml; without it DET fell
   to 0.946 at 130 nm/px); Streamlit does not reliably hot-reload helper modules (`app/cells_tab.py`), so restart the

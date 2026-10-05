@@ -9,7 +9,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import streamlit as _st
 import tifffile
+from PIL import Image
+
+from fastview import all_cells_frames, cell_composite, single_cell_frames
+from player import show_player
+from simlive.stage5_linking.celldata import load_cell
 
 SRC_LABEL = {"truth": "True cell IDs (ground truth)", "tracked_gt_masks": "Tracked IDs (tracker on ground-truth masks)",
              "tracked_auto_masks": "Tracked IDs (tracker on automatic segmentation)"}
@@ -33,6 +39,21 @@ def cell_rgb(cdir: Path, i: int, channels: list) -> np.ndarray:
         im = np.clip((im - np.median(im)) / max(im.max() - np.median(im), 1e-9), 0, 1)
         rgb[..., k] = np.clip(rgb[..., k] + im, 0, 1)
     return rgb
+
+
+@_st.cache_resource(show_spinner=False, max_entries=3)
+def _all_cells_movie(sdir: str, stamp: float, loc_names: tuple, tile: int = 150):
+    """Every cell as a small RGB tile per frame (computed once, one cell in memory at a time)."""
+    summ = pd.read_csv(Path(sdir) / "cell_summary.csv")
+    data = []
+    for cid in summ.cell_id:
+        c = load_cell(sdir, cid)
+        tiles = {}
+        for i, t in enumerate(c.t):
+            rgb = cell_composite(c.channels["nucleus"][i], [c.channels[n][i] for n in loc_names])
+            tiles[int(t)] = np.asarray(Image.fromarray(rgb.astype(np.uint8)).resize((tile, tile), Image.BILINEAR))
+        data.append((int(cid), tiles))
+    return all_cells_frames(data, int(summ.last_t.max()) + 1, tile=tile)
 
 
 def render(st, run_path: Path, cfg: dict):
@@ -62,6 +83,14 @@ def render(st, run_path: Path, cfg: dict):
                    f", {c} ({COLOR_NAMES[k]})" for k, c in enumerate(loc_ch[:3])) + ".")
     with st.expander("Cell summary table (lifetime, gaps, border contact, closest neighbour)"):
         st.dataframe(summ.drop(columns=["crop_size_px"]).round(1), hide_index=True, width="stretch")
+
+    # ---- smooth movie of all cells side by side (in-browser player)
+    with st.expander("▶ Play all cells together (smooth, runs in your browser)", expanded=st.session_state.get("cells_all_play", False)):
+        if st.toggle("Prepare player", key="cells_all_play", help="Takes a few seconds the first time for each run"):
+            with st.spinner("Rendering frames…"):
+                frames_all, labels_all = _all_cells_movie(str(sdir), (sdir / "cell_summary.csv").stat().st_mtime,
+                                                          tuple(loc_ch))
+            show_player(frames_all, labels_all, fps=10, column_width_px=700, key="allcells")
 
     # ---- contact sheet: every cell at one frame
     st.subheader("All cells at one frame")
@@ -105,6 +134,13 @@ def render(st, run_path: Path, cfg: dict):
         st.warning("; ".join(flags))
     else:
         st.success(f"Clean track: present in {int(row.n_frames)} frames, no gaps, never touching the border.")
+    with st.expander("▶ Play this cell's movie (smooth, runs in your browser)", expanded=st.session_state.get("cell_play", False)):
+        if st.toggle("Prepare player", key="cell_play", help="Renders this cell's frames once"):
+            with st.spinner("Rendering frames…"):
+                cd = load_cell(sdir, cid)
+                pc_ = pos[pos.cell_id == cid] if len(pos) else None
+                fr_list, lb_list = single_cell_frames(cd.channels, cd.mask, cd.frames, loc_ch, pc_, truth, px_um)
+            show_player(fr_list, lb_list, fps=10, column_width_px=800, key="onecell")
     ci = st.slider("Frame (this cell)", 0, len(frames) - 1, 0, key="cell_idx")
     t_now, fr_now = int(frames.t.iloc[ci]), frames.iloc[ci]
     mask = read_frame(cdir / "mask.tif", ci) > 0

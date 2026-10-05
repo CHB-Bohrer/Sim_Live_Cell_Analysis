@@ -51,7 +51,7 @@ def list_runs() -> list[Path]:
     return sorted(rs, key=lambda p: (p / "stage7_validation" / "metrics.json").stat().st_mtime, reverse=True)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def load_run(path: str, stamp: float):
     r = Path(path)
     s3, s4, s7 = r / "stage3_microscopy", r / "stage4_segtrack", r / "stage7_validation"
@@ -297,7 +297,8 @@ tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_cfg = st.tabs(
     ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
-with tab_movie:
+@st.fragment
+def movie_tab():
     variant = st.radio("Tracked on:", list(VARIANT_LABEL), format_func=VARIANT_LABEL.get, horizontal=True)
     if "frame" not in st.session_state:
         st.session_state["frame"] = 0
@@ -354,7 +355,8 @@ with tab_movie:
     st.bar_chart(ev.groupby("t").size().reindex(range(T), fill_value=0))
 
 # ----------------------------------------------------------------------------- metrics
-with tab_metrics:
+@st.fragment
+def metrics_tab():
     rows = {}
     for v in ("auto_masks", "gt_masks"):
         flat = {}
@@ -383,7 +385,8 @@ trajectory-association accuracy. **Track purity** = how much of each predicted t
                  width="stretch")
 
 # ----------------------------------------------------------------------------- trajectories
-with tab_traj:
+@st.fragment
+def traj_tab():
     v = st.radio("Tracked on:", list(VARIANT_LABEL), format_func=VARIANT_LABEL.get, horizontal=True, key="trajv")
     fig = trajectory_figure(R, v)
     st.pyplot(fig)
@@ -398,11 +401,12 @@ SCAN_METRICS = {"CHOTA": "CHOTA (higher is better)", "LNK": "LNK (higher is bett
                 "target_eff": "Target effectiveness (higher is better)", "id_switches": "ID switches (lower is better)",
                 "identity_kept": "Identity kept (higher is better)", "DET": "DET (higher is better)",
                 "TRA": "TRA (higher is better)"}
-with tab_scan:
+@st.fragment
+def scan_tab():
     scans = sorted((RUNS.parent / "sweeps").glob("*/results.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not scans:
         st.info("No scans yet. Run one from a terminal, e.g.\n\n"
-                "`scripts\run.cmd python scripts\sweep.py --name speed --seeds 1-5 --grid motion.speed_scale=1,0.5,0.25`")
+                "`scripts\\run.cmd python scripts\\sweep.py --name speed --seeds 1-5 --grid motion.speed_scale=1,0.5,0.25`")
     else:
         sname = st.selectbox("Scan", [p.parent.name for p in scans])
         sdf = pd.read_csv(RUNS.parent / "sweeps" / sname / "results.csv")
@@ -449,6 +453,45 @@ with tab_scan:
 
 # ----------------------------------------------------------------------------- single cells
 import cells_tab  # noqa: E402  (app/cells_tab.py)
+from fastview import movie_frames  # noqa: E402
+from player import show_player  # noqa: E402
 
-with tab_cells:
+@st.fragment
+def cells_frag():
     cells_tab.render(st, run_path, R["cfg"])
+
+
+@st.cache_resource(show_spinner=False, max_entries=4)
+def cached_movie(path: str, stamp: float, variant: str, show_image: bool):
+    """Pre-render every frame once (numpy/PIL, fast) for the in-browser player."""
+    return movie_frames(load_run(path, stamp), variant, show_image)
+
+
+@st.fragment
+def movie_player():
+    with st.expander("▶ Play the movie (smooth, runs in your browser)", expanded=st.session_state.get("mv_play", False)):
+        st.caption("Pre-renders every frame once, then plays in your browser with no waiting between frames. "
+                   "Space = play/pause, arrow keys = step. Red circles mark identity switches.")
+        c1, c2, c3 = st.columns([2, 2, 3])
+        on = c1.toggle("Prepare player", key="mv_play", help="Takes a few seconds the first time for each run")
+        pv = c2.radio("Tracked on", list(VARIANT_LABEL), format_func=lambda v: "Automatic masks" if v == "auto_masks" else "Ground-truth masks",
+                      key="mv_play_var", horizontal=True)
+        raw = c3.checkbox("Also show the raw image", False, key="mv_play_raw")
+        if on:
+            with st.spinner("Rendering frames…"):
+                frames, labels = cached_movie(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime,
+                                              pv, raw)
+            show_player(frames, labels, fps=8, key="movie")
+
+
+with tab_movie:
+    movie_player()
+    movie_tab()
+with tab_metrics:
+    metrics_tab()
+with tab_traj:
+    traj_tab()
+with tab_scan:
+    scan_tab()
+with tab_cells:
+    cells_frag()
