@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -14,6 +15,9 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# Where simulation outputs live (runs, sweeps, chromatin library). Defaults to <repo>/data, but scripts\run.cmd points
+# it at C:\Users\<you>\SimLiveData so large files stay out of the OneDrive-synced repo folder.
+DATA_ROOT = Path(os.environ.get("SIMLIVE_DATA", REPO_ROOT / "data"))
 
 
 def load_config(path: str | Path, overrides: list[str] | None = None) -> dict:

@@ -144,8 +144,10 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - **File contracts:** each stage reads and writes defined files only (no in-memory hand-offs between stages).
   Every stage output directory contains: data files, `params.yaml` (resolved config), `seed.txt`, `provenance.json`
   (git commit, package versions, timestamp), and ground truth where applicable.
-- **Run layout:** `data/runs/<run_id>/stageN_<name>/...`. `run_id` encodes the config hash + seed. Outputs are
-  gitignored; they must be reproducible from config + seed.
+- **Run layout:** `$SIMLIVE_DATA/runs/<run_id>/stageN_<name>/...` where `SIMLIVE_DATA` defaults to
+  `C:\Users\cbohr\SimLiveData` (set in `scripts\run.cmd`; code uses `simlive.io.runs.DATA_ROOT`). Data was moved out of
+  the repo/OneDrive on 2026-10-05. `run_id` encodes the config hash + seed. Outputs are gitignored and must be
+  reproducible from config + seed. Chromatin simulations go in `$SIMLIVE_DATA/chromatin/`.
 - **Configs:** YAML in `configs/`, one per stage plus sweep files that expand to a list of resolved configs.
   Never hardcode parameters in code.
 - **Seeds:** all randomness flows from an explicit seed via `numpy.random.default_rng` (and `torch` / OpenMM seeds

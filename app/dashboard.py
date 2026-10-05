@@ -21,12 +21,12 @@ import yaml
 from scipy import ndimage as ndi
 from skimage.segmentation import find_boundaries
 
-from simlive.io.runs import REPO_ROOT, load_config
+from simlive.io.runs import DATA_ROOT, REPO_ROOT, load_config
 
 # NOTE: the simulation (PyTorch/OpenMM/GPU) runs in a separate process (scripts/run_tracking_demo.py). Importing
 # torch into this web server clashes with the plotting libraries' OpenMP runtime on Windows and crashes it.
 
-RUNS = REPO_ROOT / "data" / "runs"
+RUNS = DATA_ROOT / "runs"
 DEFAULT_CFG = REPO_ROOT / "configs" / "tracking_demo.yaml"
 VARIANT_LABEL = {"auto_masks": "Automatic segmentation (realistic)", "gt_masks": "Ground-truth masks (linking error only)"}
 

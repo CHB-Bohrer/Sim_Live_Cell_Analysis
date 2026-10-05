@@ -20,11 +20,11 @@ Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env fr
 | Simulate moving cells and score the tracking (no GUI) | `scripts\run.cmd python scripts\run_tracking_demo.py` |
 | ...with different settings | `scripts\run.cmd python scripts\run_tracking_demo.py --set motion.D_um2_s=0.05 --set seed=2` |
 | **Single-cell loci run** (cells + two coloured loci, isolate each cell, locate loci per cell in parallel) | `scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_demo.yaml` (~2 min), then open the dashboard's **🔬 Cells** tab |
-| Compare settings over several seeds | `scripts\run.cmd python scripts\sweep.py --name mytest --seeds 1-5 --grid tracking.mode=greedy,ilp` (results in `data\sweeps\mytest\`) |
-| View the tracked cells from that run | `scripts\run.cmd python scripts\view_run.py data\runs\<run_id> --labels stage4_segtrack\tracked_auto_masks.tif` |
+| Compare settings over several seeds | `scripts\run.cmd python scripts\sweep.py --name mytest --seeds 1-5 --grid tracking.mode=greedy,ilp` (results in `%SIMLIVE_DATA%\sweeps\mytest\`) |
+| View the tracked cells from that run | `scripts\run.cmd python scripts\view_run.py %SIMLIVE_DATA%\runs\<run_id> --labels stage4_segtrack\tracked_auto_masks.tif` |
 | Make a fake demo movie (old, locus-only toy) | `scripts\run.cmd python scripts\make_demo_run.py` |
-| **Look at a simulation (interactive window)** | `scripts\run.cmd python scripts\view_run.py data\runs\demo` |
-| Save it as a GIF or a PNG instead | `scripts\run.cmd python scripts\view_run.py data\runs\demo --save out.gif` |
+| **Look at a simulation (interactive window)** | `scripts\run.cmd python scripts\view_run.py %SIMLIVE_DATA%\runs\demo` |
+| Save it as a GIF or a PNG instead | `scripts\run.cmd python scripts\view_run.py %SIMLIVE_DATA%\runs\demo --save out.gif` |
 
 Viewer controls: slider or left/right arrows = frame, space = play/pause, `l` = toggle cell-mask overlay
 (each persistent cell ID keeps its color), `i` = toggle cell-ID numbers. Works on any run directory containing
@@ -68,7 +68,9 @@ Segmentation here is a classical threshold + watershed baseline; Cellpose/StarDi
 
 ```
 configs/     YAML parameter files and sweeps
-data/runs/   outputs, one folder per run (gitignored): data/runs/<run_id>/stageN_<name>/
+data/        only .gitkeep placeholders. Real outputs live OUTSIDE the repo (so OneDrive does not sync gigabytes) in
+             %SIMLIVE_DATA%, default C:\Users\<you>\SimLiveData (set by scripts\run.cmd):
+             runs/<run_id>/stageN_<name>/, sweeps/<name>/, chromatin/ (polymer simulation library)
 scripts/     run.cmd, view_run.py, make_demo_run.py, install scripts
 src/simlive/ stage1_chromatin ... stage7_validation, calibration, io
 tests/       pytest (GPU tests marked `gpu`)

@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from simlive.io.runs import REPO_ROOT, load_config
+from simlive.io.runs import DATA_ROOT, REPO_ROOT, load_config
 from simlive.pipelines.tracking_demo import run_tracking_demo
 
 
@@ -19,7 +19,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(REPO_ROOT / "configs" / "tracking_demo.yaml"))
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VAL", help="override, e.g. motion.D_um2_s=0.05")
-    ap.add_argument("--out", type=Path, default=REPO_ROOT / "data" / "runs")
+    ap.add_argument("--out", type=Path, default=DATA_ROOT / "runs")
     a = ap.parse_args()
 
     run = run_tracking_demo(load_config(a.config, a.set), a.out)

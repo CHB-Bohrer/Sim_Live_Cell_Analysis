@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from simlive.io.runs import REPO_ROOT, load_config
+from simlive.io.runs import DATA_ROOT, REPO_ROOT, load_config
 from simlive.pipelines.tracking_demo import run_tracking_demo
 
 METRICS = {"CHOTA": ("CHOTAMetric", "CHOTA"), "LNK": ("CTCMetrics", "LNK"), "TRA": ("CTCMetrics", "TRA"),
@@ -47,7 +47,7 @@ def main():
     for g in a.grid:
         k, _, v = g.partition("=")
         axes[k] = v.split(",")
-    out_dir = REPO_ROOT / "data" / "sweeps" / a.name
+    out_dir = DATA_ROOT / "sweeps" / a.name
     out_dir.mkdir(parents=True, exist_ok=True)
     combos = list(itertools.product(*axes.values())) if axes else [()]
     seeds = parse_seeds(a.seeds)
@@ -58,7 +58,7 @@ def main():
             ov = a.set + [f"{k}={v}" for k, v in zip(axes, combo)] + [f"seed={seed}"]
             t0 = time.time()
             try:
-                run = run_tracking_demo(load_config(a.config, ov), REPO_ROOT / "data" / "runs", progress=lambda s: None)
+                run = run_tracking_demo(load_config(a.config, ov), DATA_ROOT / "runs", progress=lambda s: None)
                 m = json.loads((run / "stage7_validation" / "metrics.json").read_text())
                 for variant in ("gt_masks", "auto_masks"):
                     row = {**dict(zip(axes, combo)), "seed": seed, "masks": variant, "run": run.name}
