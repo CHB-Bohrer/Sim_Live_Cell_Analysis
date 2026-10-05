@@ -67,6 +67,7 @@ def load_run(path: str, stamp: float):
         out["v"][v] = {
             "trk": tifffile.imread(s4 / f"tracked_{v}.tif"), "matches": matches, "dominant": dom,
             "events": pd.read_csv(s7 / f"id_switch_events_{v}.csv"), "per_cell": pd.read_csv(s7 / f"id_per_cell_{v}.csv"),
+            "parent_of": pd.read_csv(s4 / f"tracks_{v}.csv").set_index("label").parent.to_dict(),
         }
     out["v"]["auto_masks"]["seg"] = tifffile.imread(s4 / "auto_segmentation.tif")
     return out
@@ -134,7 +135,8 @@ def movie_figure(R, variant, t, show_image=False):
         cx, cy, rad = row.x_um.iloc[0] / px, row.y_um.iloc[0] / px, row.bound_radius_um.iloc[0] / px
         for ax in (ax_gt, ax_tr):
             ax.add_patch(plt.Circle((cx, cy), rad * 1.7, fill=False, ec="red", lw=3.5))
-        ax_tr.annotate(f"SWAP  track {r.old_pred_id} → {r.new_pred_id}", (cx, cy - rad * 1.7), color="white",
+        ax_tr.annotate(f"track {r.old_pred_id} → {r.new_pred_id}" + (" (called a division)" if V["parent_of"].get(r.new_pred_id, 0) > 0
+                                                                   else ""), (cx, cy - rad * 1.7), color="white",
                        fontsize=11, weight="bold", ha="center", va="bottom",
                        bbox=dict(boxstyle="round,pad=0.25", fc="red", ec="none"))
     fig.tight_layout()
@@ -297,8 +299,11 @@ with tab_movie:
         st.error(f"**Errors in frame {t}:** {len(ev_t)} identity switch(es), {n_lost} true cell(s) missed by the masks, "
                  f"{n_nogt} false-positive mask(s).")
         for r in ev_t.itertuples():
+            par = R["v"][variant]["parent_of"].get(r.new_pred_id, 0)
+            why = (f" The tracker treated this as a **division** of track {par} (a false division unless the cell really divided)."
+                   if par > 0 else " The tracker lost the link and started a new track (or swapped it with a neighbour).")
             st.write(f"🔴 True cell **{r.gt_id}** was track **{r.old_pred_id}** in the previous frame and is now "
-                     f"track **{r.new_pred_id}**.")
+                     f"track **{r.new_pred_id}**.{why}")
     else:
         st.success(f"Frame {t}: no errors. Every true cell kept its track ID.")
     with st.expander("How to read the pictures"):
