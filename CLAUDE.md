@@ -8,7 +8,13 @@ https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for
 **Before ending a work session, or after any significant change, update this file and README.md without being asked:**
 what changed, new commands/files, gotchas hit, findings, open questions, next steps. Then commit. A new session starts
 from this file and the code alone, so anything not written here is lost. Keep the "Status" and "Findings" sections
-below true; delete stale statements rather than appending contradictions. Do not push to GitHub unless asked.
+below true; delete stale statements rather than appending contradictions.
+
+**Pushing to GitHub (public repo):** commit locally as you go, but never push on your own. When something major is
+done and verified working (new stage, new feature, important result) and the user has not mentioned pushing, ASK
+them whether to push ("This works and is committed locally; push it to GitHub?"). Push immediately only if they
+say so. Before every push: run `git status -sb`, check for secrets (password/token/key strings) and large files, and
+confirm `data/runs/` and `data/sweeps/` are still ignored.
 
 ## The experiment being simulated (from the user; some details still open)
 - Loci: LacO/TetO-array-like labels plus MS2 bursting; reported as three different colors. Unclear whether MS2 is a
