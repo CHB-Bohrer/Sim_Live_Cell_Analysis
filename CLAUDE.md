@@ -14,6 +14,12 @@ what the analysis measures) are **not yet specified** — ask before building st
   DLL loading.
 - Never import torch into the Streamlit dashboard (`app/dashboard.py`): on Windows it clashes with the plotting libs'
   OpenMP runtime and kills the server. The dashboard shells out to `scripts/run_tracking_demo.py` instead.
+- Cellpose runs in a separate worker process (`stage4_segtrack/cellpose_worker.py`) with `skimage` import blocked:
+  importing Cellpose after torch otherwise aborts with "OMP: Error #15" (two OpenMP runtimes). Do NOT use
+  KMP_DUPLICATE_LIB_OK to work around it (can silently give wrong results). Same rule for any new torch-based tool
+  that also pulls in scikit-image: isolate it in its own process.
+- `scripts/sweep.py` runs grids x seeds and writes `data/sweeps/<name>/results.csv`. Single runs are not evidence;
+  compare conditions over >=5 seeds (seed-to-seed sd of ID switches is large, ~5-10).
 - polychrom is installed WITHOUT its Cython extension (`scripts/install_polychrom.ps1`); do not use knot-simplification
   functions.
 - Current state: stages 2, 3 (nuclear channel only), 4 (threshold-watershed segmentation + Trackastra) and 7a
