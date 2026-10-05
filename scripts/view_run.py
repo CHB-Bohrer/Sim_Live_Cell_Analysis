@@ -43,6 +43,9 @@ def main():
     ap.add_argument("run", type=Path, help="run directory, e.g. data/runs/demo")
     ap.add_argument("--save", type=Path, help="write .gif/.mp4/.png (first frame) instead of opening a window")
     ap.add_argument("--fps", type=int, default=10)
+    ap.add_argument("--labels", type=Path,
+                    help="label stack to overlay, relative to the run dir (default stage3_microscopy/labels.tif = "
+                         "ground truth), e.g. stage4_segtrack/tracked_auto_masks.tif")
     args = ap.parse_args()
     if args.save:
         matplotlib.use("Agg")
@@ -52,12 +55,13 @@ def main():
 
     d = args.run / "stage3_microscopy"
     loc, nuc, lab = (load_stack(d / "locus.tif"), load_stack(d / "nucleus.tif"),
-                     load_stack(d / "labels.tif", True))
+                     load_stack(args.run / args.labels if args.labels else d / "labels.tif", True))
     panels = [(n, s) for n, s in (("locus", loc), ("nucleus", nuc)) if s is not None]
+    show_ids_default = args.labels is not None
     if not panels:
         raise SystemExit(f"No locus.tif / nucleus.tif found in {d}")
     T = panels[0][1].shape[0]
-    show = {"labels": lab is not None, "ids": False}
+    show = {"labels": lab is not None, "ids": show_ids_default}  # tracked labels: show IDs by default
 
     fig, axes = plt.subplots(1, len(panels), figsize=(5.5 * len(panels), 5.8), squeeze=False)
     axes = axes[0]

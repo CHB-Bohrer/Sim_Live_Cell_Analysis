@@ -1,0 +1,48 @@
+# Cells-only tracking test: stage 2 (motion) -> stage 3 (nuclear channel) -> stage 4 (segment + track) -> stage 7 (score).
+# Override anything from the command line, e.g.  --set motion.D_um2_s=0.05 --set seed=2
+name: tracking_demo
+seed: 1
+
+acquisition:
+  n_frames: 40
+  frame_interval_s: 300     # time between frames
+  exposure_s: 0.1
+
+geometry:
+  fov_um: [140, 140]        # (y, x) field of view
+  cell_radius_um: 6.0       # nuclear radius
+
+cells:
+  n_cells: 25
+  p_divide_per_frame: 0.01  # >0 enables division (e.g. 0.01)
+  max_cells: 45
+
+motion:                     # per-cell persistent random walk + collisions
+  D_um2_s: 0.03             # diffusion coefficient; step sigma = sqrt(2 D dt) per axis
+  drift_um_s: 0.008         # directed speed (0 = purely diffusive)
+  heading_diffusion_rad: 0.3
+
+optics:                     # nuclear (NLS-GFP) channel
+  modality: widefield
+  wavelength_nm: 509
+  NA: 1.2
+  pixel_size_nm: 650
+  photons_per_px_s: 3000    # peak nuclear photon flux per pixel
+  brightness_cv: 0.3        # cell-to-cell brightness variation
+  bleach_tau_s: 20000       # photobleaching time constant (null = none)
+  background_photons: 5
+  quantum_efficiency: 0.8
+  read_noise_e: 1.5
+  gain_adu_per_e: 1.0
+  offset_adu: 100
+
+segmentation:
+  method: threshold_watershed
+  smooth_px: 1.5
+  min_area_px: 20
+  min_distance_px: 5
+
+tracking:
+  tracker: trackastra
+  model: general_2d
+  mode: greedy

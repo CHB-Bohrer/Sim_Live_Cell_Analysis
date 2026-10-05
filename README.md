@@ -15,7 +15,10 @@ Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env fr
 |---|---|
 | Check the GPU setup (OpenMM CUDA, PyTorch, CuPy, Trackastra) | `scripts\run.cmd pytest -m gpu -v` |
 | Run all tests | `scripts\run.cmd pytest` |
-| Make a fake demo movie (until stage 3 exists) | `scripts\run.cmd python scripts\make_demo_run.py` |
+| **Simulate moving cells and score the tracking** | `scripts\run.cmd python scripts\run_tracking_demo.py` |
+| ...with different settings | `scripts\run.cmd python scripts\run_tracking_demo.py --set motion.D_um2_s=0.05 --set seed=2` |
+| View the tracked cells from that run | `scripts\run.cmd python scripts\view_run.py data\runs\<run_id> --labels stage4_segtrack\tracked_auto_masks.tif` |
+| Make a fake demo movie (old, locus-only toy) | `scripts\run.cmd python scripts\make_demo_run.py` |
 | **Look at a simulation (interactive window)** | `scripts\run.cmd python scripts\view_run.py data\runs\demo` |
 | Save it as a GIF or a PNG instead | `scripts\run.cmd python scripts\view_run.py data\runs\demo --save out.gif` |
 
@@ -25,6 +28,18 @@ Viewer controls: slider or left/right arrows = frame, space = play/pause, `l` = 
 
 Or activate the env yourself: `C:\Users\cbohr\miniforge3\condabin\conda.bat activate simlive`, then run the
 commands without the `scripts\run.cmd` prefix.
+
+## The tracking test (`run_tracking_demo.py`)
+
+Cells move (diffusion + directed drift, collisions, optional division) -> nuclei are rendered with a
+widefield forward model -> segmented -> tracked with Trackastra **twice** (on ground-truth masks = linking error
+only; on automatic-segmentation masks = realistic) -> scored against the true cell IDs with Cell Tracking
+Challenge metrics (TRA, DET, LNK, CHOTA, track purity / target effectiveness). Prints a table and saves
+`stage7_validation/metrics.json`. All parameters (motion, density, optics, noise, frame interval, tracker) are in
+[configs/tracking_demo.yaml](configs/tracking_demo.yaml); override any with `--set key=value`. The run folder name
+encodes the config hash and seed, so the same config + seed always reproduces the same run.
+Segmentation here is a classical threshold + watershed baseline; Cellpose/StarDist plug into
+`stage4_segtrack/segment.py`, other trackers (Ultrack, TrackMate) into `stage4_segtrack/trackers.py`.
 
 ## Setup from scratch (already done on this PC)
 
