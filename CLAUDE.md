@@ -34,13 +34,26 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   `simlive-frozen-2026-10-05`, and git tag `env-2026-10-05`. NEVER run `pip install -U` / `conda update` in `simlive`;
   test upgrades in a separate env and save new lock files first.
 
-## Chromatin simulation plan (stage 1, agreed with the user 2026-10-05; not built yet)
-- Simulate chromatin SEPARATELY from the microscopy pipeline, as a reusable library of specific polymer simulations
-  (Mirny-lab style, with polychrom/OpenMM on the GPU), saved with their parameters, seed and versions. Stage 1 of a
-  movie then assigns one specific saved simulation to each cell; the microscopy labels/fluorophores come later.
-- Before using them, reproduce known Mirny-lab results to verify the setup (e.g. contact probability P(s) scaling,
-  loop-extrusion contact maps, compartments, sub-diffusive locus MSD). Check target numbers against the papers; do not
-  rely on memory.
+## Chromatin library (stage 1; decisions agreed with the user 2026-10-05)
+- Chromatin is simulated SEPARATELY from the microscopy pipeline as a library of saved polymer simulations
+  (polychrom/OpenMM on the GPU, Mirny-lab style). Stage 1 of a movie assigns one saved simulation to each cell
+  (`library.assign_simulations`); microscopy labels/fluorophores and mapping into the nucleus come later.
+- User's choices: first models = plain confined polymer + loop extrusion with boundary elements (compartments later);
+  1 kb per monomer; chromosome 21 scale (N = 46,710); 100 simulations per library; MSD calibration (nm, s) later
+  (user will supply measured MSD). Boundary-element positions are SYNTHETIC (seeded random TAD sizes) until real
+  chr21 CTCF data is added.
+- Code: `stage1_chromatin/lef1d.py` (numba 1D loop extrusion with boundaries; 1 monomer/step/leg, processivity = 2 x
+  lifetime), `polymer3d.py` (3D polychrom runner, parameters from the polychrom `loopExtrusion` example), `analysis.py`
+  (contact maps, P(s), insulation, corner dots, MSD), `library.py`. Scripts: `run_chromatin.py` (one sim),
+  `run_chromatin_library.py` (resumable library runner), `validate_chromatin.py` (reproduce known behaviour ->
+  `docs/chromatin_validation.md`). Configs in `configs/chromatin/`. Output: `$SIMLIVE_DATA/chromatin/<library>/<sim>/`.
+- Reference numbers (Fudenberg et al. 2016 Cell Reports, fetched from the paper): LEF processivity ~120-240 kb, LEF
+  separation ~120 kb, 10 Mb region, impermeable boundaries in the minimal model, contacts ~2-fold lower across TAD
+  borders than within. polychrom example: 750 MD steps/block, bond wiggle 0.1, angle k 1.5, repulsion trunc 1.5 x 1.05,
+  LEF bonds length 0.5 / wiggle 0.2. Do not quote paper numbers from memory; re-check them.
+- Status: engine built and unit-tested; validation simulations (4 conditions x 2 seeds, 10 Mb) were started 2026-10-05
+  and the report is `docs/chromatin_validation.md` once `validate_chromatin.py report` has been run. The 100-simulation
+  chr21 libraries have NOT been started (est. GPU time must be measured first; see the library runner).
 - polychrom works on this machine: CUDA platform, ~7,000 steps/s for N=2,000 monomers and ~3,650 steps/s for N=10,000
   (variable Langevin, spherical confinement). In THIS polychrom version the Simulation args are `error_tol`,
   `reporters=[...]` (not `error_tolerance`/`reporter`).
@@ -76,7 +89,7 @@ identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, d
 STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per nucleus doing confined diffusion in
 the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/localize.py` (brightest-spot localizer, placeholder for
 the user's analysis). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
-NOT built: real stage 1 (polychrom/OpenMM) and MSD calibration, MS2 bursting, 3D z-stacks, the real stage 5 (link
+NOT built: wiring the chromatin library into the movie pipeline, MSD calibration, MS2 bursting, 3D z-stacks, the real stage 5 (link
 locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
 locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,
 density and frame-interval scans.

@@ -1,0 +1,25 @@
+# Chromosome-21-scale library 2/2: loop extrusion with boundary elements.
+# NOTE: boundary positions are SYNTHETIC (random TAD sizes, mean 800 kb, the same for every simulation), not real chr21 CTCF sites yet.
+name: chr21_loop_extrusion
+polymer:
+  n_monomers: 46710         # chromosome 21 (hg38: 46.7 Mb) at 1 kb per monomer
+  density: 0.1
+  bond_wiggle: 0.1
+  angle_k: 1.5
+  repulsion_trunc: 1.5
+  radius_mult: 1.05
+dynamics:
+  steps_per_block: 750
+  equilibration_blocks: 1500
+  production_blocks: 2000
+  full_every_blocks: 20
+  track_stride: 10          # store every 10th monomer (10 kb) at EVERY production block, for locus trajectories
+  collision_rate: 0.03
+extrusion:
+  separation_kb: 120
+  processivity_kb: 200
+  lef_steps_per_block: 1
+  warmup_lifetimes: 10
+  bond_length: 0.5
+  bond_wiggle: 0.2
+  ctcf: {mode: tads, mean_tad_kb: 800, stall: 0.9, seed: 21}

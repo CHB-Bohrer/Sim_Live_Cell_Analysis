@@ -1,0 +1,24 @@
+# Validation 3/4: loop extrusion + IMPERMEABLE domain boundaries (Fudenberg 2016 minimal model)
+name: val_lef_ctcf
+polymer:
+  n_monomers: 10000         # 1 monomer = 1 kb, so 10 Mb (same size as Fudenberg et al. 2016)
+  density: 0.1
+  bond_wiggle: 0.1
+  angle_k: 1.5
+  repulsion_trunc: 1.5
+  radius_mult: 1.05
+dynamics:
+  steps_per_block: 750
+  equilibration_blocks: 1000
+  production_blocks: 1000
+  full_every_blocks: 10
+  track_stride: 10
+  collision_rate: 0.03
+extrusion:
+  separation_kb: 120        # Fudenberg 2016: LEF separation ~120 kb
+  processivity_kb: 200      # Fudenberg 2016: best agreement for processivity ~120-240 kb
+  lef_steps_per_block: 1
+  warmup_lifetimes: 10
+  bond_length: 0.5
+  bond_wiggle: 0.2
+  ctcf: {mode: tads, mean_tad_kb: 600, stall: 1.0, seed: 7}

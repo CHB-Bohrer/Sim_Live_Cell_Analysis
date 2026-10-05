@@ -1,0 +1,16 @@
+# Validation 1/4: plain confined polymer (no loop extrusion)
+name: val_polymer
+polymer:
+  n_monomers: 10000         # 1 monomer = 1 kb, so 10 Mb (same size as Fudenberg et al. 2016)
+  density: 0.1
+  bond_wiggle: 0.1
+  angle_k: 1.5
+  repulsion_trunc: 1.5
+  radius_mult: 1.05
+dynamics:
+  steps_per_block: 750
+  equilibration_blocks: 1000
+  production_blocks: 1000
+  full_every_blocks: 10
+  track_stride: 10
+  collision_rate: 0.03
