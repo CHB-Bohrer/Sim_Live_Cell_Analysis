@@ -92,32 +92,53 @@ def outline(ax, mask, color):
         ax.imshow(o, interpolation="nearest")
 
 
-def movie_figure(R, variant, t):
+def error_frames(R, variant) -> list[int]:
+    """Frames where something went wrong: an identity switch or a true cell the tracker's masks missed."""
+    V = R["v"][variant]
+    m = V["matches"]
+    return sorted(set(V["events"].t) | set(m[m.pred_id == 0].t))
+
+
+def movie_figure(R, variant, t, show_image=False):
     V = R["v"][variant]
     img, gt, trk, m = R["img"][t], R["gt"][t], V["trk"][t], V["matches"]
     mt = m[m.t == t]
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.6))
-    for ax, title in zip(axes, ("Image (what the tracker sees)", "Ground truth (true cell IDs)",
-                                 "Tracked (predicted track IDs)")):
+    px = R["cfg"]["optics"]["pixel_size_nm"] / 1000.0
+    n = 3 if show_image else 2
+    fig, axes = plt.subplots(1, n, figsize=(7.5 * n, 7.6))
+    axes = np.atleast_1d(axes)
+    titles = (["Image (what the tracker sees)"] if show_image else []) + [
+        "TRUE cells (ground truth IDs)", "TRACKED cells (tracker's IDs)"]
+    for ax, title in zip(axes, titles):
         ax.imshow(img, cmap="gray", vmin=np.percentile(R["img"], 1), vmax=np.percentile(R["img"], 99.8))
-        ax.set_title(title); ax.axis("off")
-    # ground truth: color = true ID; yellow outline = this cell was not found/matched by the tracker's masks
+        ax.set_title(title, fontsize=15); ax.axis("off")
+    ax_gt, ax_tr = axes[-2], axes[-1]
     gmax = int(R["gt"].max())
-    draw_labels(axes[1], gt, lut(gmax, {i: color_for(i) for i in range(1, gmax + 1)}))
+    draw_labels(ax_gt, gt, lut(gmax, {i: color_for(i) for i in range(1, gmax + 1)}))
     lost = mt[mt.pred_id == 0].gt_id.to_numpy()
-    outline(axes[1], np.isin(gt, lost) & (gt > 0), (1.0, 0.9, 0.0))
-    # tracked: color = the TRUE cell this track mostly follows; red outline = track is on a different cell right now
+    outline(ax_gt, np.isin(gt, lost) & (gt > 0), (1.0, 0.9, 0.0))  # yellow: tracker's masks missed this cell
     pmax = int(max(trk.max(), 1))
     dom = V["dominant"]
     cols = {p: (color_for(dom[p]) if p in dom else np.array([0.55, 0.55, 0.55])) for p in range(1, pmax + 1)}
-    draw_labels(axes[2], trk, lut(pmax, cols))
-    cur = dict(zip(mt.pred_id, mt.gt_id))  # track -> GT cell it currently overlaps
-    wrong = [p for p in np.unique(trk) if p > 0 and p in dom and p in cur and cur[p] != dom[p]]
+    draw_labels(ax_tr, trk, lut(pmax, cols))
+    cur = dict(zip(mt.pred_id, mt.gt_id))
     nogt = [p for p in np.unique(trk) if p > 0 and p not in cur]
-    outline(axes[2], np.isin(trk, wrong) & (trk > 0), (1.0, 0.1, 0.1))
-    outline(axes[2], np.isin(trk, nogt) & (trk > 0), (0.8, 0.2, 1.0))
+    outline(ax_tr, np.isin(trk, nogt) & (trk > 0), (0.8, 0.2, 1.0))  # purple: mask with no true cell
+    # identity switches happening at THIS frame: big red circle + label on both panels
+    ev = V["events"]
+    ev_t = ev[ev.t == t]
+    for r in ev_t.itertuples():
+        row = R["cells"][(R["cells"].cell_id == r.gt_id) & (R["cells"].t == t)]
+        if row.empty:
+            continue
+        cx, cy, rad = row.x_um.iloc[0] / px, row.y_um.iloc[0] / px, row.bound_radius_um.iloc[0] / px
+        for ax in (ax_gt, ax_tr):
+            ax.add_patch(plt.Circle((cx, cy), rad * 1.7, fill=False, ec="red", lw=3.5))
+        ax_tr.annotate(f"SWAP  track {r.old_pred_id} → {r.new_pred_id}", (cx, cy - rad * 1.7), color="white",
+                       fontsize=11, weight="bold", ha="center", va="bottom",
+                       bbox=dict(boxstyle="round,pad=0.25", fc="red", ec="none"))
     fig.tight_layout()
-    return fig, len(lost), len(wrong), len(nogt)
+    return fig, len(lost), ev_t, len(nogt)
 
 
 def trajectory_figure(R, variant):
@@ -246,26 +267,53 @@ with tab_movie:
     if "frame" not in st.session_state:
         st.session_state["frame"] = 0
     st.session_state["frame"] = min(st.session_state["frame"], T - 1)
-    c1, c2, c3 = st.columns([1, 1, 10])
-    c1.button("◀", on_click=lambda: st.session_state.update(frame=max(0, st.session_state["frame"] - 1)))
-    c2.button("▶", on_click=lambda: st.session_state.update(frame=min(T - 1, st.session_state["frame"] + 1)))
-    t = c3.slider("Frame", 0, T - 1, key="frame")
-    fig, n_lost, n_wrong, n_nogt = movie_figure(R, variant, t)
+    errs = error_frames(R, variant)
+
+    def go_prev_err():
+        prev = [f for f in errs if f < st.session_state["frame"]]
+        if prev:
+            st.session_state["frame"] = prev[-1]
+
+    def go_next_err():
+        nxt = [f for f in errs if f > st.session_state["frame"]]
+        if nxt:
+            st.session_state["frame"] = nxt[0]
+
+    b0, b1, b2, b3, b4 = st.columns([1, 1, 2, 2, 3])
+    b0.button("◀", help="Previous frame", on_click=lambda: st.session_state.update(frame=max(0, st.session_state["frame"] - 1)))
+    b1.button("▶", help="Next frame", on_click=lambda: st.session_state.update(frame=min(T - 1, st.session_state["frame"] + 1)))
+    b2.button("⏮ Previous error", on_click=go_prev_err, disabled=not errs)
+    b3.button("Next error ⏭", on_click=go_next_err, disabled=not errs, type="primary")
+    show_img = b4.checkbox("Also show raw image panel", value=False)
+    t = st.slider("Frame", 0, T - 1, key="frame")
+    st.caption(f"{len(errs)} of {T} frames contain an error: "
+               + (", ".join(map(str, errs[:40])) + (" …" if len(errs) > 40 else "") if errs else "none"))
+
+    fig, n_lost, ev_t, n_nogt = movie_figure(R, variant, t, show_image=show_img)
     st.pyplot(fig, width="stretch")
     plt.close(fig)
-    st.caption(
-        "**Middle:** each true cell has a fixed color; **yellow outline** = the tracker's masks missed it. "
-        "**Right:** each track is colored by the true cell it mostly follows, so *a track whose color differs from "
-        "its cell in the middle panel has swapped*. **Red outline** = this track is on a different cell than its "
-        "usual one right now (identity swap). A track that merely *breaks* (the cell gets a new track number) keeps its "
-        "color, so watch the numbers too. **Purple outline / grey** = a mask with no true cell under it (false positive).")
-    st.write(f"This frame: **{n_lost}** true cells missed, **{n_wrong}** tracks on the wrong cell, **{n_nogt}** false-positive masks.")
+
+    if len(ev_t) or n_lost or n_nogt:
+        st.error(f"**Errors in frame {t}:** {len(ev_t)} identity switch(es), {n_lost} true cell(s) missed by the masks, "
+                 f"{n_nogt} false-positive mask(s).")
+        for r in ev_t.itertuples():
+            st.write(f"🔴 True cell **{r.gt_id}** was track **{r.old_pred_id}** in the previous frame and is now "
+                     f"track **{r.new_pred_id}**.")
+    else:
+        st.success(f"Frame {t}: no errors. Every true cell kept its track ID.")
+    with st.expander("How to read the pictures"):
+        st.markdown(
+            "- **Left (TRUE cells):** the simulation's ground truth. Each true cell has its own color and ID number.\n"
+            "- **Right (TRACKED cells):** what the tracker produced, with the tracker's own track numbers. A track is "
+            "colored by the true cell it mostly follows, so *matching colors on both sides = tracked correctly*.\n"
+            "- **Red circle + red label = an identity switch happening in this frame:** the cell had one track ID in "
+            "the previous frame and a different one now (the tracker broke the track or swapped two cells).\n"
+            "- **Yellow outline (left):** the segmentation missed this true cell. **Purple outline / grey (right):** a "
+            "mask with no true cell under it (false positive).\n"
+            "- Use **Next error ⏭** to jump to frames where something went wrong.")
     ev = R["v"][variant]["events"]
     st.markdown("**Identity switches over time** (each bar = switches at that frame)")
     st.bar_chart(ev.groupby("t").size().reindex(range(T), fill_value=0))
-    if (ev.t == t).any():
-        st.warning("Switches at this frame (true cell → old track ID → new track ID):")
-        st.dataframe(ev[ev.t == t], hide_index=True)
 
 # ----------------------------------------------------------------------------- metrics
 with tab_metrics:

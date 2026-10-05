@@ -34,8 +34,9 @@ commands without the `scripts\run.cmd` prefix.
 
 `scripts\dashboard.cmd` starts a local web app (this PC only, http://localhost:8501). The sidebar's **New
 simulation** form sets motion, shape, imaging and tracker parameters and runs the pipeline (~20 s); **Run to view**
-reopens any earlier run. Tabs: **Movie** (image | true cells | tracked cells, with identity swaps outlined in red,
-missed cells in yellow, and a per-frame error timeline), **Metrics** (all scores, with explanations, and a per-cell
+reopens any earlier run. Tabs: **Movie** (true cells | tracked cells side by side, large; identity swaps circled in red and
+labeled, missed cells outlined in yellow; **Next error ⏭** jumps to the next frame with a mistake; optional raw-image
+panel; per-frame error timeline), **Metrics** (all scores, with explanations, and a per-cell
 identity table), **Trajectories** (true vs tracked paths, switches marked), **Config**. Stop it with Ctrl-C in its
 window. The simulation runs in a separate process, so the dashboard itself never loads PyTorch.
 

@@ -5,8 +5,15 @@
       "name": "dashboard",
       "runtimeExecutable": "cmd",
       "runtimeArgs": ["/c", "scripts\\run.cmd", "python", "-m", "streamlit", "run", "app/dashboard.py",
-                      "--server.port", "8501", "--server.address", "localhost", "--server.headless", "true"],
+                      "--server.port", "8501", "--server.address", "127.0.0.1", "--server.headless", "true"],
       "port": 8501
+    },
+    {
+      "name": "dashboard-test",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "scripts\\run.cmd", "python", "-m", "streamlit", "run", "app/dashboard.py",
+                      "--server.port", "8502", "--server.address", "127.0.0.1", "--server.headless", "true"],
+      "port": 8502
     }
   ]
 }
