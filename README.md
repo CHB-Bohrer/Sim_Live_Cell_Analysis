@@ -3,7 +3,8 @@
 Validate live-cell chromatin-locus analysis against simulations with known ground truth.
 Pipeline: polymer dynamics (polychrom/OpenMM) -> cells + motion -> microscopy forward model ->
 segmentation + tracking (Trackastra) -> locus-to-cell linking -> analysis -> validation.
-See [CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** environment, GPU tests and image viewer are
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits together and the build roadmap, and
+[CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** environment, GPU tests and image viewer are
 done; stages 1-7 are not built yet.
 
 ## Quick start (Windows)

@@ -8,7 +8,9 @@ https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for
 **Before ending a work session, or after any significant change, update this file and README.md without being asked:**
 what changed, new commands/files, gotchas hit, findings, open questions, next steps. Then commit. A new session starts
 from this file and the code alone, so anything not written here is lost. Keep the "Status" and "Findings" sections
-below true; delete stale statements rather than appending contradictions.
+below true; delete stale statements rather than appending contradictions. `docs/ARCHITECTURE.md` holds Mermaid diagrams
+(pipeline, validation logic, roadmap) whose boxes are coloured built / stand-in / planned: recolour or edit them when a
+stage's status changes (GitHub renders them; to check syntax, render the blocks with mermaid.js in a browser).
 
 **Pushing to GitHub (public repo):** commit locally as you go, but never push on your own. When something major is
 done and verified working (new stage, new feature, important result) and the user has not mentioned pushing, ASK
