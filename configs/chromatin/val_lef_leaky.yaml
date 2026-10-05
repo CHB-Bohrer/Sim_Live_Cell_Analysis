@@ -1,4 +1,4 @@
-# Validation 4/4: loop extrusion + LEAKY boundaries (stall probability 0.9 per attempt)
+# Validation 4/4: loop extrusion + LEAKY boundaries (stall probability 0.99 per attempt; 0.9 gave no insulation)
 name: val_lef_leaky
 polymer:
   n_monomers: 10000         # 1 monomer = 1 kb, so 10 Mb (same size as Fudenberg et al. 2016)
@@ -21,4 +21,4 @@ extrusion:
   warmup_lifetimes: 10
   bond_length: 0.5
   bond_wiggle: 0.2
-  ctcf: {mode: tads, mean_tad_kb: 600, stall: 0.9, seed: 7}
+  ctcf: {mode: tads, mean_tad_kb: 600, stall: 0.99, seed: 7}

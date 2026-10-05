@@ -83,9 +83,16 @@ def observed_over_expected(m: np.ndarray) -> np.ndarray:
     return out
 
 
-def boundary_insulation(m: np.ndarray, boundaries: list[int], bin_size: int, window_kb: int = 150) -> list[dict]:
+def boundary_insulation(m: np.ndarray, boundaries: list[int], bin_size: int, window_kb: int = 150,
+                        use_oe: bool = False) -> list[dict]:
     """For each boundary: mean contact frequency WITHIN the flanking windows vs ACROSS the boundary.
-    ratio = within / across; 1 = no insulation (Fudenberg et al. report ~2-fold lower contact across TAD borders)."""
+    ratio = within / across; 1 = no insulation (Fudenberg et al. report ~2-fold lower contact across TAD borders).
+
+    Contacts fall steeply with genomic distance and 'within' pixels are closer to the diagonal than 'across' pixels,
+    so on a raw map the ratio is >> 1 even with NO boundary. Use use_oe=True (observed/expected per diagonal), which
+    compares pixels at equal genomic separation; then 1 really means no insulation."""
+    if use_oe:
+        m = observed_over_expected(m)
     out, w = [], max(2, window_kb // bin_size)
     nb = m.shape[0]
     for x in boundaries:
@@ -117,6 +124,20 @@ def corner_peak_enrichment(oe: np.ndarray, boundaries: list[int], bin_size: int,
     return out
 
 
+def loop_dot_enrichment(oe: np.ndarray, pairs: list[tuple[int, int]], bin_size: int) -> list[float]:
+    """Enrichment of observed/expected contacts at the anchors (a, b) of designed loops: the 3x3 bins at (a, b) divided
+    by the mean of the surrounding ring (outside the central 5x5 of a 9x9 block). >1 = a 'dot' (corner peak)."""
+    out = []
+    for a, b in pairs:
+        i, j = a // bin_size, b // bin_size
+        if i < 5 or j + 5 >= oe.shape[0]:
+            continue
+        centre = oe[i - 1:i + 2, j - 1:j + 2].mean()
+        ring = oe[i - 4:i + 5, j - 4:j + 5][_RING]
+        out.append(float(centre / max(ring.mean(), 1e-12)))
+    return out
+
+
 _RING = np.ones((9, 9), bool)
 _RING[2:7, 2:7] = False     # True for the cells of the 9x9 block that lie outside its central 5x5
 
@@ -139,3 +160,65 @@ def msd_exponent(lags: np.ndarray, m: np.ndarray, lo: float, hi: float) -> float
 
 def radius_of_gyration(conf: np.ndarray) -> float:
     return float(np.sqrt(((conf - conf.mean(0)) ** 2).sum(1).mean()))
+
+
+def across_insulation(m: np.ndarray, positions: list[int], bin_size: int, window_kb: int = 150) -> list[float]:
+    """Insulation fold at each position = 1 / (mean observed/expected contact frequency ACROSS the position).
+
+    The expectation is the map-wide average at the same genomic separation, so 1.0 means 'no insulation' and 2.0 means
+    contacts across the position are half of what is typical at those distances. Unlike a within/across ratio this has
+    no distance-decay bias: at random positions it is ~1 (checked on plain-polymer and loop-extrusion data)."""
+    oe = observed_over_expected(m)
+    w = max(2, window_kb // bin_size)
+    out = []
+    for x in positions:
+        b = x // bin_size
+        if b - w >= 0 and b + w <= oe.shape[0]:
+            out.append(1.0 / max(float(oe[b - w:b, b:b + w].mean()), 1e-9))
+    return out
+
+
+def anchor_contact_enrichment(traj: np.ndarray, beads: np.ndarray, pairs: list[tuple[int, int]], s_curve: tuple,
+                              cutoff: float = 3.0) -> list[float]:
+    """Contact probability of designed loop anchors relative to the average monomer pair at the same genomic separation.
+
+    traj: (T, n_tracked, 3) positions of tracked monomers at every block; beads: their monomer indices; pairs: (a, b)
+    monomer indices (both must be tracked); s_curve: (s, P(s)) of the same simulation (same cutoff). Returns one
+    enrichment per pair: P_contact(a, b) / P(b - a). A held loop makes it >> 1; with no loop it is ~1."""
+    s, p = s_curve
+    out = []
+    for a, b in pairs:
+        ia, ib = np.nonzero(beads == a)[0], np.nonzero(beads == b)[0]
+        if len(ia) == 0 or len(ib) == 0:
+            continue
+        d = np.linalg.norm(traj[:, ia[0]] - traj[:, ib[0]], axis=1)
+        expected = float(np.interp(np.log(b - a), np.log(s), p))
+        out.append(float((d < cutoff).mean() / max(expected, 1e-9)))
+    return out
+
+
+def insulation_fold_pooled(m: np.ndarray, positions: list[int], bin_size: int, window_kb: int = 150) -> float:
+    """1 / (mean over positions of the observed/expected contact frequency across the position). Averaging the contact
+    frequency first and inverting after is robust; averaging per-position folds is inflated by a few near-zero values."""
+    oe = observed_over_expected(m)
+    w = max(2, window_kb // bin_size)
+    vals = [oe[x // bin_size - w:x // bin_size, x // bin_size:x // bin_size + w].mean() for x in positions
+            if x // bin_size - w >= 0 and x // bin_size + w <= oe.shape[0]]
+    return 1.0 / max(float(np.mean(vals)), 1e-9)
+
+
+def anchor_contact_pooled(traj: np.ndarray, beads: np.ndarray, pairs: list[tuple[int, int]], s_curve: tuple,
+                          cutoff: float = 3.0) -> tuple[float, float]:
+    """(observed, expected) contact probability pooled over all designed pairs: observed = fraction of (block, pair)
+    samples in which the two anchor monomers are within `cutoff`; expected = the average P(s) at those separations.
+    Pooling avoids a few unformed loops (zero contacts in the run) dominating a median."""
+    s, p = s_curve
+    obs, exp = [], []
+    for a, b in pairs:
+        ia, ib = np.nonzero(beads == a)[0], np.nonzero(beads == b)[0]
+        if len(ia) == 0 or len(ib) == 0:
+            continue
+        d = np.linalg.norm(traj[:, ia[0]] - traj[:, ib[0]], axis=1)
+        obs.append(float((d < cutoff).mean()))
+        exp.append(float(np.interp(np.log(b - a), np.log(s), p)))
+    return (float(np.mean(obs)), float(np.mean(exp))) if obs else (float("nan"), float("nan"))

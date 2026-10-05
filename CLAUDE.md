@@ -51,9 +51,21 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   separation ~120 kb, 10 Mb region, impermeable boundaries in the minimal model, contacts ~2-fold lower across TAD
   borders than within. polychrom example: 750 MD steps/block, bond wiggle 0.1, angle k 1.5, repulsion trunc 1.5 x 1.05,
   LEF bonds length 0.5 / wiggle 0.2. Do not quote paper numbers from memory; re-check them.
-- Status: engine built and unit-tested; validation simulations (4 conditions x 2 seeds, 10 Mb) were started 2026-10-05
-  and the report is `docs/chromatin_validation.md` once `validate_chromatin.py report` has been run. The 100-simulation
-  chr21 libraries have NOT been started (est. GPU time must be measured first; see the library runner).
+- Status: engine built, unit-tested and VALIDATED (`docs/chromatin_validation.md`; 5 conditions x 2 seeds at 10 Mb;
+  all 11 checks pass after analysis corrections that are documented in the report). Measured: plain polymer P(s) slope
+  -1.43; loop extrusion raises P(s) ~2.5-3x around 150 kb and depletes beyond ~1 Mb; impermeable boundaries insulate
+  1.87-fold (paper: ~2-fold), none without boundaries (0.91); designed loops (120-180 kb) are held ~10% of the time and
+  their anchors are ~50x enriched over a typical pair; locus MSD exponent 0.49; mean loop 101 kb.
+- Lessons for future analysis (do not repeat): a within/across insulation ratio is biased by distance decay (use the
+  pooled across-OE fold); dots must be tested on the anchor monomers' own contact probability pooled over loops (10 kb
+  bins dilute a single pair 100-fold; per-loop medians are dominated by unformed loops); boundary stall 0.9 per attempt
+  gives NO insulation (use >= 0.99); validate metrics on null data (random positions, no-boundary control).
+- chr21 scale benchmark (N=46,710, 389 LEFs, 52 boundaries, GPU shared with nothing else): ~1,400-1,750 MD steps/s.
+  Planned config (1500 equilibration + 2000 production blocks x 750 steps) = ~27 min per simulation, ~46 h per
+  100-simulation library, ~17 GB per library on disk. The 100-simulation libraries have NOT been started; each needs the
+  user's go-ahead because it occupies the GPU for ~2 days. Whether 1500 equilibration blocks suffice at chr21 scale is
+  UNVERIFIED: run one full pilot and check P(s) stationarity (first vs second half) before the library.
+- Dashboard: the 🧬 Chromatin tab shows the validation report and any saved simulation.
 - polychrom works on this machine: CUDA platform, ~7,000 steps/s for N=2,000 monomers and ~3,650 steps/s for N=10,000
   (variable Langevin, spherical confinement). In THIS polychrom version the Simulation args are `error_tol`,
   `reporters=[...]` (not `error_tolerance`/`reporter`).

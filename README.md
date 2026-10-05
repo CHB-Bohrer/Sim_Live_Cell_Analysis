@@ -20,6 +20,9 @@ Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env fr
 | Simulate moving cells and score the tracking (no GUI) | `scripts\run.cmd python scripts\run_tracking_demo.py` |
 | ...with different settings | `scripts\run.cmd python scripts\run_tracking_demo.py --set motion.D_um2_s=0.05 --set seed=2` |
 | **Single-cell loci run** (cells + two coloured loci, isolate each cell, locate loci per cell in parallel) | `scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_demo.yaml` (~2 min), then open the dashboard's **🔬 Cells** tab |
+| **Chromatin: run one polymer simulation** (GPU) | `scripts\run.cmd python scripts\run_chromatin.py --config configs\chromatin\smoke_test.yaml --seed 1 --library smoke` (~1 min; browse it in the dashboard's **🧬 Chromatin** tab) |
+| Chromatin: re-check against known Mirny-lab results | `scripts\run.cmd python scripts\validate_chromatin.py all` (about 80 min on the GPU) -> [docs/chromatin_validation.md](docs/chromatin_validation.md) |
+| Chromatin: build a library of simulations (resumable) | `scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\chr21_loop_extrusion.yaml --library chr21_loop_extrusion --n 100` (about 46 h of GPU for 100) |
 | Compare settings over several seeds | `scripts\run.cmd python scripts\sweep.py --name mytest --seeds 1-5 --grid tracking.mode=greedy,ilp` (results in `%SIMLIVE_DATA%\sweeps\mytest\`) |
 | View the tracked cells from that run | `scripts\run.cmd python scripts\view_run.py %SIMLIVE_DATA%\runs\<run_id> --labels stage4_segtrack\tracked_auto_masks.tif` |
 | Make a fake demo movie (old, locus-only toy) | `scripts\run.cmd python scripts\make_demo_run.py` |

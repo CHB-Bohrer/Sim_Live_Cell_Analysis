@@ -1,0 +1,38 @@
+# Validation 5: loop-anchor test. Six convergent boundary pairs placed CLOSER together (120-180 kb) than the LEF
+# processivity (200 kb), with no other boundaries, so each pair should hold a loop and show a dot (corner peak).
+name: val_lef_loops
+polymer:
+  n_monomers: 10000         # 1 monomer = 1 kb, so 10 Mb (same size as Fudenberg et al. 2016)
+  density: 0.1
+  bond_wiggle: 0.1
+  angle_k: 1.5
+  repulsion_trunc: 1.5
+  radius_mult: 1.05
+dynamics:
+  steps_per_block: 750
+  equilibration_blocks: 1000
+  production_blocks: 1000
+  full_every_blocks: 10
+  track_stride: 10
+  collision_rate: 0.03
+extrusion:
+  separation_kb: 120        # Fudenberg 2016: LEF separation ~120 kb
+  processivity_kb: 200      # Fudenberg 2016: best agreement for processivity ~120-240 kb
+  lef_steps_per_block: 1
+  warmup_lifetimes: 10
+  bond_length: 0.5
+  bond_wiggle: 0.2
+  ctcf:
+    - {pos: 1000, blocks_left: 1.0, blocks_right: 0.0}
+    - {pos: 1150, blocks_left: 0.0, blocks_right: 1.0}
+    - {pos: 2500, blocks_left: 1.0, blocks_right: 0.0}
+    - {pos: 2650, blocks_left: 0.0, blocks_right: 1.0}
+    - {pos: 4000, blocks_left: 1.0, blocks_right: 0.0}
+    - {pos: 4130, blocks_left: 0.0, blocks_right: 1.0}
+    - {pos: 5500, blocks_left: 1.0, blocks_right: 0.0}
+    - {pos: 5680, blocks_left: 0.0, blocks_right: 1.0}
+    - {pos: 7000, blocks_left: 1.0, blocks_right: 0.0}
+    - {pos: 7120, blocks_left: 0.0, blocks_right: 1.0}
+    - {pos: 8500, blocks_left: 1.0, blocks_right: 0.0}
+    - {pos: 8660, blocks_left: 0.0, blocks_right: 1.0}
+validation_loops: [[1000, 1150], [2500, 2650], [4000, 4130], [5500, 5680], [7000, 7120], [8500, 8660]]
