@@ -19,7 +19,7 @@ def test_motion_is_deterministic_and_collision_free():
     b = simulate_cells(cfg, np.random.default_rng(5))
     assert a.equals(b)
     for _, g in a.groupby("t"):
-        p, r = g[["y_um", "x_um"]].to_numpy(), g["radius_um"].to_numpy()
+        p, r = g[["y_um", "x_um"]].to_numpy(), g["bound_radius_um"].to_numpy()
         d = np.hypot(*(p[:, None] - p[None]).transpose(2, 0, 1))
         np.fill_diagonal(d, np.inf)
         assert (d >= r[:, None] + r[None] - 1e-6).all(), "cells overlap"
@@ -33,6 +33,24 @@ def test_division_creates_daughters_with_parent():
     t = gt_table(cells).set_index("label")
     for cid, row in t[t.parent > 0].iterrows():
         assert t.loc[row.parent, "t2"] == row.t1 - 1  # parent ends the frame before daughters start
+
+
+def test_shapes_are_noncircular_and_masks_intact():
+    cfg = small_cfg()
+    cells = simulate_cells(cfg, np.random.default_rng(4))
+    assert (cells.bound_radius_um > cells.radius_um * 1.05).mean() > 0.5  # clearly not circles
+    _, lab = render_nuclei(cells, cfg, np.random.default_rng(4))
+    for t, g in cells.groupby("t"):
+        assert set(np.unique(lab[t])) - {0} == set(g.cell_id)  # every cell rendered, none overwritten away
+
+
+def test_zero_deformation_ellipse_has_expected_area():
+    cfg = small_cfg(**{"geometry.shape.deform_amp": 0.0, "geometry.shape.aspect_std": 0.0})
+    cells = simulate_cells(cfg, np.random.default_rng(4))
+    _, lab = render_nuclei(cells, cfg, np.random.default_rng(4))
+    expected = np.pi * (cfg["geometry"]["cell_radius_um"] / (cfg["optics"]["pixel_size_nm"] / 1000)) ** 2
+    areas = [(lab[0] == i).sum() for i in cells[cells.t == 0].cell_id]
+    assert np.allclose(areas, expected, rtol=0.1)  # area-preserving ellipse
 
 
 def test_ground_truth_scores_perfectly_against_itself(tmp_path):

@@ -10,7 +10,14 @@ acquisition:
 
 geometry:
   fov_um: [140, 140]        # (y, x) field of view
-  cell_radius_um: 6.0       # nuclear radius
+  cell_radius_um: 6.0       # equivalent-circle nuclear radius
+  shape:                    # irregular nuclei: ellipse + boundary bumps/dents, evolving over time
+    aspect_mean: 1.25       # long/short axis ratio (1 = circle)
+    aspect_std: 0.12
+    harmonics: [2, 3, 4, 5] # boundary perturbation: rho = 1 + sum_k amp_k cos(k*theta + phase_k)
+    deform_amp: 0.07        # std of each harmonic amplitude (0 = smooth ellipses; ~0.15 = strongly lobed)
+    persistence: 0.9        # per-frame memory of the shape (1 = frozen, 0 = new shape every frame)
+    rot_diffusion_rad: 0.1  # random rotation per frame
 
 cells:
   n_cells: 25

@@ -17,6 +17,19 @@ def psf_sigma_px(optics: dict) -> float:
     return 0.21 * optics["wavelength_nm"] / optics["NA"] / optics["pixel_size_nm"]
 
 
+def _nucleus_mask(dy, dx, r, px_um, harm):
+    """Pixels inside a deformed ellipse. dy, dx: pixel offsets from the cell centre; r: a cells.csv row."""
+    from simlive.stage2_cells.motion import boundary_rho
+
+    c, s = np.cos(r.angle_rad), np.sin(r.angle_rad)
+    u, v = dy * s + dx * c, dy * c - dx * s        # rotate into the ellipse frame (u along the long axis)
+    a_ax, b_ax = np.sqrt(r.aspect), 1 / np.sqrt(r.aspect)
+    uu, vv = u / a_ax, v / b_ax
+    amp = np.array([getattr(r, f"amp{int(k)}") for k in harm])
+    phase = np.array([getattr(r, f"phase{int(k)}") for k in harm])
+    return np.hypot(uu, vv) <= (r.radius_um / px_um) * boundary_rho(np.arctan2(vv, uu), amp, phase, harm)
+
+
 def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
     opt, acq = cfg["optics"], cfg["acquisition"]
     px_um = opt["pixel_size_nm"] / 1000.0
@@ -25,6 +38,7 @@ def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
     yy, xx = np.mgrid[:ny, :nx]
     sig = psf_sigma_px(opt)
 
+    harm = np.array([int(c[3:]) for c in cells.columns if c.startswith("amp")], float)
     ids = cells["cell_id"].unique()
     brightness = dict(zip(ids, rng.lognormal(0.0, opt.get("brightness_cv", 0.3), len(ids))))
     flux = opt["photons_per_px_s"] * acq["exposure_s"]
@@ -36,10 +50,12 @@ def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
     for t, grp in cells.groupby("t"):
         clean = np.zeros((ny, nx), np.float32)
         for r in grp.itertuples():
-            cy, cx, rad = r.y_um / px_um, r.x_um / px_um, r.radius_um / px_um
-            inside = (yy - cy) ** 2 + (xx - cx) ** 2 <= rad**2
-            lab[t][inside] = r.cell_id
-            clean[inside] = brightness[r.cell_id]
+            cy, cx = r.y_um / px_um, r.x_um / px_um
+            half = int(np.ceil(r.bound_radius_um / px_um)) + 2
+            y0, y1, x0, x1 = max(int(cy) - half, 0), min(int(cy) + half + 1, ny), max(int(cx) - half, 0), min(int(cx) + half + 1, nx)
+            inside = _nucleus_mask(yy[y0:y1, x0:x1] - cy, xx[y0:y1, x0:x1] - cx, r, px_um, harm)
+            lab[t, y0:y1, x0:x1][inside] = r.cell_id
+            clean[y0:y1, x0:x1][inside] = brightness[r.cell_id]
         blurred = gaussian_filter(clean, sig) if sig > 0 else clean
         photons = rng.poisson((blurred * flux * bleach[t] + opt["background_photons"]).clip(0))
         electrons = photons * opt.get("quantum_efficiency", 0.8)
