@@ -178,7 +178,7 @@ with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
         NA = st.number_input("NA", 0.3, 1.7, float(base["optics"]["NA"]), 0.05)
         st.markdown("**Tracker**")
         mode = st.selectbox("Trackastra mode", ["greedy", "greedy_nodiv", "ilp"], 0)
-        go = st.form_submit_button("▶ Run simulation", type="primary", use_container_width=True)
+        go = st.form_submit_button("▶ Run simulation", type="primary", width="stretch")
 
 if go:
     overrides = [
@@ -251,7 +251,7 @@ with tab_movie:
     c2.button("▶", on_click=lambda: st.session_state.update(frame=min(T - 1, st.session_state["frame"] + 1)))
     t = c3.slider("Frame", 0, T - 1, key="frame")
     fig, n_lost, n_wrong, n_nogt = movie_figure(R, variant, t)
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
     plt.close(fig)
     st.caption(
         "**Middle:** each true cell has a fixed color; **yellow outline** = the tracker's masks missed it. "
@@ -276,7 +276,7 @@ with tab_metrics:
             for k, x in vals.items():
                 flat[f"{grp}.{k}"] = x
         rows[VARIANT_LABEL[v]] = flat
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch")
     with st.expander("What do these numbers mean?"):
         st.markdown("""
 **Matching.** A true cell counts as found if one predicted mask covers >50% of it. *FN nodes* = missed true cells,
@@ -294,7 +294,7 @@ trajectory-association accuracy. **Track purity** = how much of each predicted t
 *identity_preserved_fraction* = share of cell-frames carrying that cell's most common track ID.""")
     v = st.selectbox("Per-cell identity table for:", list(VARIANT_LABEL), format_func=VARIANT_LABEL.get)
     st.dataframe(R["v"][v]["per_cell"].sort_values("id_switches", ascending=False), hide_index=True,
-                 use_container_width=True)
+                 width="stretch")
 
 # ----------------------------------------------------------------------------- trajectories
 with tab_traj:
