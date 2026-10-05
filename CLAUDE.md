@@ -28,6 +28,23 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
 - Still needed from the user: real frame interval, typical cell speed, cell density, whether cells divide, and ideally
   a real movie with some tracked cells to check how well the simulation matches reality.
 
+## Pinned versions (do not break)
+- Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
+  pip freeze, polychrom commit `11a870c` (installer is pinned to it), model-weight SHA-256s, a frozen conda env copy
+  `simlive-frozen-2026-10-05`, and git tag `env-2026-10-05`. NEVER run `pip install -U` / `conda update` in `simlive`;
+  test upgrades in a separate env and save new lock files first.
+
+## Chromatin simulation plan (stage 1, agreed with the user 2026-10-05; not built yet)
+- Simulate chromatin SEPARATELY from the microscopy pipeline, as a reusable library of specific polymer simulations
+  (Mirny-lab style, with polychrom/OpenMM on the GPU), saved with their parameters, seed and versions. Stage 1 of a
+  movie then assigns one specific saved simulation to each cell; the microscopy labels/fluorophores come later.
+- Before using them, reproduce known Mirny-lab results to verify the setup (e.g. contact probability P(s) scaling,
+  loop-extrusion contact maps, compartments, sub-diffusive locus MSD). Check target numbers against the papers; do not
+  rely on memory.
+- polychrom works on this machine: CUDA platform, ~7,000 steps/s for N=2,000 monomers and ~3,650 steps/s for N=10,000
+  (variable Langevin, spherical confinement). In THIS polychrom version the Simulation args are `error_tol`,
+  `reporters=[...]` (not `error_tolerance`/`reporter`).
+
 ## Environment
 - Windows 11, NVIDIA RTX 3090 (driver supports CUDA 13.2). Conda env `simlive` from `environment.yml`, Python 3.12
   (Trackastra supports 3.10–3.13, Ultrack 3.11–3.13).
