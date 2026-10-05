@@ -1,7 +1,7 @@
 """Stage 4a: automatic segmentation. Registry of segmenters; each maps (T,Y,X) image -> (T,Y,X) instance labels.
 
-`threshold_watershed` is a classical baseline needing no model download. Cellpose / StarDist adapters plug into
-SEGMENTERS with the same signature.
+`threshold_watershed` is a classical baseline needing no model download. `cellpose` downloads its model weights
+on first use. StarDist can be added to SEGMENTERS with the same signature.
 """
 from __future__ import annotations
 
@@ -29,7 +29,34 @@ def threshold_watershed(images: np.ndarray, smooth_px: float = 2.0, min_area_px:
     return out
 
 
-SEGMENTERS = {"threshold_watershed": threshold_watershed}
+def cellpose_seg(images: np.ndarray, diameter_px: float | None = None, flow_threshold: float = 0.4,
+                 cellprob_threshold: float = 0.0, model: str = "cpsam", gpu: bool = True, batch_size: int = 8,
+                 **_) -> np.ndarray:
+    """Cellpose (v4 default model 'cpsam') on every frame; labels are unique per frame.
+
+    Runs in a separate process (see cellpose_worker.py for why) and exchanges data through temporary TIFF files.
+    """
+    import json
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    import tifffile
+
+    params = dict(diameter_px=diameter_px, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold,
+                  model=model, gpu=gpu, batch_size=batch_size)
+    with tempfile.TemporaryDirectory() as d:
+        src, dst = Path(d) / "in.tif", Path(d) / "out.tif"
+        tifffile.imwrite(src, images.astype(np.float32))
+        proc = subprocess.run([sys.executable, "-m", "simlive.stage4_segtrack.cellpose_worker", str(src), str(dst),
+                               json.dumps(params)], capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Cellpose worker failed (exit {proc.returncode}):\n{proc.stdout[-1500:]}\n{proc.stderr[-1500:]}")
+        return tifffile.imread(dst)
+
+
+SEGMENTERS = {"threshold_watershed": threshold_watershed, "cellpose": cellpose_seg}
 
 
 def segment(images: np.ndarray, method: str, **params) -> np.ndarray:

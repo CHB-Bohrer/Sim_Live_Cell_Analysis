@@ -43,8 +43,19 @@ optics:                     # nuclear (NLS-GFP) channel
   gain_adu_per_e: 1.0
   offset_adu: 100
 
+nucleus_texture:            # intra-nuclear structure (fixed to each nucleus; rotates/deforms with it)
+  contrast: 0.30            # std of chromatin-like intensity variation (0 = uniform)
+  correlation_um: 1.5       # feature size of that variation
+  n_nucleoli: 2             # mean number of dark nucleoli per nucleus (NLS-GFP excluded)
+  nucleolus_depth: 0.55     # 0 = invisible, 1 = completely dark
+
 segmentation:
-  method: threshold_watershed
+  method: cellpose          # cellpose | threshold_watershed
+  # cellpose:
+  diameter_px: null         # null = automatic
+  flow_threshold: 0.4
+  cellprob_threshold: 0.0
+  # threshold_watershed:
   smooth_px: 1.5
   min_area_px: 20
   min_distance_px: 5

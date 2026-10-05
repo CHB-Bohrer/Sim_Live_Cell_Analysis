@@ -11,3 +11,7 @@ data/runs/*
 *.npz
 *.tif
 *.tiff
+
+# Sweep outputs are reproducible from config + seeds.
+data/sweeps/*
+!data/sweeps/.gitkeep

@@ -194,12 +194,17 @@ with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
         aspect = st.slider("Mean aspect ratio (1 = round)", 1.0, 2.5, float(base["geometry"]["shape"]["aspect_mean"]), 0.05)
         deform = st.slider("Deformation (bumps/dents)", 0.0, 0.25, float(base["geometry"]["shape"]["deform_amp"]), 0.01)
         persist = st.slider("Shape persistence", 0.0, 0.99, float(base["geometry"]["shape"]["persistence"]), 0.01)
+        st.markdown("**Nuclear texture** (chromatin-like structure, fixed to each nucleus)")
+        tex_c = st.slider("Texture contrast (0 = uniform blob)", 0.0, 0.8, float(base["nucleus_texture"]["contrast"]), 0.05)
+        n_nuc = st.slider("Dark nucleoli per nucleus (average)", 0.0, 5.0, float(base["nucleus_texture"]["n_nucleoli"]), 0.5)
         st.markdown("**Imaging**")
         photons = st.number_input("Photons/pixel/s (brightness)", 10, 100000, int(base["optics"]["photons_per_px_s"]), 100)
         read_noise = st.number_input("Camera read noise (e-)", 0.0, 20.0, float(base["optics"]["read_noise_e"]), 0.5)
         pix = st.number_input("Pixel size (nm)", 50, 2000, int(base["optics"]["pixel_size_nm"]), 10)
         NA = st.number_input("NA", 0.3, 1.7, float(base["optics"]["NA"]), 0.05)
-        st.markdown("**Tracker**")
+        st.markdown("**Segmentation and tracker**")
+        seg_method = st.selectbox("Segmentation", ["cellpose", "threshold_watershed"],
+                                  0 if base["segmentation"]["method"] == "cellpose" else 1)
         mode = st.selectbox("Trackastra mode", ["greedy", "greedy_nodiv", "ilp"], 0)
         go = st.form_submit_button("▶ Run simulation", type="primary", width="stretch")
 
@@ -211,7 +216,8 @@ if go:
         f"geometry.shape.aspect_mean={aspect}", f"geometry.shape.deform_amp={deform}",
         f"geometry.shape.persistence={persist}", f"optics.photons_per_px_s={photons}",
         f"optics.read_noise_e={read_noise}", f"optics.pixel_size_nm={pix}", f"optics.NA={NA}",
-        f"tracking.mode={mode}"]
+        f"tracking.mode={mode}", f"nucleus_texture.contrast={tex_c}", f"nucleus_texture.n_nucleoli={n_nuc}",
+        f"segmentation.method={seg_method}"]
     cmd = [sys.executable, str(REPO_ROOT / "scripts" / "run_tracking_demo.py")]
     for o in overrides:
         cmd += ["--set", o]

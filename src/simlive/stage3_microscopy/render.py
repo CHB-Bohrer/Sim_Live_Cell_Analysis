@@ -1,6 +1,7 @@
 """Stage 3 (nuclear channel only, for now): render cells.csv into an image movie + ground-truth label masks.
 
-Forward model: uniform NLS-GFP nucleus (per-cell brightness) -> PSF blur (Gaussian, sigma from NA/wavelength)
+Forward model: NLS-GFP nucleus (per-cell brightness x per-nucleus texture: chromatin-like variation + dark
+nucleoli, fixed to the nucleus) -> PSF blur (Gaussian, sigma from NA/wavelength)
 -> photons (exposure x flux, optional photobleaching) -> Poisson shot noise -> camera gain/read noise/offset.
 Ground truth: integer label mask per frame, value = persistent cell ID (0 = background).
 Locus channel(s) are added when stage 1 is wired in.
@@ -27,7 +28,40 @@ def _nucleus_mask(dy, dx, r, px_um, harm):
     uu, vv = u / a_ax, v / b_ax
     amp = np.array([getattr(r, f"amp{int(k)}") for k in harm])
     phase = np.array([getattr(r, f"phase{int(k)}") for k in harm])
-    return np.hypot(uu, vv) <= (r.radius_um / px_um) * boundary_rho(np.arctan2(vv, uu), amp, phase, harm)
+    r_px = r.radius_um / px_um
+    inside = np.hypot(uu, vv) <= r_px * boundary_rho(np.arctan2(vv, uu), amp, phase, harm)
+    return inside, uu / r_px, vv / r_px  # also the position in the nucleus' own frame (units of its radius)
+
+
+_TEX_GRID, _TEX_EXTENT = 96, 1.5
+
+
+def make_texture(tex: dict, radius_um: float, rng: np.random.Generator) -> np.ndarray:
+    """Per-nucleus intensity texture on a grid covering +-1.5 nuclear radii, mean ~1 inside the nucleus.
+
+    Fixed to the nucleus (rotates/deforms with it), so it is a feature a tracker can use. Components:
+    spatially correlated chromatin-like variation (`contrast`, `correlation_um`) and dark nucleoli where nuclear
+    NLS-GFP is excluded (`n_nucleoli` on average, `nucleolus_depth`).
+    """
+    g = _TEX_GRID
+    cell = 2 * _TEX_EXTENT / g                          # grid spacing in nuclear radii
+    field = gaussian_filter(rng.normal(size=(g, g)), (tex["correlation_um"] / radius_um) / cell, mode="wrap")
+    field /= field.std()
+    t = np.clip(1 + tex["contrast"] * field, 0.25, None)
+    ax = np.linspace(-_TEX_EXTENT, _TEX_EXTENT, g)
+    gx, gy = np.meshgrid(ax, ax)
+    for _ in range(min(int(rng.poisson(tex.get("n_nucleoli", 0))), 6)):
+        ang, rad, s = rng.uniform(0, 2 * np.pi), 0.65 * np.sqrt(rng.uniform()), rng.uniform(0.10, 0.18)
+        d2 = (gx - rad * np.cos(ang)) ** 2 + (gy - rad * np.sin(ang)) ** 2
+        t *= 1 - tex.get("nucleolus_depth", 0.5) * np.exp(-d2 / (2 * s**2))
+    return t / t[np.hypot(gx, gy) <= 1].mean()
+
+
+def _sample_texture(tex_map: np.ndarray, xn: np.ndarray, yn: np.ndarray) -> np.ndarray:
+    from scipy.ndimage import map_coordinates
+
+    to_grid = lambda c: (c + _TEX_EXTENT) / (2 * _TEX_EXTENT) * (_TEX_GRID - 1)
+    return map_coordinates(tex_map, [to_grid(yn), to_grid(xn)], order=1, mode="nearest")
 
 
 def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
@@ -41,6 +75,11 @@ def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
     harm = np.array([int(c[3:]) for c in cells.columns if c.startswith("amp")], float)
     ids = cells["cell_id"].unique()
     brightness = dict(zip(ids, rng.lognormal(0.0, opt.get("brightness_cv", 0.3), len(ids))))
+    tex_cfg = cfg.get("nucleus_texture")  # None/absent or contrast 0 and no nucleoli -> uniform nuclei
+    if tex_cfg and tex_cfg.get("contrast", 0) == 0 and tex_cfg.get("n_nucleoli", 0) == 0:
+        tex_cfg = None
+    tex_rng = np.random.default_rng(rng.integers(2**63))  # separate stream so texture draws don't shift the noise
+    textures: dict = {}
     flux = opt["photons_per_px_s"] * acq["exposure_s"]
     bleach = np.exp(-acq["frame_interval_s"] * np.arange(T) / opt["bleach_tau_s"]) \
         if opt.get("bleach_tau_s") else np.ones(T)
@@ -53,9 +92,14 @@ def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
             cy, cx = r.y_um / px_um, r.x_um / px_um
             half = int(np.ceil(r.bound_radius_um / px_um)) + 2
             y0, y1, x0, x1 = max(int(cy) - half, 0), min(int(cy) + half + 1, ny), max(int(cx) - half, 0), min(int(cx) + half + 1, nx)
-            inside = _nucleus_mask(yy[y0:y1, x0:x1] - cy, xx[y0:y1, x0:x1] - cx, r, px_um, harm)
+            inside, xn, yn = _nucleus_mask(yy[y0:y1, x0:x1] - cy, xx[y0:y1, x0:x1] - cx, r, px_um, harm)
             lab[t, y0:y1, x0:x1][inside] = r.cell_id
-            clean[y0:y1, x0:x1][inside] = brightness[r.cell_id]
+            val = brightness[r.cell_id] * np.ones(inside.shape, np.float32)
+            if tex_cfg:
+                if r.cell_id not in textures:
+                    textures[r.cell_id] = make_texture(tex_cfg, r.radius_um, tex_rng)
+                val = val * _sample_texture(textures[r.cell_id], xn, yn)
+            clean[y0:y1, x0:x1][inside] = val[inside]
         blurred = gaussian_filter(clean, sig) if sig > 0 else clean
         photons = rng.poisson((blurred * flux * bleach[t] + opt["background_photons"]).clip(0))
         electrons = photons * opt.get("quantum_efficiency", 0.8)

@@ -53,6 +53,26 @@ def test_zero_deformation_ellipse_has_expected_area():
     assert np.allclose(areas, expected, rtol=0.1)  # area-preserving ellipse
 
 
+def test_texture_adds_structure_but_keeps_mean_brightness():
+    base = {"acquisition.n_frames": 3, "cells.n_cells": 4, "optics.bleach_tau_s": "null", "optics.read_noise_e": 0.0,
+            "optics.background_photons": 0, "optics.photons_per_px_s": 20000, "cells.p_divide_per_frame": 0.0}
+    cfg_u = small_cfg(**base, **{"nucleus_texture.contrast": 0.0, "nucleus_texture.n_nucleoli": 0.0})
+    cfg_t = small_cfg(**base, **{"nucleus_texture.contrast": 0.4, "nucleus_texture.n_nucleoli": 2.0})
+    cells = simulate_cells(cfg_u, np.random.default_rng(1))
+    img_u, lab = render_nuclei(cells, cfg_u, np.random.default_rng(2))
+    img_t, _ = render_nuclei(cells, cfg_t, np.random.default_rng(2))
+    inner = lab[0] > 0
+    from scipy.ndimage import binary_erosion
+
+    inner = binary_erosion(inner, iterations=3)  # stay away from the blurred edge
+    cv = lambda im: np.std(im[0][inner] / np.mean(im[0][inner]))
+    assert cv(img_t) > cv(img_u) * 2, "texture should add intra-nuclear variation"
+    assert abs(img_t[0][lab[0] > 0].mean() / img_u[0][lab[0] > 0].mean() - 1) < 0.15  # same overall brightness
+    # texture is attached to the nucleus: identical config and seed reproduce the same image
+    img_t2, _ = render_nuclei(cells, cfg_t, np.random.default_rng(2))
+    assert np.array_equal(img_t, img_t2)
+
+
 def test_ground_truth_scores_perfectly_against_itself(tmp_path):
     cfg = small_cfg()
     cells = simulate_cells(cfg, np.random.default_rng(2))
