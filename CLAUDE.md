@@ -1,8 +1,24 @@
 # Sim_Live_Cell_Analysis
 
 Repo for validating live-cell microscopy analysis of chromatin loci against simulations with known ground truth.
-Package name: `simlive` (src layout). Owner is a biophysicist; experiment details (loci labeled, modality, frame rate,
-what the analysis measures) are **not yet specified** — ask before building stages 2+ beyond stubs.
+Package name: `simlive` (src layout). Owner is a biophysicist (GitHub: CHB-Bohrer; repo
+https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for how to run everything.
+
+## Session handoff rule (always follow)
+**Before ending a work session, or after any significant change, update this file and README.md without being asked:**
+what changed, new commands/files, gotchas hit, findings, open questions, next steps. Then commit. A new session starts
+from this file and the code alone, so anything not written here is lost. Keep the "Status" and "Findings" sections
+below true; delete stale statements rather than appending contradictions. Do not push to GitHub unless asked.
+
+## The experiment being simulated (from the user; some details still open)
+- Loci: LacO/TetO-array-like labels plus MS2 bursting; reported as three different colors. Unclear whether MS2 is a
+  third color or one of the two loci — confirm. The nuclear NLS-GFP signal is the same color as the MS2 spots.
+- Imaging modality (widefield / spinning-disk / lattice light sheet), 2D vs 3D z-stacks, pixel size, NA, wavelengths,
+  frame rate, exposure, movie length and cell count must all be easy-to-vary config parameters.
+- The user's analysis will quantify each locus's position through time; not written yet (stage 6).
+- MSD calibration targets (D, alpha, length/time scales) not yet given.
+- Still needed from the user: real frame interval, typical cell speed, cell density, whether cells divide, and ideally
+  a real movie with some tracked cells to check how well the simulation matches reality.
 
 ## Environment
 - Windows 11, NVIDIA RTX 3090 (driver supports CUDA 13.2). Conda env `simlive` from `environment.yml`, Python 3.12
@@ -22,9 +38,30 @@ what the analysis measures) are **not yet specified** — ask before building st
   compare conditions over >=5 seeds (seed-to-seed sd of ID switches is large, ~5-10).
 - polychrom is installed WITHOUT its Cython extension (`scripts/install_polychrom.ps1`); do not use knot-simplification
   functions.
-- Current state: stages 2, 3 (nuclear channel only), 4 (threshold-watershed segmentation + Trackastra) and 7a
-  (CTC metrics + identity switches) exist; stage 1 (chromatin), locus channels, stage 5, 6 and 7b do not.
-  `src/simlive/pipelines/tracking_demo.py` chains them; `app/dashboard.py` is the UI.
+- Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
+  on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
+  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Config.
+
+## Status (update this section every session)
+Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
+nuclear channel only (PSF blur, noise, bleaching, per-nucleus texture + nucleoli), stage 4 (Cellpose default,
+threshold-watershed baseline, Trackastra `general_2d` behind the `Tracker` adapter), stage 7a (CTC metrics via
+traccuracy + own identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, dashboard.
+NOT built: stage 1 (chromatin / polychrom), locus + MS2 channels, calibration, stage 5 (locus-to-cell linking),
+stage 6 (analysis), stage 7b (propagation of tracking errors into locus results), Ultrack/TrackMate adapters,
+density and frame-interval scans.
+
+## Findings so far (cell tracking only; simulated 2D nuclei, 5 seeds per setting)
+- Errors come from crowding x speed: touching, featureless-ish nuclei; Trackastra (greedy, divisions allowed) often
+  calls a touching pair a false division. Texture inside nuclei did NOT improve linking (CHOTA 0.913 vs 0.914 with
+  perfect masks) but it breaks the watershed segmenter (0.89 -> 0.78); Cellpose is unaffected.
+- Speed scan (speed_scale, default config): CHOTA >= 0.99 up to 0.7x, 0.975 at 0.8x, 0.91 at 1x, 0.85 at 1.25x. At
+  <=0.5x linking with perfect masks was perfect (0 ID switches in 15 runs); ~1 switch/run remains from segmentation.
+- `ilp` vs `greedy` mode: only helps at >=1x speed (fewer ID switches in 4/5 seeds); no consistent difference slower.
+- Trackastra's pretrained model is meant to generalize, but it has NOT been checked on real data; a real annotated
+  movie is the proper test.
+- Default config (speed_scale 1.0) is deliberately hard; consider setting a slower default once the user's real
+  cell speed / frame interval is known.
 
 ## Pipeline stages (each is its own subpackage under `src/simlive/`)
 1. `stage1_chromatin` — polychrom/OpenMM polymer dynamics -> locus-locus distances vs time (polymer units).
