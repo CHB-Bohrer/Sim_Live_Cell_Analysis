@@ -25,7 +25,13 @@ def load_config(path: str | Path, overrides: list[str] | None = None) -> dict:
         parts = key.split(".")
         for p in parts[:-1]:
             node = node.setdefault(p, {})
-        node[parts[-1]] = yaml.safe_load(raw)
+        val = yaml.safe_load(raw)
+        if isinstance(val, str):  # YAML reads "1e-05" as text; accept it as a number
+            try:
+                val = float(val)
+            except ValueError:
+                pass
+        node[parts[-1]] = val
     return cfg
 
 

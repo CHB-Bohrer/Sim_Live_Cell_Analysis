@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "scripts\\run.cmd", "python", "-m", "streamlit", "run", "app/dashboard.py",
+                      "--server.port", "8501", "--server.address", "localhost", "--server.headless", "true"],
+      "port": 8501
+    }
+  ]
+}

@@ -15,7 +15,8 @@ Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env fr
 |---|---|
 | Check the GPU setup (OpenMM CUDA, PyTorch, CuPy, Trackastra) | `scripts\run.cmd pytest -m gpu -v` |
 | Run all tests | `scripts\run.cmd pytest` |
-| **Simulate moving cells and score the tracking** | `scripts\run.cmd python scripts\run_tracking_demo.py` |
+| **Open the dashboard (set parameters, run, see everything)** | `scripts\dashboard.cmd` then open http://localhost:8501 |
+| Simulate moving cells and score the tracking (no GUI) | `scripts\run.cmd python scripts\run_tracking_demo.py` |
 | ...with different settings | `scripts\run.cmd python scripts\run_tracking_demo.py --set motion.D_um2_s=0.05 --set seed=2` |
 | View the tracked cells from that run | `scripts\run.cmd python scripts\view_run.py data\runs\<run_id> --labels stage4_segtrack\tracked_auto_masks.tif` |
 | Make a fake demo movie (old, locus-only toy) | `scripts\run.cmd python scripts\make_demo_run.py` |
@@ -28,6 +29,15 @@ Viewer controls: slider or left/right arrows = frame, space = play/pause, `l` = 
 
 Or activate the env yourself: `C:\Users\cbohr\miniforge3\condabin\conda.bat activate simlive`, then run the
 commands without the `scripts\run.cmd` prefix.
+
+## The dashboard
+
+`scripts\dashboard.cmd` starts a local web app (this PC only, http://localhost:8501). The sidebar's **New
+simulation** form sets motion, shape, imaging and tracker parameters and runs the pipeline (~20 s); **Run to view**
+reopens any earlier run. Tabs: **Movie** (image | true cells | tracked cells, with identity swaps outlined in red,
+missed cells in yellow, and a per-frame error timeline), **Metrics** (all scores, with explanations, and a per-cell
+identity table), **Trajectories** (true vs tracked paths, switches marked), **Config**. Stop it with Ctrl-C in its
+window. The simulation runs in a separate process, so the dashboard itself never loads PyTorch.
 
 ## The tracking test (`run_tracking_demo.py`)
 

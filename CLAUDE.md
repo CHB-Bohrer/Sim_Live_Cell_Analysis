@@ -10,6 +10,15 @@ what the analysis measures) are **not yet specified** — ask before building st
 - OpenMM CUDA build (conda-forge), PyTorch CUDA wheels (pip), CuPy, polychrom (installed from GitHub, not PyPI), Trackastra.
 - The one GPU is shared: OpenMM (stage 1) and PyTorch (stage 4). Run them sequentially, never concurrently.
 - Verify setup with `pytest -m gpu`.
+- Always run Python through `scripts\run.cmd` (activates the env). Calling the env's python.exe directly fails on
+  DLL loading.
+- Never import torch into the Streamlit dashboard (`app/dashboard.py`): on Windows it clashes with the plotting libs'
+  OpenMP runtime and kills the server. The dashboard shells out to `scripts/run_tracking_demo.py` instead.
+- polychrom is installed WITHOUT its Cython extension (`scripts/install_polychrom.ps1`); do not use knot-simplification
+  functions.
+- Current state: stages 2, 3 (nuclear channel only), 4 (threshold-watershed segmentation + Trackastra) and 7a
+  (CTC metrics + identity switches) exist; stage 1 (chromatin), locus channels, stage 5, 6 and 7b do not.
+  `src/simlive/pipelines/tracking_demo.py` chains them; `app/dashboard.py` is the UI.
 
 ## Pipeline stages (each is its own subpackage under `src/simlive/`)
 1. `stage1_chromatin` — polychrom/OpenMM polymer dynamics -> locus-locus distances vs time (polymer units).
