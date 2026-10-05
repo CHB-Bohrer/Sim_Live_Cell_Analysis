@@ -1,0 +1,46 @@
+# Sim_Live_Cell_Analysis
+
+Validate live-cell chromatin-locus analysis against simulations with known ground truth.
+Pipeline: polymer dynamics (polychrom/OpenMM) -> cells + motion -> microscopy forward model ->
+segmentation + tracking (Trackastra) -> locus-to-cell linking -> analysis -> validation.
+See [CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** environment, GPU tests and image viewer are
+done; stages 1-7 are not built yet.
+
+## Quick start (Windows)
+
+Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env from any prompt
+(no activation needed). Run from the repo root.
+
+| I want to... | Command |
+|---|---|
+| Check the GPU setup (OpenMM CUDA, PyTorch, CuPy, Trackastra) | `scripts\run.cmd pytest -m gpu -v` |
+| Run all tests | `scripts\run.cmd pytest` |
+| Make a fake demo movie (until stage 3 exists) | `scripts\run.cmd python scripts\make_demo_run.py` |
+| **Look at a simulation (interactive window)** | `scripts\run.cmd python scripts\view_run.py data\runs\demo` |
+| Save it as a GIF or a PNG instead | `scripts\run.cmd python scripts\view_run.py data\runs\demo --save out.gif` |
+
+Viewer controls: slider or left/right arrows = frame, space = play/pause, `l` = toggle cell-mask overlay
+(each persistent cell ID keeps its color), `i` = toggle cell-ID numbers. Works on any run directory containing
+`stage3_microscopy/locus.tif`, `nucleus.tif`, `labels.tif` (T,Y,X or T,Z,Y,X).
+
+Or activate the env yourself: `C:\Users\cbohr\miniforge3\condabin\conda.bat activate simlive`, then run the
+commands without the `scripts\run.cmd` prefix.
+
+## Setup from scratch (already done on this PC)
+
+1. Install Miniforge (`C:\Users\<you>\miniforge3`).
+2. `conda env create -f environment.yml` (conda part; its pip step builds torch/Trackastra).
+3. `powershell -File scripts\install_polychrom.ps1` — polychrom from GitHub without its optional Cython
+   extension (needs MSVC; only used for knot simplification).
+4. Copy `scripts\cuda_path.bat` to `<env>\etc\conda\activate.d\` so CuPy finds the CUDA headers.
+5. `scripts\run.cmd pytest -m gpu -v` should show 5 passed.
+
+## Layout
+
+```
+configs/     YAML parameter files and sweeps
+data/runs/   outputs, one folder per run (gitignored): data/runs/<run_id>/stageN_<name>/
+scripts/     run.cmd, view_run.py, make_demo_run.py, install scripts
+src/simlive/ stage1_chromatin ... stage7_validation, calibration, io
+tests/       pytest (GPU tests marked `gpu`)
+```
