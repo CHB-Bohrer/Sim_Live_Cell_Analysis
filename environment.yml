@@ -10,6 +10,10 @@ dependencies:
   - cuda-version=12.6
   - openmm>=8.1
   - cupy
+  # CUDA headers so CuPy can JIT-compile kernels (see scripts/cuda_path.bat for CUDA_PATH).
+  - cuda-cudart-dev
+  - cuda-nvrtc-dev
+  - cuda-cccl
   - numpy
   - scipy
   - matplotlib
@@ -26,6 +30,6 @@ dependencies:
       - torchvision
       # Installed after torch so pip keeps the CUDA build.
       - trackastra
-      # polychrom is not on PyPI.
-      - git+https://github.com/open2c/polychrom.git
       - -e .
+# polychrom is not on PyPI and its Cython extension needs MSVC, so it is installed afterwards by
+#   powershell -File scripts/install_polychrom.ps1
