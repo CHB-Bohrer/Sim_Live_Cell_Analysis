@@ -10,10 +10,19 @@ import numpy as np
 import pandas as pd
 import streamlit as _st
 
+import chromatin_view as V
+from player import show_player
 from simlive.io.runs import DATA_ROOT, REPO_ROOT
 from simlive.stage1_chromatin import analysis as A
 
 CHROM = DATA_ROOT / "chromatin"
+
+
+@_st.cache_resource(show_spinner=False, max_entries=3)
+def _watch_frames(sim_dir: str, mode: str, a_kb: int, b_kb: int, show_loops: bool, rotate_deg: float):
+    """Pre-render the movie frames for one simulation (cached per setting)."""
+    fn = V.snapshot_frames if mode == "snapshots" else V.block_frames
+    return fn(sim_dir, a_kb, b_kb, show_loops, rotate_deg)
 
 
 @_st.cache_resource(show_spinner=False, max_entries=4)
@@ -67,6 +76,28 @@ def render(st):
     c1.metric("Monomers", f"{N:,}", help="1 monomer = 1 kb")
     c2.metric("Speed", f"{meta['md_steps_per_second']:.0f} steps/s")
     c3.metric("Mean loop size", f"{meta['mean_loop_size_kb']:.0f} kb" if "mean_loop_size_kb" in meta else "no loop extrusion")
+
+    has_lef = (d / "lef_positions.npy").exists()
+    with st.expander("▶ Watch the chromosome move through time (smooth player)",
+                     expanded=st.session_state.get("chrom_play", False)):
+        st.caption("Every bead is coloured by genomic position (purple = start of the region, yellow = end) and the chain "
+                   "slowly rotates so the 3D shape is visible. Two loci you choose are highlighted (A red, B blue) and "
+                   "joined by a line with their distance. White lines = loop-extruding factors holding two monomers together. "
+                   "Time is in MD blocks (750 steps each) until the calibration step converts it to seconds.")
+        c1, c2, c3 = st.columns([1, 3, 2])
+        on = c1.toggle("Prepare player", key="chrom_play", help="Renders every frame once (a few seconds)")
+        mode = c2.radio("Time resolution", ["snapshots", "blocks"], horizontal=True, key="chrom_mode",
+                        format_func={"snapshots": "Whole chain at each saved snapshot (every monomer)",
+                                     "blocks": "Every block, finest time resolution (1 in 10 monomers)"}.get)
+        rot = c3.slider("Rotation per frame (degrees)", 0.0, 5.0, 1.5, 0.5, key="chrom_rot")
+        wa = st.slider("Locus A position (kb)", 0, int(N) - 1, int(N * 0.40), 10, key="watch_a")
+        ws = st.slider("Locus B is this far from A (kb)", 10, int(min(3000, N - 1)), 500, 10, key="watch_sep")
+        show_loops = st.checkbox("Draw loop-extruding factors", True, key="watch_loops", disabled=not has_lef)
+        if on:
+            with st.spinner("Rendering frames…"):
+                frames, labels = _watch_frames(str(d), mode, int(wa), int(min(N - 1, wa + ws)), bool(show_loops and has_lef),
+                                               float(rot))
+            show_player(frames, labels, fps=10, column_width_px=640, key="chrom")
 
     if st.toggle("Show contact map, P(s) and 3D shape (reads saved snapshots; a few seconds)", key="chrom_maps"):
         n_snap = 20

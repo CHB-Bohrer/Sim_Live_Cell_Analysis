@@ -39,9 +39,10 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   (polychrom/OpenMM on the GPU, Mirny-lab style). Stage 1 of a movie assigns one saved simulation to each cell
   (`library.assign_simulations`); microscopy labels/fluorophores and mapping into the nucleus come later.
 - User's choices: first models = plain confined polymer + loop extrusion with boundary elements (compartments later);
-  1 kb per monomer; chromosome 21 scale (N = 46,710); 100 simulations per library; MSD calibration (nm, s) later
-  (user will supply measured MSD). Boundary-element positions are SYNTHETIC (seeded random TAD sizes) until real
-  chr21 CTCF data is added.
+  1 kb per monomer; 100 simulations per library; MSD calibration (nm, s) later (user will supply measured MSD).
+  The user first said "chromosome 21 scale" (N = 46,710) and then dropped it ("lets not focus explicitly on chr21
+  anymore"): the region size is now a plain setting `polymer.n_monomers`, default 10,000 (the validated 10 Mb).
+  Boundary-element positions are SYNTHETIC (seeded random TAD sizes) until real CTCF positions are supplied.
 - Code: `stage1_chromatin/lef1d.py` (numba 1D loop extrusion with boundaries; 1 monomer/step/leg, processivity = 2 x
   lifetime), `polymer3d.py` (3D polychrom runner, parameters from the polychrom `loopExtrusion` example), `analysis.py`
   (contact maps, P(s), insulation, corner dots, MSD), `library.py`. Scripts: `run_chromatin.py` (one sim),
@@ -60,11 +61,12 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   pooled across-OE fold); dots must be tested on the anchor monomers' own contact probability pooled over loops (10 kb
   bins dilute a single pair 100-fold; per-loop medians are dominated by unformed loops); boundary stall 0.9 per attempt
   gives NO insulation (use >= 0.99); validate metrics on null data (random positions, no-boundary control).
-- chr21 scale benchmark (N=46,710, 389 LEFs, 52 boundaries, GPU shared with nothing else): ~1,400-1,750 MD steps/s.
-  Planned config (1500 equilibration + 2000 production blocks x 750 steps) = ~27 min per simulation, ~46 h per
-  100-simulation library, ~17 GB per library on disk. The 100-simulation libraries have NOT been started; each needs the
-  user's go-ahead because it occupies the GPU for ~2 days. Whether 1500 equilibration blocks suffice at chr21 scale is
-  UNVERIFIED: run one full pilot and check P(s) stationarity (first vs second half) before the library.
+- Speed: N=10,000: ~3,650 MD steps/s (~7.5 min per 2,000-block validation run). N=46,710 (389 LEFs, 52 boundaries):
+  ~1,400-1,750 steps/s, i.e. cost scales roughly with region size. Library configs
+  (`configs/chromatin/library_*.yaml`: 1000 equilibration + 2000 production blocks x 750 steps) = ~11 min per 10 Mb
+  simulation, ~18 h per 100-simulation library, ~7 GB per library at 10 Mb. The libraries have NOT been started; each
+  occupies the GPU for many hours, so get the user's go-ahead and region size first. Whether 1000 equilibration blocks
+  suffice is only validated at 10 Mb (P(s) stationarity 0.077 over 2000 blocks); re-check for larger regions.
 - Dashboard: the 🧬 Chromatin tab shows the validation report and any saved simulation.
 - polychrom works on this machine: CUDA platform, ~7,000 steps/s for N=2,000 monomers and ~3,650 steps/s for N=10,000
   (variable Langevin, spherical confinement). In THIS polychrom version the Simulation args are `error_tol`,

@@ -38,7 +38,7 @@ flowchart TD
     subgraph SIM["① SIMULATION: we invent the experiment, so we know the right answer"]
         direction TB
         S2["<b>Cells</b> (stage 2)<br/>Cells drift, bump into each other,<br/>change shape and sometimes divide.<br/>Each cell keeps its own ID number."]:::built
-        LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>100 saved polymer simulations of<br/>chromosome 21 (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
+        LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>many saved polymer simulations of a<br/>chromatin region (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
         S1["<b>Loci in each cell</b> (stage 1)<br/>Give every cell its own saved simulation<br/>and read two loci from it.<br/>NOW: still a simple toy model.<br/>NEXT: use the library (after calibration)."]:::standin
         CAL["<b>Calibration</b><br/>Make the simulated motion match<br/>your measured MSD, in nm and seconds"]:::planned
         S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into noisy images:<br/>blur, camera noise, bleaching.<br/>Nucleus in one colour, each locus in its own."]:::built

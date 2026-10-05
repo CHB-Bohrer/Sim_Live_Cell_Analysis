@@ -104,6 +104,13 @@ def analyse(seeds):
                 entry["loop_anchored_fraction"] = float(np.mean([((lp[:, :, 0] == a) & (lp[:, :, 1] == b)).any(1).mean()
                                                                  for a, b in pairs]))
             if lp is not None:
+                fe = int(cfg["dynamics"].get("full_every_blocks", 10))
+                legs = []
+                for kk in range(0, len(snaps), 4):      # snapshot kk was saved at production block kk * full_every
+                    L = lp[min(kk * fe, len(lp) - 1)]
+                    legs.append(np.linalg.norm(snaps[kk][L[:, 0]] - snaps[kk][L[:, 1]], axis=1))
+                entry["leg_distance_median"] = float(np.median(np.concatenate(legs)))
+            if lp is not None:
                 sizes = (lp[:, :, 1] - lp[:, :, 0])
                 entry["mean_loop_kb"] = float(sizes.mean())
                 if bnd:
@@ -229,6 +236,10 @@ def write_report(res, seeds):
         gain.append(float(np.mean(e_free["p"][:n][sel] / e_poly["p"][:n][sel])))
     chk("Loop extrusion raises contacts at 50-300 kb (compaction by loops, scale of processivity)", "ratio > 1",
         fmt(float(np.mean(gain))), np.mean(gain) > 1.0)
+    legd = max(mean_of(c, "leg_distance_median") for c in (free, strong, leaky, loops))
+    chk("Loop-extruder bonds actually hold their two legs together in 3D (sanity check on the coupling)",
+        "median leg-to-leg distance < 1.5 (bond rest length 0.5; two typical monomers 100 kb apart are ~16 apart)",
+        fmt(legd), legd < 1.5)
     ins = mean_of(strong, "insulation_fold")
     chk("Impermeable boundaries insulate (contacts across borders lower than expected; paper: ~2-fold)", "fold >= 1.5",
         fmt(ins), ins >= 1.5)
@@ -262,6 +273,14 @@ def write_report(res, seeds):
         L.append(f"| {c[0]} | {c[1]} | {c[2]} | **{c[3]}** |")
     L.append("\n`CHECK` means the measured value is outside the expected range and needs a closer look (it is not hidden).\n")
     L.append("## Corrections made to the analysis during validation\n")
+    L.append("0. **A bug in the 3D coupling invalidated the first loop-extrusion validation.** Loop-extruder bonds were moved each block "
+             "with OpenMM's `updateParametersInContext`, which cannot change which two monomers a bond connects, so the loops stayed "
+             "frozen at their starting positions (the legs of a loop were as far apart as any two monomers at that separation, ~12 "
+             "instead of ~0.5). The first results looked plausible because the frozen loops piled up at the boundary sites. It was "
+             "found while building the time viewer (loop lines crossed the whole nucleus), fixed by pre-registering every bond and "
+             "switching them on and off as the polychrom example does, and guarded by a GPU regression test plus the leg-distance "
+             "check below. All loop-extrusion numbers in this report are from simulations re-run after the fix; the old results are "
+             "kept in `_superseded_static_bonds`. The plain-polymer condition has no loop bonds and was not affected.\n")
     L.append("The first passes of this validation flagged checks. They turned out to be errors in the *analysis*, not the simulation, and "
              "were fixed before the numbers above were produced (stated here so the history is visible):\n"
              "1. **Insulation metric was biased.** It compared contacts near the diagonal (within a domain) with contacts farther "

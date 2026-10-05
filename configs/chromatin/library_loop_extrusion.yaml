@@ -1,0 +1,29 @@
+# Library config 2/2: loop extrusion with boundary elements (CTCF-like), Mirny-lab style.
+# Region size is a plain setting: polymer.n_monomers (1 monomer = 1 kb). 10,000 = a 10 Mb region (validated size).
+# stall 0.99: at 0.9 a LEF leg leaks through a boundary within ~10 steps and there is no insulation
+# (see docs/chromatin_validation.md).
+# NOTE: boundary positions are SYNTHETIC (random TAD sizes, mean 800 kb, the same for every simulation), not real
+# CTCF sites. Real positions could be supplied later as an explicit list under extrusion.ctcf.
+name: library_loop_extrusion
+polymer:
+  n_monomers: 10000
+  density: 0.1
+  bond_wiggle: 0.1
+  angle_k: 1.5
+  repulsion_trunc: 1.5
+  radius_mult: 1.05
+dynamics:
+  steps_per_block: 750
+  equilibration_blocks: 1000
+  production_blocks: 2000
+  full_every_blocks: 20
+  track_stride: 10          # store every 10th monomer (10 kb) at EVERY production block, for locus trajectories
+  collision_rate: 0.03
+extrusion:
+  separation_kb: 120        # Fudenberg 2016: LEF separation ~120 kb
+  processivity_kb: 200      # Fudenberg 2016: best agreement for processivity ~120-240 kb
+  lef_steps_per_block: 1
+  warmup_lifetimes: 10
+  bond_length: 0.5
+  bond_wiggle: 0.2
+  ctcf: {mode: tads, mean_tad_kb: 800, stall: 0.99, seed: 21}

@@ -40,11 +40,43 @@ def build_ctcf(cfg: dict, n: int) -> list[dict]:
     raise ValueError(f"unknown ctcf spec: {c}")
 
 
-def _update_lef_bonds(sim, force, bonds, length, wiggle):
-    k = sim.kbondScalingFactor / (wiggle * sim.length_scale) ** 2
-    for i, (a, b) in enumerate(bonds):
-        force.setBondParameters(i, int(a), int(b), length * sim.length_scale, float(k))
-    force.updateParametersInContext(sim.context)
+class LEFBondUpdater:
+    """Loop-extruder bonds that really move from block to block.
+
+    IMPORTANT (a bug in an earlier version of this file): OpenMM's `updateParametersInContext` can change a bond's
+    length and stiffness but NOT which two particles it connects. Re-pointing existing bonds at new monomers is silently
+    ignored, which froze the loops at their starting positions. The correct method (the one in the polychrom
+    loopExtrusion example) is to register EVERY bond that will ever occur up front, with stiffness 0, and then switch
+    them on and off by changing only the stiffness.
+
+    lef_traj: (n_blocks, n_lefs, 2) int array of (left leg, right leg) for every MD block of the whole run.
+    """
+
+    def __init__(self, sim, lef_traj: np.ndarray, length: float = 0.5, wiggle: float = 0.2):
+        from polychrom import forces
+
+        flat = lef_traj.reshape(-1, 2)
+        self.pairs, inv = np.unique(flat, axis=0, return_inverse=True)
+        self.index = inv.reshape(lef_traj.shape[:2])                  # bond number active for each (block, LEF)
+        self.force = forces.harmonic_bonds(sim, bonds=[(int(a), int(b)) for a, b in self.pairs],
+                                           bondWiggleDistance=0, bondLength=length, name="lef_bonds",
+                                           override_checks=True)       # wiggle 0 -> stiffness 0 (all inactive)
+        self.sim = sim
+        self.length = length * sim.length_scale
+        self.k_active = float(sim.kbondScalingFactor / (wiggle * sim.length_scale) ** 2)
+        self._active = np.array([], dtype=int)
+
+    def step(self, block: int) -> None:
+        """Make exactly the bonds of this block active (call before sim.do_block)."""
+        cur = np.unique(self.index[block])
+        for i in np.setdiff1d(self._active, cur):
+            a, b = self.pairs[i]
+            self.force.setBondParameters(int(i), int(a), int(b), self.length, 0.0)
+        for i in np.setdiff1d(cur, self._active):
+            a, b = self.pairs[i]
+            self.force.setBondParameters(int(i), int(a), int(b), self.length, self.k_active)
+        self.force.updateParametersInContext(self.sim.context)
+        self._active = cur
 
 
 def run_chromatin_simulation(cfg: dict, out_dir: str | Path, seed: int, progress=print) -> dict:
@@ -77,42 +109,41 @@ def run_chromatin_simulation(cfg: dict, out_dir: str | Path, seed: int, progress
         nonbonded_force_kwargs={"trunc": P.get("repulsion_trunc", 1.5), "radiusMult": P.get("radius_mult", 1.05)},
         except_bonds=True))
 
-    lef, lef_force, ctcf = None, None, []
+    eq, prod = int(D["equilibration_blocks"]), int(D["production_blocks"])
+    lef, updater, lef_traj, ctcf = None, None, None, []
     if ex:
         ctcf = build_ctcf(cfg, N)
-        speed = ex.get("lef_steps_per_block", 1)
         lifetime_steps = ex["processivity_kb"] / 2.0       # processivity = 2 * speed(=1/step) * lifetime
         n_lefs = int(round(N / ex["separation_kb"]))
         lef = LEF1D(N, n_lefs, lifetime_steps, ctcf=ctcf, seed=seed + 1)
         lef.step(int(ex.get("warmup_lifetimes", 10) * lifetime_steps))   # reach the steady state in 1D first
-        lef_force = forces.harmonic_bonds(sim, bonds=lef.bonds(), bondWiggleDistance=ex.get("bond_wiggle", 0.2),
-                                          bondLength=ex.get("bond_length", 0.5), name="lef_bonds",
-                                          override_checks=True)
-        sim.add_force(lef_force)
+        lef_traj = np.zeros((eq + prod, n_lefs, 2), np.int32)            # the whole 1D history, computed up front
+        for b in range(eq + prod):
+            lef.step(ex.get("lef_steps_per_block", 1))
+            lef_traj[b] = lef.bonds()
+        updater = LEFBondUpdater(sim, lef_traj, ex.get("bond_length", 0.5), ex.get("bond_wiggle", 0.2))
+        sim.add_force(updater.force)
         import pandas as pd
         pd.DataFrame(ctcf).to_csv(out / "ctcf_sites.csv", index=False)
+        progress(f"loop extrusion: {n_lefs} LEFs, {len(updater.pairs):,} distinct bonds over {eq + prod} blocks")
 
     progress(f"minimizing energy (N={N}, density={P['density']}, confinement radius {radius:.1f})")
     sim.local_energy_minimization()
 
-    eq, prod = int(D["equilibration_blocks"]), int(D["production_blocks"])
     stride = int(D.get("track_stride", 10))
     tracked = np.arange(0, N, stride)
     traj = np.zeros((prod, len(tracked), 3), np.float32)
-    lef_pos = np.zeros((prod, lef.n_lefs, 2), np.int32) if lef else None
+    lef_pos = lef_traj[eq:] if lef else None
     steps = int(D["steps_per_block"])
     full_every = int(D.get("full_every_blocks", 10))
     t0 = time.time()
     for b in range(eq + prod):
-        if lef:
-            lef.step(ex.get("lef_steps_per_block", 1))
-            _update_lef_bonds(sim, lef_force, lef.bonds(), ex.get("bond_length", 0.5), ex.get("bond_wiggle", 0.2))
+        if updater:
+            updater.step(b)
         p = b - eq
         sim.do_block(steps, save=(p >= 0 and p % full_every == 0))
         if p >= 0:
             traj[p] = sim.get_data()[tracked]
-            if lef:
-                lef_pos[p] = lef.bonds()
         if b % 100 == 0:
             progress(f"block {b}/{eq + prod}  ({(b + 1) * steps / (time.time() - t0):.0f} MD steps/s)")
     reporter.dump_data()

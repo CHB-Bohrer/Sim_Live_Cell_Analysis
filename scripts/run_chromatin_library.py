@@ -1,7 +1,7 @@
 """Generate a LIBRARY of independent chromatin simulations (resumable; one simulation at a time on the GPU).
 
-    scripts\\run.cmd python scripts\\run_chromatin_library.py --config configs\\chromatin\\chr21_loop_extrusion.yaml ^
-        --library chr21_loop_extrusion --n 100
+    scripts\\run.cmd python scripts\\run_chromatin_library.py --config configs\\chromatin\\library_loop_extrusion.yaml ^
+        --library loop_extrusion --n 100
 
 Each simulation runs in its own process (so GPU memory is released), seeds are first_seed .. first_seed+n-1, and
 finished simulations are skipped, so you can stop (Ctrl-C / close the window) and run the same command later to
