@@ -228,6 +228,8 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
                          format_func={"toy": "Invented stand-in motion (fast, no library needed)",
                                       "library": "Saved chromatin library, with my choice from the 🗂 Library tab"}.get,
                          help="The library option uses polymer simulations made on the GPU. Pick which ones in the Library tab.")
+        l_probes = st.checkbox("Model probe binding at the two loci (settings from the 🧪 Probes tab)", False, key="l_probes",
+                               help="Locus brightness then follows a stochastic model of probes binding, scanning and falling off.")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
 
@@ -290,7 +292,10 @@ if not runs:
                                                 "The chromatin library can already be generated and monitored below.")
     import chromatin_tab  # noqa: E402
     import library_tab  # noqa: E402
-    t_lib, t_chrom = st.tabs(["🗂 Library", "🧬 Chromatin"])
+    t_probe, t_lib, t_chrom = st.tabs(["🧪 Probes", "🗂 Library", "🧬 Chromatin"])
+    with t_probe:
+        import probe_tab  # noqa: E402
+        probe_tab.render(None)
     with t_lib:
         library_tab.render()
     with t_chrom:
@@ -318,8 +323,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -530,6 +535,9 @@ def chrom_frag():
     chromatin_tab.render(st)
 
 
+with tab_probe:
+    import probe_tab  # noqa: E402  (app/probe_tab.py)
+    probe_tab.render(run_path)
 with tab_lib:
     library_tab.render()
 with tab_chrom:

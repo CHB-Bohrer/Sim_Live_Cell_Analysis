@@ -68,6 +68,11 @@ loci:                       # source: library = saved polychrom simulations (nee
   wavelengths_nm: [580, 660]  # one colour channel per locus (locus0, locus1)
   photons_per_locus_s: 6000   # photons per locus per second of exposure (x exposure_s = 600 per frame)
   bleach_tau_s: 6000
+  probes:                    # stochastic probe binding at each locus (stage 1b); locus 0 = promoter, locus 1 = enhancer
+    enabled: false           # true: locus brightness = photons_per_probe_s x (probes attached) and fluctuates in time
+    photons_per_probe_s: 300 # PLACEHOLDER photons per attached probe per second of exposure
+    promoter: {n_probes: 30, k_bind: 0.05, k_scan: 0.5, k_unbind: 0.1, k_off: 0.1, capacity: null}    # rates in 1/s
+    enhancer: {n_probes: 30, k_bind: 0.03, k_scan: 0.3, k_unbind: 0.1, k_off: 0.05, capacity: null}
 
 isolation:                  # stage 5: one single-cell movie per cell ID
   sources: [truth, tracked_auto_masks]   # truth | tracked_gt_masks | tracked_auto_masks

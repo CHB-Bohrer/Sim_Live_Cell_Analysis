@@ -18,6 +18,7 @@ import tifffile
 from simlive.io.runs import run_id_for, stage_dir, write_provenance
 from simlive.stage2_cells.motion import simulate_cells
 from simlive.stage1_chromatin.library_loci import simulate_library_loci
+from simlive.stage1_chromatin.probes import simulate_probe_occupancy
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
 from simlive.stage3_microscopy.render import render_loci, render_nuclei
 from simlive.stage4_segtrack.segment import segment
@@ -36,7 +37,7 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     seed = int(cfg["seed"])
     run = Path(out_root) / run_id_for(cfg)
     s2, s3, s4, s7 = (run / n for n in ("stage2_cells", "stage3_microscopy", "stage4_segtrack", "stage7_validation"))
-    ss = np.random.SeedSequence(seed).spawn(4)  # independent streams: motion, rendering, loci, locus rendering
+    ss = np.random.SeedSequence(seed).spawn(5)  # independent streams: motion, rendering, loci, locus rendering, probes
     progress(f"Run folder: {run}")
 
     progress("Stage 2: simulating cell motion and shape")
@@ -57,8 +58,14 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
         truth = simulate(cells, cfg, np.random.default_rng(ss[2]))
         truth.to_csv(run / "stage1_chromatin" / "loci_truth.csv", index=False)
         write_provenance(run / "stage1_chromatin", cfg, seed)
+        occ = None
+        if (cfg["loci"].get("probes") or {}).get("enabled"):
+            progress("Stage 1b: stochastic probe binding at the promoter and enhancer (sets each locus' brightness)")
+            occ = simulate_probe_occupancy(cells, cfg, np.random.default_rng(ss[4]))
+            occ.to_csv(run / "stage1_chromatin" / "probe_occupancy.csv", index=False)
         for k, rk in enumerate(ss[3].spawn(int(cfg["loci"]["n_loci"]))):  # one image channel (colour) per locus
-            tifffile.imwrite(s3 / f"locus{k}.tif", _stored(render_loci(truth, cfg, np.random.default_rng(rk), locus_id=k), cfg))
+            tifffile.imwrite(s3 / f"locus{k}.tif", _stored(render_loci(truth, cfg, np.random.default_rng(rk), locus_id=k,
+                                                                       occupancy=occ), cfg))
     write_provenance(s3, cfg, seed)
 
     progress("Stage 4: segmenting")

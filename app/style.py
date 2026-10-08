@@ -52,6 +52,10 @@ h3 {{ margin-top: 2rem; }}
 .sl-badge.good {{ background:#dcfce7; color:#166534; }} .sl-badge.warn {{ background:#fef3c7; color:#92400e; }}
 .sl-badge.bad {{ background:#fee2e2; color:#991b1b; }} .sl-badge.idle {{ background:#e5e7eb; color:#374151; }}
 .sl-badge.run {{ background:{PALETTE['accent_soft']}; color:#115e59; }}
+.sl-stats {{ display:grid; grid-template-columns: repeat(2, 1fr); gap:.6rem; margin:.5rem 0 .2rem 0; }}
+.sl-stat {{ background:#fff; border:1px solid var(--line); border-radius:.7rem; padding:.55rem .8rem; }}
+.sl-stat b {{ display:block; font-size:1.35rem; letter-spacing:-0.02em; line-height:1.3; }}
+.sl-stat span {{ color:var(--muted); font-size:.8rem; }}
 .sl-mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.85rem; }}
 </style>
 """
@@ -84,3 +88,10 @@ def card(st, title: str, body: str, step: int | None = None) -> None:
 
 def badge(st, text: str, kind: str = "idle") -> None:
     st.markdown(f'<span class="sl-badge {kind}">{html.escape(text)}</span>', unsafe_allow_html=True)
+
+
+def stat_grid(st, items: list[tuple[str, str, str]]) -> None:
+    """Compact two-column grid of (label, value, tooltip) numbers; unlike st.metric it never truncates text."""
+    cells = "".join(f'<div class="sl-stat" title="{html.escape(tip)}"><b>{html.escape(val)}</b><span>{html.escape(lab)}</span></div>'
+                    for lab, val, tip in items)
+    st.markdown(f'<div class="sl-stats">{cells}</div>', unsafe_allow_html=True)

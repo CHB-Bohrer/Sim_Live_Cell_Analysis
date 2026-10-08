@@ -128,6 +128,18 @@ Choosing simulations: `library.assign_simulations(..., pool=, pinned=)`; config 
 `loci.pin: {cell_id: sim_id}`; the sidebar's loci form has a source radio (stand-in / library) that uses the Library tab's choice.
 The picker's preview uses the movie's own random stream (`SeedSequence(seed).spawn(4)[2]`), so it matches the real assignment when no cell divides.
 Untested: `status.json` writing needs a real library run (GPU).
+Probe binding model (2026-10-08): `stage1_chromatin/probes.py`, stage 1b. Each locus (locus 0 = promoter, 1 = enhancer, separate parameters)
+has N probes cycling FREE -(k_bind)-> BOUND -(k_scan)-> SCANNING -(k_off)-> FREE, plus BOUND -(k_unbind)-> FREE; optional `capacity` (binding
+sites). Exact Gillespie (numba); exact theory in `summary()` (mean, CV, dwell time, correlation time); tested against each other
+(`tests/test_probes.py`, 8 tests). `loci.probes.enabled: true` (configs loci_demo/loci_library, default false) makes locus brightness =
+`photons_per_probe_s` x exposure x probes attached (exposure-averaged) in `render_loci(..., occupancy=)`; counts saved to
+`stage1_chromatin/probe_occupancy.csv`; own seed stream ss[4]. All rates/brightness are PLACEHOLDERS (user will supply kinetics).
+Not modelled: individual-probe bleaching, probe positions, signal spread along the locus while scanning, probe pool shared between loci.
+Sweeps: `scripts/sweep_probes.py` (model only, seconds, -> `$SIMLIVE_DATA/probe_sweeps/<name>.csv`) and the 🧪 Probes tab; through the whole movie pipeline
+with `scripts/sweep.py --config configs/loci_demo.yaml --set loci.probes.enabled=true --grid loci.probes.promoter.k_off=...` (its metrics are still
+the tracking metrics only; locus-analysis metrics wait for stage 6/7b). Dashboard 🧪 Probes tab (`app/probe_tab.py`): explainer, per-locus
+parameter panel with presets, live drawing of the model with probe counts, example trace + count histogram, parameter sweep, command/sidebar
+hand-off to a movie (sidebar checkbox in the loci form). Seen only on the cloud container with no real runs.
 NOT built: MSD calibration (real nm/s), MS2 bursting, 3D z-stacks, the real stage 5 (link
 locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
 locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,

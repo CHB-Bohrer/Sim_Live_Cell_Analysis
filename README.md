@@ -89,3 +89,9 @@ Start the generator in one window (`scripts\run.cmd python scripts\run_chromatin
 the dashboard in another (`scripts\dashboard.cmd`). The **🗂 Library** tab shows live progress (refreshes every 5 s; shows "Stalled" if the PC slept).
 Below it you pick how cells get their simulation: random from the whole library (default), random from the ones you tick, or pin cell N to a given simulation.
 The same choices work in config files: `loci.sim_ids: [...]`, `loci.pin: {1: loop_extrusion_seed1003}` (see `configs/loci_library.yaml`).
+
+
+### Probe binding at the promoter and enhancer (🧪 Probes tab)
+Each locus gets a stochastic model: free probes land (k_bind), scan (k_scan) and fall off (k_off); the number attached sets the locus
+brightness, so binding noise shows up in the movie. Turn it on with `loci.probes.enabled=true` (or the sidebar checkbox in the single-cell loci form).
+Explore and sweep parameters in the tab, or from a terminal: `scripts\run.cmd python scripts\sweep_probes.py --name koff --locus promoter --grid k_off=0.02,0.05,0.1,0.2`.

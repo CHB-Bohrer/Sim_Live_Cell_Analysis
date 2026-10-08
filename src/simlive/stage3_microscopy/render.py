@@ -64,12 +64,15 @@ def _sample_texture(tex_map: np.ndarray, xn: np.ndarray, yn: np.ndarray) -> np.n
     return map_coordinates(tex_map, [to_grid(yn), to_grid(xn)], order=1, mode="nearest")
 
 
-def render_loci(loci: pd.DataFrame, cfg: dict, rng: np.random.Generator, locus_id: int = 0) -> np.ndarray:
+def render_loci(loci: pd.DataFrame, cfg: dict, rng: np.random.Generator, locus_id: int = 0,
+                occupancy: pd.DataFrame | None = None) -> np.ndarray:
     """One locus colour channel: diffraction-limited spots (Gaussian PSF integrated over each pixel).
 
     Each locus has its own colour/channel (`loci.wavelengths_nm[locus_id]`), so only rows of that locus are drawn.
     Photons per spot = loci.photons_per_locus_s x exposure x photobleaching; then Poisson shot noise and camera
     gain/read noise/offset, like the nuclear channel. Pixel centres sit at integer coordinates (pixel i spans i+-0.5).
+    With `occupancy` (stage 1 probe model, see stage1_chromatin/probes.py) the photons of a spot are instead
+    loci.probes.photons_per_probe_s x exposure x (probes attached, averaged over the exposure) x photobleaching.
     """
     from scipy.special import erf
 
@@ -83,6 +86,11 @@ def render_loci(loci: pd.DataFrame, cfg: dict, rng: np.random.Generator, locus_i
     bleach_tau = lc.get("bleach_tau_s", opt.get("bleach_tau_s"))
     bleach = np.exp(-acq["frame_interval_s"] * np.arange(T) / bleach_tau) if bleach_tau else np.ones(T)
     photons_per_spot = lc["photons_per_locus_s"] * acq["exposure_s"]
+    attached = None
+    if occupancy is not None:
+        o = occupancy[occupancy.locus_id == locus_id]
+        attached = dict(zip(zip(o.t, o.cell_id), o.mean_attached))
+        photons_per_probe = lc["probes"]["photons_per_probe_s"] * acq["exposure_s"]
     half = int(np.ceil(4 * sig)) + 1
     s2 = np.sqrt(2) * sig
 
@@ -98,7 +106,8 @@ def render_loci(loci: pd.DataFrame, cfg: dict, rng: np.random.Generator, locus_i
             ys, xs = np.arange(y0, y1), np.arange(x0, x1)
             py = 0.5 * (erf((ys + 0.5 - cy) / s2) - erf((ys - 0.5 - cy) / s2))
             px = 0.5 * (erf((xs + 0.5 - cx) / s2) - erf((xs - 0.5 - cx) / s2))
-            clean[y0:y1, x0:x1] += photons_per_spot * bleach[t] * np.outer(py, px)
+            pps = photons_per_spot if attached is None else photons_per_probe * attached[(t, r.cell_id)]
+            clean[y0:y1, x0:x1] += pps * bleach[t] * np.outer(py, px)
         photons = rng.poisson(clean + opt["background_photons"])
         electrons = photons * opt.get("quantum_efficiency", 0.8)
         img[t] = (electrons + rng.normal(0, opt["read_noise_e"], electrons.shape)) * opt.get("gain_adu_per_e", 1.0) \
