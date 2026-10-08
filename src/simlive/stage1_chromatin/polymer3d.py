@@ -17,6 +17,7 @@ Output folder (one per simulation):
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -79,6 +80,13 @@ class LEFBondUpdater:
         self._active = cur
 
 
+def _write_progress(out: Path, **kw) -> None:
+    """Atomically write progress.json (read live by the dashboard's Library monitor)."""
+    tmp = out / "progress.json.tmp"
+    tmp.write_text(json.dumps({**kw, "updated": time.time()}))
+    os.replace(tmp, out / "progress.json")
+
+
 def run_chromatin_simulation(cfg: dict, out_dir: str | Path, seed: int, progress=print) -> dict:
     from polychrom import forcekits, forces, simulation, starting_conformations
     from polychrom.hdf5_format import HDF5Reporter
@@ -127,6 +135,7 @@ def run_chromatin_simulation(cfg: dict, out_dir: str | Path, seed: int, progress
         pd.DataFrame(ctcf).to_csv(out / "ctcf_sites.csv", index=False)
         progress(f"loop extrusion: {n_lefs} LEFs, {len(updater.pairs):,} distinct bonds over {eq + prod} blocks")
 
+    _write_progress(out, phase="minimizing", block=0, total=eq + prod)
     progress(f"minimizing energy (N={N}, density={P['density']}, confinement radius {radius:.1f})")
     sim.local_energy_minimization()
 
@@ -144,6 +153,10 @@ def run_chromatin_simulation(cfg: dict, out_dir: str | Path, seed: int, progress
         sim.do_block(steps, save=(p >= 0 and p % full_every == 0))
         if p >= 0:
             traj[p] = sim.get_data()[tracked]
+        if b % 20 == 0:
+            _write_progress(out, phase="equilibration" if b < eq else "production", block=b + 1, total=eq + prod,
+                            steps_per_s=(b + 1) * steps / (time.time() - t0),
+                            blocks_per_s=(b + 1) / (time.time() - t0))
         if b % 100 == 0:
             progress(f"block {b}/{eq + prod}  ({(b + 1) * steps / (time.time() - t0):.0f} MD steps/s)")
     reporter.dump_data()
@@ -164,5 +177,6 @@ def run_chromatin_simulation(cfg: dict, out_dir: str | Path, seed: int, progress
         meta.update({"lef_count": lef.n_lefs, "mean_loop_size_kb": float(sizes.mean()),
                      "processivity_kb": ex["processivity_kb"], "separation_kb": ex["separation_kb"]})
     (out / "meta.json").write_text(json.dumps(meta, indent=2))
+    _write_progress(out, phase="done", block=eq + prod, total=eq + prod, steps_per_s=meta["md_steps_per_second"])
     write_provenance(out, cfg, int(seed))
     return meta

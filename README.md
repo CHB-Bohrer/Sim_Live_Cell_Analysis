@@ -82,3 +82,10 @@ tests/       pytest (GPU tests marked `gpu`)
 
 ### Chromatin library in the movie
 `scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml` uses saved polymer simulations for the loci (needs a finished library named in `loci.library`; `block_duration_s` is a placeholder until MSD calibration).
+
+
+### Watching a library run, and choosing simulations (🗂 Library tab)
+Start the generator in one window (`scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\library_loop_extrusion.yaml --library loop_extrusion --n 100`),
+the dashboard in another (`scripts\dashboard.cmd`). The **🗂 Library** tab shows live progress (refreshes every 5 s; shows "Stalled" if the PC slept).
+Below it you pick how cells get their simulation: random from the whole library (default), random from the ones you tick, or pin cell N to a given simulation.
+The same choices work in config files: `loci.sim_ids: [...]`, `loci.pin: {1: loop_extrusion_seed1003}` (see `configs/loci_library.yaml`).

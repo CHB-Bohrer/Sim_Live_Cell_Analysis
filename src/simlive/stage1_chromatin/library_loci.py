@@ -1,6 +1,7 @@
 """Stage 1 -> movie: loci taken from saved polymer simulations (replaces `toy_loci.py` when `loci.source: library`).
 
-Each cell gets its own simulation (`library.assign_simulations`). Its loci are monomers at `positions_kb`; their polymer
+Each cell gets its own simulation (`library.assign_simulations`: random draw from the library, optionally restricted to
+`loci.sim_ids`, with `loci.pin: {cell_id: sim_id}` forcing particular cells onto particular simulations). Its loci are monomers at `positions_kb`; their polymer
 coordinates are mapped into the nucleus frame (so they rotate / deform / move with the nucleus, as in `toy_loci`):
 
   - space: polymer coordinates are converted to TRUE distances with one calibration number, `nm_per_unit` (nm per polymer
@@ -47,7 +48,8 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
     nm_per_unit, block_s = float(lc["nm_per_unit"]), float(lc["block_duration_s"])
     dt = float(cfg["acquisition"]["frame_interval_s"])
     cell_ids = sorted(cells.cell_id.unique())
-    assigned = lib.assign_simulations(lc["library"], cell_ids, rng, replace=bool(lc.get("replace", False)))
+    assigned = lib.assign_simulations(lc["library"], cell_ids, rng, replace=bool(lc.get("replace", False)),
+                                      pool=lc.get("sim_ids"), pinned=lc.get("pin"))
     rows = []
     for cid, g in cells.sort_values("t").groupby("cell_id"):
         sim = lib.library_dir(lc["library"]) / assigned[int(cid)]

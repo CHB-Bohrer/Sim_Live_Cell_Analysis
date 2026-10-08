@@ -30,7 +30,10 @@ RUNS = DATA_ROOT / "runs"
 DEFAULT_CFG = REPO_ROOT / "configs" / "tracking_demo.yaml"
 VARIANT_LABEL = {"auto_masks": "Automatic segmentation (realistic)", "gt_masks": "Ground-truth masks (linking error only)"}
 
-st.set_page_config(page_title="Cell tracking validation", layout="wide")
+st.set_page_config(page_title="Sim Live Cell Analysis", page_icon="🧬", layout="wide")
+import style  # noqa: E402  (app/style.py: page CSS + matplotlib defaults)
+
+style.apply(st)
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -173,7 +176,8 @@ def trajectory_figure(R, variant):
 
 
 # ----------------------------------------------------------------------------- sidebar
-st.sidebar.title("Cell tracking validation")
+st.sidebar.markdown("## 🧬 Sim Live Cell Analysis")
+st.sidebar.caption("Simulated live-cell movies with known ground truth, to test tracking and locus analysis.")
 base = load_config(DEFAULT_CFG)
 
 with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
@@ -220,6 +224,10 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed")
         l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot")
         l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div")
+        l_src = st.radio("Where do the locus movements come from?", ["toy", "library"], key="l_src",
+                         format_func={"toy": "Invented stand-in motion (fast, no library needed)",
+                                      "library": "Saved chromatin library, with my choice from the 🗂 Library tab"}.get,
+                         help="The library option uses polymer simulations made on the GPU. Pick which ones in the Library tab.")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
 
@@ -262,14 +270,31 @@ if go:
         f"tracking.mode={mode}", f"nucleus_texture.contrast={tex_c}", f"nucleus_texture.n_nucleoli={n_nuc}",
         f"segmentation.method={seg_method}", f"motion.speed_scale={speed}"])
 if go_loci:
-    launch([f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
-            f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
-            f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}"],
-           config=REPO_ROOT / "configs" / "loci_demo.yaml")
+    common = [f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
+              f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
+              f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}"]
+    if l_src == "library":
+        import library_tab  # noqa: E402
+        picked = library_tab.overrides_for_movie(l_cells)
+        if not picked:
+            st.error("Open the **🗂 Library** tab first and choose a library (and optionally which simulations); "
+                     "then run again.")
+        else:
+            launch(common + picked, config=REPO_ROOT / "configs" / "loci_library.yaml")
+    else:
+        launch(common, config=REPO_ROOT / "configs" / "loci_demo.yaml")
 
 runs = list_runs()
 if not runs:
-    st.info("No runs yet. Open **New simulation** in the sidebar and press **Run simulation**.")
+    style.hero(st, "Sim Live Cell Analysis", "No movie runs yet. Open New simulation in the sidebar and press Run. "
+                                                "The chromatin library can already be generated and monitored below.")
+    import chromatin_tab  # noqa: E402
+    import library_tab  # noqa: E402
+    t_lib, t_chrom = st.tabs(["🗂 Library", "🧬 Chromatin"])
+    with t_lib:
+        library_tab.render()
+    with t_chrom:
+        st.fragment(chromatin_tab.render)(st)
     st.stop()
 names = [r.name for r in runs]
 if st.session_state.get("run") not in names:
@@ -280,12 +305,12 @@ R = load_run(str(run_path), (run_path / "stage7_validation" / "metrics.json").st
 T = len(R["gt"])
 
 # ----------------------------------------------------------------------------- headline numbers
-st.title("Cell tracking: how well did we do?")
-st.caption(f"Run `{run_path.name}` — {R['cells'].cell_id.nunique()} cell IDs, {T} frames, "
+style.hero(st, "Cell tracking: how well did we do?",
+           f"Run {run_path.name} · {R['cells'].cell_id.nunique()} cell IDs · {T} frames · "
            f"{R['cfg']['optics']['pixel_size_nm']} nm/px")
 for v in ("auto_masks", "gt_masks"):
     m = R["metrics"][v]
-    st.subheader(VARIANT_LABEL[v])
+    st.markdown(f"**{VARIANT_LABEL[v]}**")
     a, b, c, d = st.columns(4)
     a.metric("CHOTA", f"{m['CHOTAMetric']['CHOTA']:.3f}", help="Detection + trajectory association, 1 = perfect")
     b.metric("LNK", f"{m['CTCMetrics']['LNK']:.3f}", help="Cell Tracking Challenge linking score, 1 = perfect")
@@ -293,8 +318,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -497,6 +522,7 @@ with tab_cells:
     cells_frag()
 
 import chromatin_tab  # noqa: E402  (app/chromatin_tab.py)
+import library_tab  # noqa: E402  (app/library_tab.py)
 
 
 @st.fragment
@@ -504,5 +530,7 @@ def chrom_frag():
     chromatin_tab.render(st)
 
 
+with tab_lib:
+    library_tab.render()
 with tab_chrom:
     chrom_frag()

@@ -73,3 +73,16 @@ def test_library_loci_follow_the_nucleus_and_polymer(fake_library):
         simulate_library_loci(pd.DataFrame(rows), {**cfg, "loci": {**cfg["loci"], "nm_per_unit": 5000.0}}, np.random.default_rng(0))
     again = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(0))
     pd.testing.assert_frame_equal(out, again)                          # reproducible from the seed
+
+
+def test_pool_restricts_and_pin_forces(fake_library):
+    ids = sorted(lib.list_library("demo").sim_id)
+    a = lib.assign_simulations("demo", [1, 2], np.random.default_rng(0), pool=ids[:2])
+    assert set(a.values()) == set(ids[:2])
+    b = lib.assign_simulations("demo", [1, 2, 3], np.random.default_rng(0), pinned={2: ids[2]})
+    assert b[2] == ids[2] and len(set(b.values())) == 3                    # pinned sim is not handed to anyone else
+    assert b == lib.assign_simulations("demo", [1, 2, 3], np.random.default_rng(0), pinned={2: ids[2]})
+    with pytest.raises(ValueError):
+        lib.assign_simulations("demo", [1], np.random.default_rng(0), pinned={1: "nope_seed9"})
+    with pytest.raises(ValueError):
+        lib.assign_simulations("demo", [1, 2, 3], np.random.default_rng(0), pool=ids[:2])   # 3 cells, 2 sims, no replace

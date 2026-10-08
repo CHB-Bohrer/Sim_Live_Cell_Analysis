@@ -36,20 +36,41 @@ def list_library(library: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def assign_simulations(library: str, cell_ids, rng: np.random.Generator, replace: bool = False) -> dict[int, str]:
+def assign_simulations(library: str, cell_ids, rng: np.random.Generator, replace: bool = False,
+                       pool=None, pinned=None) -> dict[int, str]:
     """Give every cell its own simulation from the library (without replacement while simulations last).
 
-    Cells are independent in reality, so each should have its own independent trajectory. If there are more cells than
+    How a simulation is chosen for each cell:
+      1. `pinned` {cell_id: sim_id}: these cells get exactly that simulation (nothing random).
+      2. every other cell is drawn at random, using `rng` (so the same seed gives the same assignment), from `pool`
+         (a list of sim_ids; default = every finished simulation in the library), excluding pinned simulations.
+    Cells are independent in reality, so each should have its own trajectory. If there are more cells than available
     simulations, `replace=True` is required and some cells will share a trajectory (documented, not silent).
     """
     lib = list_library(library)
-    cell_ids = list(cell_ids)
+    cell_ids = [int(c) for c in cell_ids]
     if len(lib) == 0:
         raise ValueError(f"library '{library}' has no finished simulations")
-    if len(cell_ids) > len(lib) and not replace:
-        raise ValueError(f"{len(cell_ids)} cells but only {len(lib)} simulations; pass replace=True to reuse some")
-    picks = rng.choice(lib.sim_id.to_numpy(), size=len(cell_ids), replace=replace)
-    return {int(c): str(p) for c, p in zip(cell_ids, picks)}
+    have = set(lib.sim_id)
+    pinned = {int(k): str(v) for k, v in (pinned or {}).items() if int(k) in set(cell_ids)}
+    for sim in pinned.values():
+        if sim not in have:
+            raise ValueError(f"pinned simulation '{sim}' is not a finished simulation of library '{library}'")
+    pool = sorted(have) if not pool else sorted(str(x) for x in pool)
+    unknown = sorted(set(pool) - have)
+    if unknown:
+        raise ValueError(f"simulations not in library '{library}': {unknown}")
+    free_cells = [c for c in cell_ids if c not in pinned]
+    candidates = [x for x in pool if replace or x not in set(pinned.values())]
+    if free_cells and not candidates:
+        raise ValueError("no simulations left in the pool for the cells that are not pinned")
+    if len(free_cells) > len(candidates) and not replace:
+        raise ValueError(f"{len(free_cells)} cells but only {len(candidates)} simulations available; "
+                         "pass replace=True to reuse some")
+    picks = rng.choice(np.array(candidates), size=len(free_cells), replace=replace) if free_cells else []
+    out = {c: s for c, s in pinned.items()}
+    out.update({c: str(p) for c, p in zip(free_cells, picks)})
+    return {c: out[c] for c in cell_ids}
 
 
 def locus_trajectories(sim_path: str | Path, positions_kb) -> tuple[np.ndarray, np.ndarray]:

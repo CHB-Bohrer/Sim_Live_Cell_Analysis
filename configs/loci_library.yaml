@@ -58,6 +58,9 @@ loci:                       # source: library = saved polychrom simulations (nee
   positions_kb: [3000, 6000]     # genomic position of each locus (1 kb = 1 monomer)
   block_duration_s: 10           # PLACEHOLDER seconds per saved block until the MSD calibration exists
   nm_per_unit: 50                # PLACEHOLDER nm per polymer length unit (the calibration); region keeps its true size
+  # Which simulation does each cell get?  Default: a seeded random draw from every finished simulation in the library.
+  sim_ids: null                  # or a list, e.g. [loop_extrusion_seed1003, loop_extrusion_seed1010]: only draw from these
+  pin: null                      # or a map {cell_id: sim_id}, e.g. {1: loop_extrusion_seed1003}: force that cell onto that simulation
   replace: false                 # true = cells may share a simulation when cells > simulations
   n_loci: 2
   # toy-only: confinement_std: 0.10     # spread of locus position, in units of the nuclear radius (0.1 x 6 um = 0.6 um)
