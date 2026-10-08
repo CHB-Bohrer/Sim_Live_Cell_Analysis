@@ -118,7 +118,7 @@ identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, d
 STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per nucleus doing confined diffusion in
 the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/localize.py` (brightest-spot localizer, placeholder for
 the user's analysis). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
-Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer sphere scaled to `region_radius` (default 0.12) x nuclear radius at a random territory centre per cell, since a 10 Mb region is ~1/600 of the genome, `block_duration_s` is a PLACEHOLDER) is unit-tested with a fake library on CPU but NOT yet run end-to-end with a real library or on the GPU machine.
+Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (PLACEHOLDER 50; NOT rescaled to the nucleus) and placed at a random territory centre per cell, `block_duration_s` is a PLACEHOLDER) is unit-tested with a fake library on CPU but NOT yet run end-to-end with a real library or on the GPU machine.
 NOT built: MSD calibration (real nm/s), MS2 bursting, 3D z-stacks, the real stage 5 (link
 locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
 locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,

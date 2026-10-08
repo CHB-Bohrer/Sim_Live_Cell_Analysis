@@ -3,16 +3,17 @@
 Each cell gets its own simulation (`library.assign_simulations`). Its loci are monomers at `positions_kb`; their polymer
 coordinates are mapped into the nucleus frame (so they rotate / deform / move with the nucleus, as in `toy_loci`):
 
-  - space: the simulated region is only a small part of the genome (10 Mb of ~6 Gb diploid is ~1/600 of the DNA, i.e.
-    ~0.12 of the nuclear radius if compact), so its confinement sphere (radius R, polymer units) is scaled to
-    `region_radius` x nuclear radius and placed at a random territory centre inside the nucleus (fixed in the nucleus
-    frame, drawn per cell). The polymer is given a random rotation per cell; (x, y) is the 2D image-plane position
-    (z is kept as `zn` for later 3D work). PLACEHOLDER until the length calibration (nm per polymer unit) exists;
+  - space: polymer coordinates are converted to TRUE distances with one calibration number, `nm_per_unit` (nm per polymer
+    length unit); the region keeps whatever physical size that gives (no rescaling to the nucleus). The polymer gets a random
+    rotation per cell and is placed at a random territory centre inside the nucleus (fixed in the nucleus frame, drawn per
+    cell, region kept inside 0.7 of the nuclear radius; a cell whose nucleus is too small for the region raises an error).
+    (x, y) is the 2D image-plane position; z is kept as `zn` for later 3D work. `nm_per_unit` is a PLACEHOLDER until the
+    MSD / compaction calibration exists;
   - time: one saved block = `block_duration_s` seconds. PLACEHOLDER until the MSD calibration exists (the user will supply
     measured MSD); frame k reads block `offset + k * frame_interval_s / block_duration_s` (nearest block), where `offset`
     is random per cell so cells do not all start at the same polymer state.
 
-Output has the same columns as `toy_loci` plus `sim_id` and `zn`: t, cell_id, locus_id, xn, yn, zn, y_um, x_um, sim_id.
+Output has the same columns as `toy_loci` (xn, yn, zn in units of the nuclear radius) plus `sim_id` and `zn`: t, cell_id, locus_id, xn, yn, zn, y_um, x_um, sim_id.
 """
 from __future__ import annotations
 
@@ -30,9 +31,7 @@ from simlive.stage2_cells.motion import nucleus_to_lab_um
 def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
     lc = cfg["loci"]
     positions = list(lc["positions_kb"])
-    reg, block_s = float(lc.get("region_radius", 0.12)), float(lc["block_duration_s"])
-    if not 0 < reg < R_MAX:
-        raise ValueError(f"region_radius must be in (0, {R_MAX}) nuclear radii")
+    nm_per_unit, block_s = float(lc["nm_per_unit"]), float(lc["block_duration_s"])
     dt = float(cfg["acquisition"]["frame_interval_s"])
     cell_ids = sorted(cells.cell_id.unique())
     assigned = lib.assign_simulations(lc["library"], cell_ids, rng, replace=bool(lc.get("replace", False)))
@@ -46,9 +45,14 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
         if offset + steps.max() >= len(traj):
             raise ValueError(f"movie needs {steps.max() + 1} blocks of {assigned[int(cid)]} but it has {len(traj)}; "
                              "raise block_duration_s or simulate longer")
+        nuc_um = float(g.radius_um.min())                                       # smallest nuclear radius of this cell
+        reg = radius * nm_per_unit / 1000.0 / nuc_um                            # region radius in nuclear radii
+        if reg >= R_MAX:
+            raise ValueError(f"region radius {radius * nm_per_unit / 1000:.2f} um does not fit in a nucleus of radius "
+                             f"{nuc_um:.2f} um (limit {R_MAX} x radius); lower nm_per_unit or the region size")
         centre = rng.normal(size=3); centre *= (R_MAX - reg) * rng.random() ** (1 / 3) / np.linalg.norm(centre)
         p = Rotation.random(random_state=int(rng.integers(2**31))).apply(
-            traj[offset + steps].reshape(-1, 3)).reshape(len(steps), -1, 3) * (reg / radius) + centre
+            traj[offset + steps].reshape(-1, 3)).reshape(len(steps), -1, 3) * (nm_per_unit / 1000.0 / nuc_um) + centre
         for i, r in enumerate(g.itertuples()):
             y, x = nucleus_to_lab_um(r, p[i, :, 0], p[i, :, 1])
             for k in range(p.shape[1]):
