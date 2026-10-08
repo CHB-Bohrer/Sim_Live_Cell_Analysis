@@ -57,18 +57,19 @@ def test_library_loci_follow_the_nucleus_and_polymer(fake_library):
         (s / "meta.json").write_text(json.dumps(m))
         t = np.load(s / "tracked_positions.npy"); t[:, :, 1] = np.arange(5)[:, None]; np.save(s / "tracked_positions.npy", t)
     rows = [dict(t=k, cell_id=c, y_um=50.0, x_um=50.0, radius_um=6.0, aspect=1.0, angle_rad=0.0) for c in (1, 2) for k in range(3)]
-    cfg = {"loci": {"library": "demo", "positions_kb": [200, 500], "block_duration_s": 10, "nm_per_unit": 100.0},
+    cfg = {"loci": {"library": "demo", "positions_kb": [20, 50], "block_duration_s": 10, "nm_per_unit": 50.0},
            "acquisition": {"frame_interval_s": 10}}
     out = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(0))
     assert len(out) == 2 * 3 * 2 and out.groupby("cell_id").sim_id.nunique().eq(1).all()
     assert out.groupby("cell_id").sim_id.first().nunique() == 2        # different cells -> different simulations
     d = out[(out.cell_id == 1) & (out.locus_id == 0)].sort_values("t")
     steps_nm = np.linalg.norm(np.diff(d[["xn", "yn", "zn"]].to_numpy(), axis=0), axis=1) * 6.0 * 1000   # radius 6 um
-    assert np.allclose(steps_nm, 100.0, atol=1e-6)                     # one block = 1 polymer unit = 100 nm: TRUE distances
-    two = out[(out.cell_id == 1) & (out.t == 0)].sort_values("locus_id")   # loci at 200 and 500 kb: x differs by 300 units
+    assert np.allclose(steps_nm, 50.0, atol=1e-6)                      # one block = 1 polymer unit = 50 nm: TRUE distances
+    two = out[(out.cell_id == 1) & (out.t == 0)].sort_values("locus_id")   # loci at 20 and 50 kb: x differs by 30 units
     sep = np.linalg.norm(two[["xn", "yn", "zn"]].to_numpy()[0] - two[["xn", "yn", "zn"]].to_numpy()[1]) * 6000
-    assert np.isclose(sep, 300 * 100.0, rtol=1e-6)                     # separation in nm independent of rotation / placement
-    with pytest.raises(ValueError):                                    # region (500 units) too big for the nucleus
+    assert np.isclose(sep, 30 * 50.0, rtol=1e-6)                     # separation in nm independent of rotation / placement
+    assert (np.linalg.norm(out[["xn", "yn", "zn"]].to_numpy(), axis=1) <= 0.7 + 1e-9).all()   # loci always inside the nucleus
+    with pytest.raises(ValueError):                                    # loci excursion larger than the whole nucleus
         simulate_library_loci(pd.DataFrame(rows), {**cfg, "loci": {**cfg["loci"], "nm_per_unit": 5000.0}}, np.random.default_rng(0))
     again = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(0))
     pd.testing.assert_frame_equal(out, again)                          # reproducible from the seed
