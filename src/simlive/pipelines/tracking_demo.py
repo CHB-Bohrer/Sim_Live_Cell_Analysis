@@ -17,6 +17,7 @@ import tifffile
 
 from simlive.io.runs import run_id_for, stage_dir, write_provenance
 from simlive.stage2_cells.motion import simulate_cells
+from simlive.stage1_chromatin.library_loci import simulate_library_loci
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
 from simlive.stage3_microscopy.render import render_loci, render_nuclei
 from simlive.stage4_segtrack.segment import segment
@@ -52,7 +53,8 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     if cfg.get("loci"):
         progress("Stage 1 (stand-in): simulating loci inside each nucleus; stage 3: rendering locus channel")
         stage_dir(run, "stage1_chromatin")
-        truth = simulate_toy_loci(cells, cfg, np.random.default_rng(ss[2]))
+        simulate = simulate_library_loci if cfg["loci"].get("source") == "library" else simulate_toy_loci
+        truth = simulate(cells, cfg, np.random.default_rng(ss[2]))
         truth.to_csv(run / "stage1_chromatin" / "loci_truth.csv", index=False)
         write_provenance(run / "stage1_chromatin", cfg, seed)
         for k, rk in enumerate(ss[3].spawn(int(cfg["loci"]["n_loci"]))):  # one image channel (colour) per locus

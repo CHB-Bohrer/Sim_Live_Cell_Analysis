@@ -78,3 +78,7 @@ scripts/     run.cmd, view_run.py, make_demo_run.py, install scripts
 src/simlive/ stage1_chromatin ... stage7_validation, calibration, io
 tests/       pytest (GPU tests marked `gpu`)
 ```
+
+
+### Chromatin library in the movie
+`scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml` uses saved polymer simulations for the loci (needs a finished library named in `loci.library`; `block_duration_s` is a placeholder until MSD calibration).
