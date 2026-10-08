@@ -52,17 +52,19 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   separation ~120 kb, 10 Mb region, impermeable boundaries in the minimal model, contacts ~2-fold lower across TAD
   borders than within. polychrom example: 750 MD steps/block, bond wiggle 0.1, angle k 1.5, repulsion trunc 1.5 x 1.05,
   LEF bonds length 0.5 / wiggle 0.2. Do not quote paper numbers from memory; re-check them.
-- Status (2026-10-08): engine built and unit-tested; RE-VALIDATION IN PROGRESS. The first validation (11/11 checks
-  "passing", committed as b813cf4 and ALREADY PUSHED to GitHub) is INVALID: the 3D loop-extruder bonds were frozen at
-  their starting positions because OpenMM `updateParametersInContext` cannot change which particles a bond connects
-  (legs of a loop were ~12 apart instead of ~0.5). Fixed in commit cc9dad0 (`LEFBondUpdater` pre-registers every bond
-  and switches them by stiffness, as the polychrom example does); regression test `tests/test_chromatin_gpu.py`; the
-  validation report now also checks leg-to-leg distance. Invalid sims are kept in
-  `$SIMLIVE_DATA/chromatin/validation/_superseded_static_bonds/`. The plain-polymer results (P(s) slope -1.43, MSD
-  exponent 0.49 for the COM-subtracted case) never used loop bonds and stand. Re-running the 4 loop-extrusion
-  conditions x 2 seeds (the 2026-10-05 re-run was cut off by a PC reboot; restarted 2026-10-08). Until
-  `docs/chromatin_validation.md` is regenerated from those runs and every number re-read, do NOT quote any
-  loop-extrusion result as validated, and the report on GitHub must be replaced.
+- Status (2026-10-08): engine built, unit-tested and RE-VALIDATED (`docs/chromatin_validation.md`; 5 conditions x 2
+  seeds at 10 Mb; 11 of 12 checks pass, 1 honest CHECK). History: the FIRST validation (b813cf4) was INVALID because the
+  3D loop-extruder bonds were frozen at their starting positions (OpenMM `updateParametersInContext` cannot change which
+  particles a bond connects; loop legs were ~12 apart instead of ~0.5). Fixed in cc9dad0 (`LEFBondUpdater` pre-registers
+  every bond and switches them by stiffness, as the polychrom example does), guarded by `tests/test_chromatin_gpu.py`
+  and a leg-distance check in the report; invalid sims are in `$SIMLIVE_DATA/chromatin/validation/_superseded_static_bonds/`.
+  Corrected results: leg-to-leg distance 0.61; plain-polymer P(s) slope -1.43; loop extrusion raises P(s) 2.8x
+  (peak ~150 kb) and depletes it beyond ~1 Mb; mean loop 101 kb; designed 120-180 kb loops held ~10% of the time with
+  anchors ~35x more often in contact than a typical pair (control 0.9); locus MSD exponent 0.49 (COM-subtracted).
+  THE ONE CHECK: impermeable boundaries insulate 1.36-fold (seeds 1.42, 1.31; target >= 1.5 set in advance; controls
+  1.05 and 0.82-1.11), i.e. a real but weaker effect than the ~2-fold in Fudenberg 2016, whose quantity (between vs
+  within TADs) is not the same metric. Leaky (stall 0.99) 1.40 is indistinguishable from impermeable with 2 seeds. More
+  seeds (e.g. 5 per condition) would tighten this; do not tune the threshold to pass. The old ~1.9 was a frozen-loop artifact.
 - Lesson (bug): never re-point existing OpenMM bonds with updateParametersInContext; and sanity-check couplings
   physically (here: distance between the two legs of every loop must be ~bond length), not only by downstream summary
   statistics, which can look plausible for the wrong reason.

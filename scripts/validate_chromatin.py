@@ -272,6 +272,19 @@ def write_report(res, seeds):
     for c in checks:
         L.append(f"| {c[0]} | {c[1]} | {c[2]} | **{c[3]}** |")
     L.append("\n`CHECK` means the measured value is outside the expected range and needs a closer look (it is not hidden).\n")
+    ins_seeds = ", ".join(fmt(e["insulation_fold"]) for e in strong)
+    leaky_seeds = ", ".join(fmt(e["insulation_fold"]) for e in leaky)
+    poly_null = ", ".join(fmt(A.insulation_fold_pooled(e["map"], res["val_lef_ctcf"]["bnd"], 10)) for e in poly)
+    L.append("## Reading the insulation result\n")
+    L.append(f"Impermeable boundaries give an insulation fold of {fmt(ins)} (per simulation: {ins_seeds}), against "
+             f"{fmt(float(np.mean(ins_free)))} for loop extrusion without boundary elements and {poly_null} for the plain polymer at the "
+             f"same positions. The effect is therefore real, but it is weaker than the >= 1.5 target set before the run and "
+             f"weaker than the roughly 2-fold quoted by Fudenberg et al. (2016). That figure compares contact frequency between "
+             f"TADs with within TADs, which is not the same quantity as the across-position observed/expected fold used here, so "
+             f"the two numbers are not directly comparable. Leaky boundaries (stall 0.99) give {fmt(ins_l)} (per simulation: "
+             f"{leaky_seeds}); with two simulations per condition the seed-to-seed spread (about 0.1-0.2, the same size as the "
+             f"spread of the no-boundary controls) is too large to rank leaky against impermeable boundaries. More simulations per "
+             f"condition would narrow this. The earlier value of about 1.9 came from frozen loops and was an artifact.\n")
     L.append("## Corrections made to the analysis during validation\n")
     L.append("0. **A bug in the 3D coupling invalidated the first loop-extrusion validation.** Loop-extruder bonds were moved each block "
              "with OpenMM's `updateParametersInContext`, which cannot change which two monomers a bond connects, so the loops stayed "
