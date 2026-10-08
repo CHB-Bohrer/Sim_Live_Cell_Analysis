@@ -12,11 +12,10 @@ below true; delete stale statements rather than appending contradictions. `docs/
 (pipeline, validation logic, roadmap) whose boxes are coloured built / stand-in / planned: recolour or edit them when a
 stage's status changes (GitHub renders them; to check syntax, render the blocks with mermaid.js in a browser).
 
-**Pushing to GitHub (public repo):** commit locally as you go, but never push on your own. When something major is
-done and verified working (new stage, new feature, important result) and the user has not mentioned pushing, ASK
-them whether to push ("This works and is committed locally; push it to GitHub?"). Push immediately only if they
-say so. Before every push: run `git status -sb`, check for secrets (password/token/key strings) and large files, and
-confirm `data/runs/` and `data/sweeps/` are still ignored.
+**Pushing to GitHub (public repo):** the user said (2026-10-08) "push every time": after committing, push the working branch to
+origin WITHOUT asking (never force-push, never push to `main` directly unless told, never open a PR unless asked). Before every
+push: run `git status -sb`, check the staged diff for secrets (password/token/key strings) and large files, and confirm
+`data/runs/` and `data/sweeps/` are still ignored. If a check fails, do not push; tell the user.
 
 ## The experiment being simulated (from the user; some details still open)
 - Loci: LacO/TetO-array-like labels plus MS2 bursting; reported as three different colors. Unclear whether MS2 is a
