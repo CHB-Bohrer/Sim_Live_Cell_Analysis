@@ -52,11 +52,20 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   separation ~120 kb, 10 Mb region, impermeable boundaries in the minimal model, contacts ~2-fold lower across TAD
   borders than within. polychrom example: 750 MD steps/block, bond wiggle 0.1, angle k 1.5, repulsion trunc 1.5 x 1.05,
   LEF bonds length 0.5 / wiggle 0.2. Do not quote paper numbers from memory; re-check them.
-- Status: engine built, unit-tested and VALIDATED (`docs/chromatin_validation.md`; 5 conditions x 2 seeds at 10 Mb;
-  all 11 checks pass after analysis corrections that are documented in the report). Measured: plain polymer P(s) slope
-  -1.43; loop extrusion raises P(s) ~2.5-3x around 150 kb and depletes beyond ~1 Mb; impermeable boundaries insulate
-  1.87-fold (paper: ~2-fold), none without boundaries (0.91); designed loops (120-180 kb) are held ~10% of the time and
-  their anchors are ~50x enriched over a typical pair; locus MSD exponent 0.49; mean loop 101 kb.
+- Status (2026-10-08): engine built and unit-tested; RE-VALIDATION IN PROGRESS. The first validation (11/11 checks
+  "passing", committed as b813cf4 and ALREADY PUSHED to GitHub) is INVALID: the 3D loop-extruder bonds were frozen at
+  their starting positions because OpenMM `updateParametersInContext` cannot change which particles a bond connects
+  (legs of a loop were ~12 apart instead of ~0.5). Fixed in commit cc9dad0 (`LEFBondUpdater` pre-registers every bond
+  and switches them by stiffness, as the polychrom example does); regression test `tests/test_chromatin_gpu.py`; the
+  validation report now also checks leg-to-leg distance. Invalid sims are kept in
+  `$SIMLIVE_DATA/chromatin/validation/_superseded_static_bonds/`. The plain-polymer results (P(s) slope -1.43, MSD
+  exponent 0.49 for the COM-subtracted case) never used loop bonds and stand. Re-running the 4 loop-extrusion
+  conditions x 2 seeds (the 2026-10-05 re-run was cut off by a PC reboot; restarted 2026-10-08). Until
+  `docs/chromatin_validation.md` is regenerated from those runs and every number re-read, do NOT quote any
+  loop-extrusion result as validated, and the report on GitHub must be replaced.
+- Lesson (bug): never re-point existing OpenMM bonds with updateParametersInContext; and sanity-check couplings
+  physically (here: distance between the two legs of every loop must be ~bond length), not only by downstream summary
+  statistics, which can look plausible for the wrong reason.
 - Lessons for future analysis (do not repeat): a within/across insulation ratio is biased by distance decay (use the
   pooled across-OE fold); dots must be tested on the anchor monomers' own contact probability pooled over loops (10 kb
   bins dilute a single pair 100-fold; per-loop medians are dominated by unformed loops); boundary stall 0.9 per attempt
@@ -67,7 +76,11 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   simulation, ~18 h per 100-simulation library, ~7 GB per library at 10 Mb. The libraries have NOT been started; each
   occupies the GPU for many hours, so get the user's go-ahead and region size first. Whether 1000 equilibration blocks
   suffice is only validated at 10 Mb (P(s) stationarity 0.077 over 2000 blocks); re-check for larger regions.
-- Dashboard: the 🧬 Chromatin tab shows the validation report and any saved simulation.
+- Dashboard: the 🧬 Chromatin tab shows the validation report and any saved simulation, and has a smooth in-browser
+  player of the polymer through time (`app/chromatin_view.py` + `app/chromatin_tab.py`: whole chain at each snapshot, or
+  every block at 1-in-10 monomers; two chosen loci A/B with their distance; loop-extruder lines).
+- If a GPU run fails with `CUDA_ERROR_INVALID_VALUE` the GPU/driver was reset (e.g. after a reboot or sleep): check
+  `nvidia-smi` and `pytest -m gpu`, then simply re-run; `validate_chromatin.py run` and `run_chromatin_library.py` resume.
 - polychrom works on this machine: CUDA platform, ~7,000 steps/s for N=2,000 monomers and ~3,650 steps/s for N=10,000
   (variable Langevin, spherical confinement). In THIS polychrom version the Simulation args are `error_tol`,
   `reporters=[...]` (not `error_tolerance`/`reporter`).
@@ -92,7 +105,7 @@ confirm `data/runs/` and `data/sweeps/` are still ignored.
   functions.
 - Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
   on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
-  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Config.
+  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Cells, Chromatin, Config.
 
 ## Status (update this section every session)
 Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
@@ -185,6 +198,6 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 37 tests at 2026-10-05. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 38 tests at 2026-10-08. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
