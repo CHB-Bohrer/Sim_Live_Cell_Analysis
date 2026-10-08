@@ -57,7 +57,8 @@ loci:                       # source: library = saved polychrom simulations (nee
   library: library_10Mb          # folder under $SIMLIVE_DATA/chromatin/
   positions_kb: [3000, 6000]     # genomic position of each locus (1 kb = 1 monomer)
   block_duration_s: 10           # PLACEHOLDER seconds per saved block until the MSD calibration exists
-  fill: 0.7                      # polymer confinement sphere radius -> this fraction of the nuclear radius
+  region_radius: 0.12            # simulated region's confinement sphere radius as a fraction of the nuclear radius
+                                 # (10 Mb of ~6 Gb ~ 1/600 of the DNA -> ~0.12 if compact); placed at a random spot per cell
   replace: false                 # true = cells may share a simulation when cells > simulations
   n_loci: 2
   # toy-only: confinement_std: 0.10     # spread of locus position, in units of the nuclear radius (0.1 x 6 um = 0.6 um)

@@ -57,15 +57,18 @@ def test_library_loci_follow_the_nucleus_and_polymer(fake_library):
         (s / "meta.json").write_text(json.dumps(m))
         t = np.load(s / "tracked_positions.npy"); t[:, :, 1] = np.arange(5)[:, None]; np.save(s / "tracked_positions.npy", t)
     rows = [dict(t=k, cell_id=c, y_um=50.0, x_um=50.0, radius_um=6.0, aspect=1.0, angle_rad=0.0) for c in (1, 2) for k in range(3)]
-    cfg = {"loci": {"library": "demo", "positions_kb": [200, 500], "block_duration_s": 10, "fill": 0.7},
+    cfg = {"loci": {"library": "demo", "positions_kb": [200, 500], "block_duration_s": 10, "region_radius": 0.12},
            "acquisition": {"frame_interval_s": 10}}
     out = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(0))
     assert len(out) == 2 * 3 * 2 and out.groupby("cell_id").sim_id.nunique().eq(1).all()
     assert out.groupby("cell_id").sim_id.first().nunique() == 2        # different cells -> different simulations
-    r = np.sqrt(out.xn**2 + out.yn**2 + out.zn**2)                     # polymer radius preserved up to the fill scaling
-    assert (r > 0).all()                                               # rotation keeps |x,y,z| (checked per locus below)
+    d = out[(out.cell_id == 1)]                                        # whole region stays small and inside the nucleus
+    ext = np.linalg.norm(d[["xn", "yn", "zn"]].to_numpy(), axis=1)
+    assert ext.max() <= 0.7 + 1e-9
+    spread = d.groupby("locus_id")[["xn", "yn", "zn"]].apply(lambda g: g.max() - g.min()).to_numpy().max()
+    assert spread < 2 * 0.12                                           # a locus never wanders beyond the region sphere
     g = out[(out.cell_id == 1) & (out.locus_id == 0)].sort_values("t")
-    d = np.linalg.norm(np.diff(g[["xn", "yn", "zn"]].to_numpy(), axis=0), axis=1)
-    assert np.allclose(d, 0.7 / 500, atol=1e-9)                        # one block advanced per frame: y moves 1 unit/block
+    steps = np.linalg.norm(np.diff(g[["xn", "yn", "zn"]].to_numpy(), axis=0), axis=1)
+    assert np.allclose(steps, 0.12 / 500, atol=1e-9)                   # one block per frame: y moves 1 unit/block
     again = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(0))
     pd.testing.assert_frame_equal(out, again)                          # reproducible from the seed
