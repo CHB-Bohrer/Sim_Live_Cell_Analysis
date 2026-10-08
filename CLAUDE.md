@@ -139,6 +139,7 @@ with `scripts/sweep.py --config configs/loci_demo.yaml --set loci.probes.enabled
 the tracking metrics only; locus-analysis metrics wait for stage 6/7b). Dashboard 🧪 Probes tab (`app/probe_tab.py`): explainer, per-locus
 parameter panel with presets, live drawing of the model with probe counts, example trace + count histogram, parameter sweep, command/sidebar
 hand-off to a movie (sidebar checkbox in the loci form). Seen only on the cloud container with no real runs.
+Transcription (MS2) model: PLANNED, see `docs/PLAN_transcription.md` (rate depends on promoter-enhancer distance from the polymer sims; main risk = time-scale mismatch; open questions listed there).
 NOT built: MSD calibration (real nm/s), MS2 bursting, 3D z-stacks, the real stage 5 (link
 locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
 locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,
