@@ -1,6 +1,27 @@
 # Plan: transcription (MS2) model driven by promoter-enhancer distance
 
-Status: PLAN ONLY (2026-10-08). Nothing here is built. Decisions needing the user are marked **ASK**.
+Status (2026-10-09): BUILT (steps 1-4 of the build order; the surrogate distance process, step 5, is not). Code: `stage1_chromatin/transcription.py`,
+`library_loci.py` (distance traces), `render.py` (MS2 spots), `app/transcription_tab.py`, tests `tests/test_transcription.py`.
+
+Decisions made by the user on 2026-10-09:
+- MS2 is a third colour but the SAME colour as the nuclear NLS-GFP (MS2-MCP carries an NLS and accumulates in the nucleus). The spot is
+  rendered INTO the nuclear channel at the promoter; the user expects it to raise the background only slightly, not disturb segmentation
+  (to be tested, not assumed).
+- Promoter (locus 0) and enhancer (locus 1) are 100 kb apart: `loci.positions_kb: [5050, 4950]` in `configs/loci_library.yaml`.
+- Coupling: all four shapes are available (contact, hill, exp, none); the default is the sharp contact. Which rate depends on distance: all
+  three selectable (default k_on).
+- Numbers: from the literature (Larson lab), with the caveat below. Frame interval: must be changeable at any time and the kinetics must follow
+  (implemented as: every rate is per SECOND of real time and the model is continuous; the frame interval only sets WHEN it is sampled, and the
+  library loci are interpolated between polymer blocks, so nothing has to be re-entered. The dashboard warns when a frame interval is too
+  coarse for the chosen kinetics). If the user meant something different by "automatically change kinetic rates", revisit.
+
+Literature numbers (SEARCH-RESULT SUMMARIES ONLY; the primary papers could not be opened because PMC / eLife / Europe PMC are blocked from the
+build machine; VERIFY against the papers before relying on them): MCF7 cells, MS2 live imaging: mean ON ~5.6-7.1 min, mean OFF ~44-70 min (Cell
+Reports 2021, MYC paper, Larson co-author); TFF1 (Rodriguez et al. 2019 Cell, review by Rodriguez and Larson): ~1-2 transcripts per burst, burst
+period ~86 min, estradiol ~2x more bursts; human Pol II elongation spans ~1-6 kb/min across studies (Darzacq 2007: ~1.9-4.3), yeast (Larson 2011
+Science) ~1.2-2.8 kb/min. Defaults chosen: ON 6 min, OFF 60 min when far, 2.5 kb/min, 24 loops. The coupling strength (fold 12), initiation
+interval (30 s), cassette/gene lengths and dwell time are design choices, NOT literature values. All MS2 brightness numbers are placeholders.
+
 
 ## Goal
 A stochastic model of transcription whose rate depends on the 3D distance between the promoter and the enhancer, taken from the
@@ -62,7 +83,7 @@ on top of the nuclear channel and can disturb segmentation and tracking, which w
 - `coupling.kind: none`: no correlation between MS2 and d (null test); `contact`: correlation positive and lagged by the burst/elongation time.
 - Reproducible from the seed; looping flag raised when the movie is longer than the trajectory.
 
-## Build order
+## Build order (1-4 done 2026-10-09)
 1. `distance_trace(sim, p_kb, e_kb)` in `library.py` (+ loop-state flag), unit-tested with the fake library.
 2. `transcription.py` core + analytic tests.
 3. Wire into the pipeline (`loci.transcription.enabled`, stream ss[5]) and the MS2 spot rendering.

@@ -95,3 +95,11 @@ The same choices work in config files: `loci.sim_ids: [...]`, `loci.pin: {1: loo
 Each locus gets a stochastic model: free probes land (k_bind), scan (k_scan) and fall off (k_off); the number attached sets the locus
 brightness, so binding noise shows up in the movie. Turn it on with `loci.probes.enabled=true` (or the sidebar checkbox in the single-cell loci form).
 Explore and sweep parameters in the tab, or from a terminal: `scripts\run.cmd python scripts\sweep_probes.py --name koff --locus promoter --grid k_off=0.02,0.05,0.1,0.2`.
+
+
+### Transcription and the MS2 spot (⚡ Transcription tab)
+The promoter-enhancer distance (from a saved polymer simulation, 100 kb apart by default) sets how readily the promoter switches ON; ON promoters
+fire Pol II that carry MS2 loops, which appear as a bright spot at the promoter in the nuclear channel. Explore it step by step in the tab, or run it in
+a movie with `loci.transcription.enabled=true` (sidebar checkbox: "Model distance-dependent transcription"), e.g.
+`scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml --set loci.transcription.enabled=true --set acquisition.frame_interval_s=10`.
+All kinetic rates are per second, so any frame interval works. Sweep a setting in the tab, or across whole movies with `scripts\sweep.py --grid loci.transcription.params.fold=3,12,48`.

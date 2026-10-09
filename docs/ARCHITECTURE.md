@@ -152,7 +152,7 @@ flowchart LR
         direction TB
         n1["Wire the chromatin library into the movie:<br/>one saved simulation per cell"]:::planned
         n2["Calibrate to your measured<br/>MSD (nm and seconds)"]:::planned
-        n3["MS2 bursting, 3D z-stacks,<br/>widefield / spinning-disk / lattice"]:::planned
+        n3["3D z-stacks,<br/>widefield / spinning-disk / lattice"]:::planned
     end
     subgraph P3["Then: the real question"]
         direction TB
@@ -196,7 +196,9 @@ software versions (`provenance.json`), so a run can always be reproduced.
 
 | Stage | Folder | Main files |
 |---|---|---|
-| 1 loci (stand-in) | `stage1_chromatin/` | `loci_truth.csv`: true locus positions |
+| 1 loci (stand-in or saved polymer library) | `stage1_chromatin/` | `loci_truth.csv`: true locus positions |
+| 1b probe binding | `stage1_chromatin/` | `probe_occupancy.csv`: probes attached per locus per frame |
+| 1c transcription (MS2) | `stage1_chromatin/` | `transcription.csv` (distance, promoter state, Pol II, MS2 loops), `transcription_events.csv` (every Pol II) |
 | 2 cells | `stage2_cells/` | `cells.csv`: position, size, shape and ID of every cell in every frame |
 | 3 microscope | `stage3_microscopy/` | `nucleus.tif`, `locus0.tif`, `locus1.tif`, `labels.tif` (true cell IDs) |
 | 4 find + follow | `stage4_segtrack/` | `tracked_gt_masks.tif`, `tracked_auto_masks.tif`, `tracks_*.csv` |

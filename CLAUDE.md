@@ -18,8 +18,9 @@ push: run `git status -sb`, check the staged diff for secrets (password/token/ke
 `data/runs/` and `data/sweeps/` are still ignored. If a check fails, do not push; tell the user.
 
 ## The experiment being simulated (from the user; some details still open)
-- Loci: LacO/TetO-array-like labels plus MS2 bursting; reported as three different colors. Unclear whether MS2 is a
-  third color or one of the two loci — confirm. The nuclear NLS-GFP signal is the same color as the MS2 spots.
+- Loci: promoter (locus 0) and enhancer (locus 1), 100 kb apart (user, 2026-10-09), plus MS2 bursting at the promoter. MS2 is a THIRD
+  colour, but the SAME colour as the nuclear NLS-GFP (MS2-MCP has an NLS and accumulates in the nucleus), so MS2 spots are drawn into the
+  nuclear channel; the user expects only a small rise in background (we test, not assume, the effect on segmentation).
 - Imaging modality (widefield / spinning-disk / lattice light sheet), 2D vs 3D z-stacks, pixel size, NA, wavelengths,
   frame rate, exposure, movie length and cell count must all be easy-to-vary config parameters.
 - The user's analysis will quantify each locus's position through time; not written yet (stage 6).
@@ -139,8 +140,23 @@ with `scripts/sweep.py --config configs/loci_demo.yaml --set loci.probes.enabled
 the tracking metrics only; locus-analysis metrics wait for stage 6/7b). Dashboard 🧪 Probes tab (`app/probe_tab.py`): explainer, per-locus
 parameter panel with presets, live drawing of the model with probe counts, example trace + count histogram, parameter sweep, command/sidebar
 hand-off to a movie (sidebar checkbox in the loci form). Seen only on the cloud container with no real runs.
-Transcription (MS2) model: PLANNED, see `docs/PLAN_transcription.md` (rate depends on promoter-enhancer distance from the polymer sims; main risk = time-scale mismatch; open questions listed there).
-NOT built: MSD calibration (real nm/s), MS2 bursting, 3D z-stacks, the real stage 5 (link
+Transcription / MS2 model (2026-10-09; stage 1c): `stage1_chromatin/transcription.py` (details and the user's decisions: `docs/PLAN_transcription.md`).
+Promoter OFF -(k_on)-> ON -(k_off)-> OFF, Pol II initiation k_init while ON, Pol II ramp over the MS2 cassette then plateau until released
+(random dwell); MS2 signal = loops carried by all Pol II. The promoter-enhancer distance d(t) (3D, from the library trajectories at full block
+resolution, via `simulate_library_loci(..., return_traces=True)`; toy loci use their 2D lab distance) multiplies ONE chosen rate
+(`coupled_rate`: k_on default | k_init | k_off) by 1 + (fold-1) f(d), f = sharp contact (default) | hill | exp | none (control). ALL rates are per second
+of real time, so the frame interval can change freely (library loci are interpolated between blocks; `check_sampling` warns when too coarse).
+Exact Gillespie + exact expectations (`expected_on`, `expected_ms2`); 12 tests in `tests/test_transcription.py` (constant-distance theory, two-valued
+distance vs exact expectation, frame-interval independence, null/positive correlation with contact, interpolation, MS2 spot in the nuclear
+channel). `loci.transcription.enabled: true` (configs loci_demo/loci_library) writes `stage1_chromatin/transcription.csv` + `transcription_events.csv`
+and renders the spot at the promoter into the nuclear channel (`render_nuclei(..., spots=)`; pipeline now runs stage 1 BEFORE rendering nuclei; seed
+stream ss[5]). If the movie is longer than the saved polymer trajectory, the trajectory is repeated back and forth with a warning (correlations beyond
+its length are artificial); the planned surrogate distance process (PLAN step 5) is NOT built. Dashboard ⚡ Transcription tab (`app/transcription_tab.py`): nine
+numbered steps (sampling, distance, coupling, promoter, Pol II kymograph, MS2 signal with exact expectation, simulated microscope tiles, parameter sweep,
+hand-off to a movie + sidebar checkbox). Checked in a browser on the cloud container with a FAKE library only; the pipeline was run through stage 4
+segmentation (trackastra not installed there). LITERATURE NUMBERS ARE UNVERIFIED search-summary values (primary papers blocked from the build machine); all
+MS2 brightness, coupling strength, initiation rate and nm_per_unit / block_duration_s are placeholders.
+NOT built: MSD calibration (real nm/s), surrogate distance process for long movies, 3D z-stacks, the real stage 5 (link
 locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
 locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,
 density and frame-interval scans.

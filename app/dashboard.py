@@ -230,6 +230,9 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
                          help="The library option uses polymer simulations made on the GPU. Pick which ones in the Library tab.")
         l_probes = st.checkbox("Model probe binding at the two loci (settings from the 🧪 Probes tab)", False, key="l_probes",
                                help="Locus brightness then follows a stochastic model of probes binding, scanning and falling off.")
+        l_tx = st.checkbox("Model distance-dependent transcription: MS2 spots (settings from the ⚡ Transcription tab)", False, key="l_tx",
+                           help="Adds bright MS2 spots at the promoter in the nuclear channel; the promoter turns ON more often when the "
+                                "enhancer is close. Works best with the saved chromatin library (real distances).")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
 
@@ -292,7 +295,10 @@ if not runs:
                                                 "The chromatin library can already be generated and monitored below.")
     import chromatin_tab  # noqa: E402
     import library_tab  # noqa: E402
-    t_probe, t_lib, t_chrom = st.tabs(["🧪 Probes", "🗂 Library", "🧬 Chromatin"])
+    t_tx, t_probe, t_lib, t_chrom = st.tabs(["⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin"])
+    with t_tx:
+        import transcription_tab  # noqa: E402
+        transcription_tab.render(None)
     with t_probe:
         import probe_tab  # noqa: E402
         probe_tab.render(None)
@@ -323,8 +329,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -535,6 +541,9 @@ def chrom_frag():
     chromatin_tab.render(st)
 
 
+with tab_tx:
+    import transcription_tab  # noqa: E402  (app/transcription_tab.py)
+    transcription_tab.render(run_path)
 with tab_probe:
     import probe_tab  # noqa: E402  (app/probe_tab.py)
     probe_tab.render(run_path)
