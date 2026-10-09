@@ -250,7 +250,7 @@ def render(run_path: Path | None = None) -> None:
     kon, koff, kinit = T.rates_from_distance(p, xs)
     fig, ax = plt.subplots(figsize=(14, 2.6))
     for arr, nm_, col in ((1 / kon / 60, "mean OFF time (min)", C["on"]), (1 / koff / 60, "mean ON time (min)", C["contact"]),
-                          (1 / kinit / 60, "Pol II interval (min)", C["ms2"])):
+                          (1 / kinit / 60, "Pol II interval (min)", "#7c3aed")):
         ax.plot(xs, arr, color=col, label=nm_, lw=2)
     ax.set_yscale("log"); ax.set_xlabel("distance between promoter and enhancer (nm)"); ax.legend(fontsize=8, ncol=3)
     ax.set_title("The three timescales of the promoter as the enhancer gets closer (a flat line = does not depend on distance)", fontsize=11)

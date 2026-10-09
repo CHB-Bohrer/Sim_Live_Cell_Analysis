@@ -54,7 +54,7 @@ nucleus_texture:
 
 loci:                       # source: library = saved polychrom simulations (needs a finished library); toy = stand-in
   source: library
-  library: library_10Mb          # folder under $SIMLIVE_DATA/chromatin/
+  library: loop_extrusion          # folder under $SIMLIVE_DATA/chromatin/
   positions_kb: [5050, 4950]     # genomic position (kb, multiples of 10) of locus 0 = promoter and locus 1 = enhancer (100 kb apart)
   block_duration_s: 10           # PLACEHOLDER seconds per saved block until the MSD calibration exists
   nm_per_unit: 50                # PLACEHOLDER nm per polymer length unit (the calibration); region keeps its true size
