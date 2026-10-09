@@ -115,7 +115,29 @@ def render_loci(loci: pd.DataFrame, cfg: dict, rng: np.random.Generator, locus_i
     return img.clip(0, 65535).astype(np.float32)
 
 
-def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
+def _spot_photons(shape, spots: pd.DataFrame, sig: float) -> np.ndarray:
+    """Expected photons per pixel from point sources (columns y_px, x_px, photons): Gaussian PSF integrated over each pixel."""
+    from scipy.special import erf
+
+    ny, nx = shape
+    out = np.zeros(shape, np.float32)
+    sig = max(sig, 0.3)
+    half, s2 = int(np.ceil(4 * sig)) + 1, np.sqrt(2) * sig
+    for r in spots.itertuples():
+        y0, y1 = max(int(round(r.y_px)) - half, 0), min(int(round(r.y_px)) + half + 1, ny)
+        x0, x1 = max(int(round(r.x_px)) - half, 0), min(int(round(r.x_px)) + half + 1, nx)
+        if y1 <= y0 or x1 <= x0:
+            continue
+        ys, xs = np.arange(y0, y1), np.arange(x0, x1)
+        py = 0.5 * (erf((ys + 0.5 - r.y_px) / s2) - erf((ys - 0.5 - r.y_px) / s2))
+        px = 0.5 * (erf((xs + 0.5 - r.x_px) / s2) - erf((xs - 0.5 - r.x_px) / s2))
+        out[y0:y1, x0:x1] += r.photons * np.outer(py, px)
+    return out
+
+
+def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator, spots: pd.DataFrame | None = None):
+    """Nuclear channel (NLS-GFP). `spots` (columns t, y_um, x_um, photons) adds bright diffraction-limited spots in the SAME channel
+    (the MS2 signal: MCP-GFP-NLS is the same colour as the nuclear label), photobleached like the nucleus, before the noise."""
     opt, acq = cfg["optics"], cfg["acquisition"]
     px_um = opt["pixel_size_nm"] / 1000.0
     ny, nx = (int(round(v / px_um)) for v in cfg["geometry"]["fov_um"])
@@ -137,6 +159,7 @@ def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
 
     img = np.zeros((T, ny, nx), np.float32)
     lab = np.zeros((T, ny, nx), np.uint16)
+    spots_by_t = spots[spots.photons > 0].groupby("t") if spots is not None and len(spots) else None
     for t, grp in cells.groupby("t"):
         clean = np.zeros((ny, nx), np.float32)
         for r in grp.itertuples():
@@ -152,7 +175,11 @@ def render_nuclei(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator):
                 val = val * _sample_texture(textures[r.cell_id], xn, yn)
             clean[y0:y1, x0:x1][inside] = val[inside]
         blurred = gaussian_filter(clean, sig) if sig > 0 else clean
-        photons = rng.poisson((blurred * flux * bleach[t] + opt["background_photons"]).clip(0))
+        expected = blurred * flux * bleach[t] + opt["background_photons"]
+        if spots_by_t is not None and t in spots_by_t.groups:
+            sp = spots_by_t.get_group(t).assign(y_px=lambda d: d.y_um / px_um, x_px=lambda d: d.x_um / px_um)
+            expected = expected + bleach[t] * _spot_photons((ny, nx), sp, sig)
+        photons = rng.poisson(expected.clip(0))
         electrons = photons * opt.get("quantum_efficiency", 0.8)
         img[t] = (electrons + rng.normal(0, opt["read_noise_e"], electrons.shape)) * opt.get("gain_adu_per_e", 1.0) \
             + opt.get("offset_adu", 100.0)
