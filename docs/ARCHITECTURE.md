@@ -41,7 +41,7 @@ flowchart TD
         LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>many saved polymer simulations of a<br/>chromatin region (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
         S1["<b>Loci in each cell</b> (stage 1)<br/>Give every cell its own saved simulation<br/>and read two loci from it.<br/>NOW: still a simple toy model.<br/>NEXT: use the library (after calibration)."]:::standin
         CAL["<b>Calibration</b><br/>Make the simulated motion match<br/>your measured MSD, in nm and seconds"]:::planned
-        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into noisy images:<br/>blur, camera noise, bleaching.<br/>Nucleus in one colour, each locus in its own."]:::built
+        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images with 22<br/>switchable image-error sources (drift, chromatic shift,<br/>blur, defocus, haze, flicker, cross-talk, camera noise...).<br/>Nucleus in one colour, each locus in its own."]:::built
         TRUTH[("<b>ANSWER KEY</b><br/>true cell outlines and ID numbers<br/>true position of every locus")]:::built
         MOVIE[("<b>THE MOVIE</b><br/>nucleus images +<br/>one image per locus colour")]:::built
     end
@@ -200,7 +200,7 @@ software versions (`provenance.json`), so a run can always be reproduced.
 | 1b probe binding | `stage1_chromatin/` | `probe_occupancy.csv`: probes attached per locus per frame |
 | 1c transcription (MS2) | `stage1_chromatin/` | `transcription.csv` (distance, promoter state, Pol II, MS2 loops), `transcription_events.csv` (every Pol II) |
 | 2 cells | `stage2_cells/` | `cells.csv`: position, size, shape and ID of every cell in every frame |
-| 3 microscope | `stage3_microscopy/` | `nucleus.tif`, `locus0.tif`, `locus1.tif`, `labels.tif` (true cell IDs) |
+| 3 microscope | `stage3_microscopy/` | `nucleus.tif`, `locus0.tif`, `locus1.tif`, `labels.tif` (true cell IDs), `imaging_truth.csv`, `cells_image.csv`, `loci_truth_image.csv`, `imaging_errors.json` (see docs/IMAGE_ERRORS.md) |
 | 4 find + follow | `stage4_segtrack/` | `tracked_gt_masks.tif`, `tracked_auto_masks.tif`, `tracks_*.csv` |
 | 5 cut out cells | `stage5_cells/<who identified them>/` | one folder per cell, plus `cell_summary.csv` |
 | 6 locate loci | `stage6_analysis/<who identified them>/` | `loci_positions.csv`, `locus_distances.csv`, `scores.json` |

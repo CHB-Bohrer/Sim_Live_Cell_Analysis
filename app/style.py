@@ -53,7 +53,7 @@ h3 {{ margin-top: 2rem; }}
 .sl-badge.good {{ background:#dcfce7; color:#166534; }} .sl-badge.warn {{ background:#fef3c7; color:#92400e; }}
 .sl-badge.bad {{ background:#fee2e2; color:#991b1b; }} .sl-badge.idle {{ background:#e5e7eb; color:#374151; }}
 .sl-badge.run {{ background:{PALETTE['accent_soft']}; color:#115e59; }}
-.sl-stats {{ display:grid; grid-template-columns: repeat(2, 1fr); gap:.6rem; margin:.5rem 0 .2rem 0; }}
+.sl-stats {{ display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:.6rem; margin:.5rem 0 .2rem 0; }}
 .sl-stat {{ background:#fff; border:1px solid var(--line); border-radius:.7rem; padding:.55rem .8rem; }}
 .sl-stat b {{ display:block; font-size:1.35rem; letter-spacing:-0.02em; line-height:1.3; }}
 .sl-stat span {{ color:var(--muted); font-size:.8rem; }}
@@ -143,6 +143,33 @@ def guide(st) -> None:
                     + "</div>", unsafe_allow_html=True)
         st.caption("Typical path: (1) choose which saved simulations to use in 🗂 Library, (2) tune the models in ⚡ / 🧪, "
                    "(3) press Run in the sidebar, (4) read the results in the movie and metrics tabs. Every setting has a ⓘ tooltip.")
+
+
+GLOSSARY = {
+    "Ground truth": "What the simulation knows to be true (true cell masks and IDs, true locus positions). Real data never has it.",
+    "Segmentation": "Finding which pixels belong to each nucleus in one image.",
+    "Tracking": "Linking the nuclei found in each frame into tracks, so the same cell keeps the same ID over time.",
+    "ID switch": "A true cell that changes track ID between two frames (a swap or a broken track).",
+    "CHOTA / LNK / DET / TRA": "Cell Tracking Challenge scores: DET = detection, LNK = linking, TRA = overall tracking, CHOTA = detection and association "
+                               "combined. 1.0 is perfect.",
+    "Locus": "A labelled spot on the chromosome (here a promoter and an enhancer, each in its own colour).",
+    "MS2 spot": "A bright spot at an active gene: many fluorescent MS2 loops sit on the RNAs being made. It is in the nuclear channel's colour.",
+    "PSF": "Point spread function: the blur a microscope turns a point of light into. Sets the size of every spot.",
+    "Photon / electron / ADU": "Light arrives as photons; the sensor turns some into electrons (quantum efficiency); the camera reports counts (ADU).",
+    "Shot noise": "Random variation in the number of photons detected, unavoidable even for a steady light; grows as the square root of the signal.",
+    "Read noise": "Electronic noise added every time a pixel is read; independent of the signal.",
+    "Chromatic shift": "Different colours are imaged at slightly different positions, so two loci of different colours appear displaced.",
+    "Flat-field": "How even the illumination is across the field of view.",
+    "Library": "A collection of saved polymer (chromosome) simulations; each cell in a movie gets its own.",
+    "Polymer unit": "The length unit of the polymer simulation until it is calibrated to nanometres and seconds (still a placeholder).",
+    "Kymograph": "A picture with time along one axis and position along a line on the other.",
+}
+
+
+def glossary(st) -> None:
+    """Collapsed list of the terms used in the dashboard."""
+    with st.expander("📖 Glossary of terms", expanded=False):
+        st.markdown("\n".join(f"- **{k}**: {v}" for k, v in GLOSSARY.items()))
 
 
 def card(st, title: str, body: str, step: int | None = None) -> None:

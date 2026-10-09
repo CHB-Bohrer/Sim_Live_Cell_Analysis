@@ -4,8 +4,7 @@ Validate live-cell chromatin-locus analysis against simulations with known groun
 Pipeline: polymer dynamics (polychrom/OpenMM) -> cells + motion -> microscopy forward model ->
 segmentation + tracking (Trackastra) -> locus-to-cell linking -> analysis -> validation.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits together and the build roadmap, and
-[CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** environment, GPU tests and image viewer are
-done; stages 1-7 are not built yet.
+[CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** see the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
 
 ## Quick start (Windows)
 
@@ -107,3 +106,12 @@ All kinetic rates are per second, so any frame interval works. Sweep a setting i
 ### Sidebar checkboxes and library movies
 The single-cell loci form now really passes the **probe binding** and **transcription** settings from their tabs to the run, and library movies place the
 two loci at the positions set in the Transcription tab (default: 100 kb apart in the middle of the chosen library's region).
+
+
+### Image errors and the 🖼 Images tab
+The microscope model (stage 3) has 22 switchable sources of image error: stage drift, chromatic shift between colours, diffraction blur, focus drift, out-of-focus haze,
+exposure motion, bleaching, uneven illumination, flicker, background, autofluorescence, colour cross-talk, quantum efficiency, shot noise, dark current, hot pixels,
+cosmic rays, pixel-gain pattern, read noise, row noise, offset pattern and digitisation/saturation. They are set in the `imaging_errors:` block of the configs (all
+values are placeholders), or with the sidebar's **Image errors** controls; `imaging_errors.enabled: false` gives the simple original model. Every source is
+explained in [docs/IMAGE_ERRORS.md](docs/IMAGE_ERRORS.md) and in the dashboard's **🖼 Images** tab, which shows each recorded frame next to the ground truth that produced it
+(true masks, true locus positions, drift/focus/light level of that frame), builds an image up one error at a time, and measures how much each error matters.

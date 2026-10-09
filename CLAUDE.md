@@ -108,11 +108,11 @@ branch, not main": that was a misreading of the user's intent.)
   functions.
 - Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
   on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
-  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Cells, Chromatin, Config.
+  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Cells, Images, Transcription, Probes, Library, Chromatin, Config.
 
 ## Status (update this section every session)
 Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
-(nuclear channel + one colour channel per locus: PSF blur, noise, bleaching, per-nucleus texture + nucleoli), stage 4
+(nuclear channel + one colour channel per locus: per-nucleus texture + nucleoli and 22 switchable image-error sources, see "Image errors"), stage 4
 (Cellpose default, threshold-watershed baseline, Trackastra `general_2d` behind the `Tracker` adapter), stage 5a
 (per-cell isolation: `stage5_linking/isolate.py`, `celldata.py`), stage 7a (CTC metrics via traccuracy + own
 identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, dashboard (tabs incl. Scans, Cells).
@@ -190,7 +190,7 @@ density and frame-interval scans.
   to 0.946 at 130 nm/px); Streamlit does not reliably hot-reload helper modules (`app/cells_tab.py`), so restart the
   dashboard after editing them.
 
-## Findings so far (cell tracking only; simulated 2D nuclei, 5 seeds per setting)
+## Findings so far (cell tracking only; simulated 2D nuclei, 5 seeds per setting; measured BEFORE the image-error model, which changed little for tracking, see "Image errors")
 - Errors come from crowding x speed: touching, featureless-ish nuclei; Trackastra (greedy, divisions allowed) often
   calls a touching pair a false division. Texture inside nuclei did NOT improve linking (CHOTA 0.913 vs 0.914 with
   perfect masks) but it breaks the watershed segmenter (0.89 -> 0.78); Cellpose is unaffected.
@@ -239,10 +239,39 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 38 tests at 2026-10-08. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 66 CPU + 6 GPU tests at 2026-10-09. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
+## Image errors (stage 3, built 2026-10-09; the user asked for ALL sources of image error)
+- `stage3_microscopy/errors.py` = table `SOURCES` (22 sources: stage drift, chromatic shift, PSF, defocus, haze, exposure motion, bleaching, flat-field,
+  flicker, constant background, autofluorescence, cross-talk, QE, shot noise, dark current, hot pixels, cosmic rays, PRNU, read noise, row noise, DSNU,
+  ADC/saturation), `ORDER` (physical order), `ErrorSet` (on/off + parameters from the config block `imaging_errors:`), per-source RNG streams
+  (`rng_for(entropy, t, source, channel)`), and `Camera`. `render.py` = `Imager`: renders any single frame with any subset of sources; `render_nuclei` /
+  `render_loci` are one-channel wrappers. `docs/IMAGE_ERRORS.md` is generated from the table (`scripts/make_image_error_docs.py`; regenerate after editing it).
+- `imaging_errors.enabled: false` (or no block) = the ORIGINAL model only (baseline sources: PSF, bleaching, constant background, QE, shot noise, read noise).
+  The three configs (`tracking_demo`, `loci_demo`, `loci_library`) now have the block ON with PLACEHOLDER values. Existing tests pass
+  `imaging_errors.enabled=false`. QE is now applied before Poisson (electrons ~ Poisson(QE x photons)), slightly more noise than the old Poisson-then-scale.
+- Determinism: frame t of (config, truth, entropy) is identical whatever else is rendered, and switching a source never changes another source's noise.
+  `entropy_for(seed)` = `SeedSequence(seed).spawn(6)[1]`; the dashboard's Images tab rebuilds the Imager with `imager_for_run` and checks the rebuilt frame equals
+  the saved TIFF (it does, bit for bit).
+- Ground truth per run in `stage3_microscopy/`: `labels.tif` (moved by the drift), `imaging_truth.csv`, `cells_image.csv`, `loci_truth_image.csv` (drift-corrected
+  truth in y_um/x_um + `y_drawn_um/x_drawn_um` = where the spot is drawn, incl. chromatic shift), `imaging_errors.json`. Stage 6 localization is scored against
+  `loci_truth_image.csv` (drift cannot be known by an analysis; the chromatic shift IS counted as error). Dashboard Cells tab/trajectories use the image-space files.
+- Findings (1 seed each, placeholder error sizes; do not over-read): default hard tracking config, 3 seeds: CHOTA 0.909 with errors vs 0.903 without (id switches
+  14/23/23 vs 14/21/25) -> bright nuclear images are robust to these errors. Loci (library smoke, MS2 + probes on, seed 11): the placeholder brightest-spot
+  localizer's detection rate falls 99.9% -> 85.1% and its RMS error 0.019 -> 2.05 um (median 16 -> 52 nm, p95 5.8 um) with all errors on: hot pixels, cosmic rays and
+  the cross-talk ghost of the nucleus fool a "brightest spot in the mask" detector. That is the kind of failure this framework is meant to expose; the user's own
+  analysis will replace the placeholder.
+- Dashboard: new 🖼 Images tab (`app/images_tab.py`): (1) recorded frame per channel with true outlines / IDs / locus positions (cyan o) / drawn positions (red x) /
+  MS2 promoters, optional error-free and difference panels, and the imaging truth numbers of that frame; (2) step-by-step build-up (ground truth -> + each source in
+  physical order, same grey scale, with a table of what each adds and a brightness profile); (3) error budget (each source alone, RMS change and spot-centre shift);
+  (4) reference of every source with this run's settings and derived numbers (PSF width, Thompson localization limit, drift, chromatic misregistration). Sidebar forms
+  have "Image errors" controls (master switch + sources to switch off). The run summary, glossary, app map, intro boxes and tooltips were added the same day.
+- Gotcha: sources whose size you change at use time reuse the same unit random series (drift, focus, flicker) so results stay comparable; fixed patterns (PRNU,
+  DSNU, hot pixels, flat-field, autofluorescence) are cached on the ErrorSet instance (`E.cache`), so create variants with `ErrorSet.with_enabled`, not by mutating.
+- Not done: motion blur of the nuclei (negligible at these exposures), EMCCD gain, rolling shutter, 3D / z-stacks, per-channel focal shift, sample-dependent
+  (thick-sample) scattering, measured values for any of the 22 sources (all placeholders; ask the user for bead / dark-frame / flat-field calibration images).
 ## Dashboard walk-through findings (2026-10-09)
 - Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,
   Library/Chromatin tabs (Streamlit `AppTest` scripts + the browser), and 4 sidebar movies (toy, library+probes, library+MS2, toy+MS2) all

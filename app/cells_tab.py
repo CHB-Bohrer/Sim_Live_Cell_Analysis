@@ -76,8 +76,10 @@ def render(st, run_path: Path, cfg: dict):
     pos_f, dist_f = (run_path / "stage6_analysis" / src / n for n in ("loci_positions.csv", "locus_distances.csv"))
     pos = pd.read_csv(pos_f) if pos_f.exists() else pd.DataFrame()
     dist = pd.read_csv(dist_f) if dist_f.exists() else pd.DataFrame()
-    tr_f = run_path / "stage1_chromatin" / "loci_truth.csv"
-    truth = pd.read_csv(tr_f) if (src == "truth" and tr_f.exists()) else None
+    tr_f = run_path / "stage3_microscopy" / "loci_truth_image.csv"       # truth in image coordinates (moved by the stage drift)
+    if not tr_f.exists():
+        tr_f = run_path / "stage1_chromatin" / "loci_truth.csv"          # runs made before the image-error model
+    truth =pd.read_csv(tr_f) if (src == "truth" and tr_f.exists()) else None
     T_all = int(summ.last_t.max()) + 1
 
     st.caption(f"{len(summ)} cells isolated. Each cell is a fixed {S}×{S} px window ({S * px_um:.1f} µm) that follows "
@@ -165,10 +167,14 @@ def render(st, run_path: Path, cfg: dict):
         for q in truth[(truth.cell_id == cid) & (truth.t == t_now)].itertuples():
             axes[1].plot(q.x_um / px_um - fr_now.crop_x0, q.y_um / px_um - fr_now.crop_y0, "o", mfc="none",
                          mec="cyan", ms=14, mew=1.5)
+            if hasattr(q, "x_drawn_um") and (abs(q.x_drawn_um - q.x_um) + abs(q.y_drawn_um - q.y_um)) > 1e-9:
+                axes[1].plot(q.x_drawn_um / px_um - fr_now.crop_x0, q.y_drawn_um / px_um - fr_now.crop_y0, "x", color="red", ms=9, mew=1.5)
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)
-    st.caption("White + = locus found by the analysis" + ("; cyan ○ = true locus position (simulation)." if truth is not None
+    st.caption("White + = locus found by the analysis" + ("; cyan ○ = true locus position (simulation, drift-corrected); red × = where that colour's spot is really drawn "
+                                                  "(true position + chromatic shift: the gap between ○ and × is an error no analysis can remove "
+                                                  "without a calibration)." if truth is not None
                else ". (True positions are only available for true cell IDs.)"))
 
     if len(pos):

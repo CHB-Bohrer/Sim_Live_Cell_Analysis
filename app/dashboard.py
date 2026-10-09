@@ -60,7 +60,8 @@ def load_run(path: str, stamp: float):
     s3, s4, s7 = r / "stage3_microscopy", r / "stage4_segtrack", r / "stage7_validation"
     out = {
         "img": tifffile.imread(s3 / "nucleus.tif"), "gt": tifffile.imread(s3 / "labels.tif"),
-        "cells": pd.read_csv(r / "stage2_cells" / "cells.csv"),
+        # cells_image.csv = cells.csv moved by the stage drift (where the nuclei really are in the images); older runs have only cells.csv
+        "cells": pd.read_csv(s3 / "cells_image.csv" if (s3 / "cells_image.csv").exists() else r / "stage2_cells" / "cells.csv"),
         "cfg": yaml.safe_load((r / "stage2_cells" / "params.yaml").read_text()),
         "metrics": json.loads((s7 / "metrics.json").read_text()), "v": {},
     }
@@ -180,14 +181,28 @@ st.sidebar.markdown("## 🧬 Sim Live Cell Analysis")
 st.sidebar.caption("Simulated live-cell movies with known ground truth, to test tracking and locus analysis.")
 base = load_config(DEFAULT_CFG)
 
+def error_controls(prefix: str, default_on: bool = True) -> list[str]:
+    """Image-error switches for a form: master checkbox + a list of sources to switch off. Returns `--set` overrides."""
+    from simlive.stage3_microscopy import errors as ERR
+
+    st.markdown("**Image errors**")
+    st.caption("Real microscope images differ from the truth in ~22 ways (drift, blur, noise, camera defects…). The 🖼 Images tab shows each one.")
+    on = st.checkbox("Include realistic image errors", default_on, key=f"{prefix}_ie_on",
+                     help="Off = the simple original model (blur, bleaching, constant background, shot and read noise only). "
+                          "On = all sources below, each with its own placeholder settings from the config file.")
+    off = st.multiselect("…but switch these off", ERR.ORDER, key=f"{prefix}_ie_off", format_func=lambda s: ERR.SOURCES[s]["title"],
+                         help="Useful to see what one error does: switch it off and compare the two runs.")
+    return ["imaging_errors.enabled=" + ("true" if on else "false")] + ([f"imaging_errors.{s}.enabled=false" for s in off] if on else [])
+
+
 with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
     with st.form("sim"):
         st.caption("Defaults come from configs/tracking_demo.yaml")
         seed = st.number_input("Random seed", 0, 10_000, int(base["seed"]))
-        st.markdown("**Acquisition**")
+        st.markdown("**Acquisition**"); st.caption("How the movie is recorded: number of images and the time between them.")
         n_frames = st.slider("Frames", 10, 120, int(base["acquisition"]["n_frames"]), help="How many images the movie has. More frames = longer movie and a harder tracking problem.")
         dt = st.number_input("Frame interval (s)", 5, 3600, int(base["acquisition"]["frame_interval_s"]), help="Seconds between images. Longer intervals let cells move farther between frames, which makes linking harder.")
-        st.markdown("**Cells and motion**")
+        st.markdown("**Cells and motion**"); st.caption("How many nuclei there are and how they move, collide and divide (stage 2).")
         n_cells = st.slider("Initial cells", 3, 80, int(base["cells"]["n_cells"]), help="Cells at the start. More cells in the same field means more crowding and touching nuclei.")
         fov = st.slider("Field of view (µm, square)", 60, 400, int(base["geometry"]["fov_um"][0]), help="Side length of the square imaged area.")
         radius = st.slider("Nuclear radius (µm)", 3.0, 12.0, float(base["geometry"]["cell_radius_um"]), 0.5)
@@ -195,22 +210,23 @@ with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
         D = st.number_input("Diffusion D (µm²/s)", 0.0, 1.0, float(base["motion"]["D_um2_s"]), 0.005, format="%.4f", help="Random-walk part of the cell motion.")
         drift = st.number_input("Directed speed (µm/s)", 0.0, 0.1, float(base["motion"]["drift_um_s"]), 0.002, format="%.4f", help="Persistent, directed part of the cell motion.")
         p_div = st.slider("Division probability per cell per frame", 0.0, 0.1, float(base["cells"]["p_divide_per_frame"]), 0.005)
-        st.markdown("**Nuclear shape**")
+        st.markdown("**Nuclear shape**"); st.caption("How round, lumpy and changeable each nucleus is.")
         aspect = st.slider("Mean aspect ratio (1 = round)", 1.0, 2.5, float(base["geometry"]["shape"]["aspect_mean"]), 0.05, help="Average nucleus elongation: 1 is a circle, 2 is twice as long as wide.")
         deform = st.slider("Deformation (bumps/dents)", 0.0, 0.25, float(base["geometry"]["shape"]["deform_amp"]), 0.01)
         persist = st.slider("Shape persistence", 0.0, 0.99, float(base["geometry"]["shape"]["persistence"]), 0.01, help="How slowly the shape changes from frame to frame (high = stable shapes).")
         st.markdown("**Nuclear texture** (chromatin-like structure, fixed to each nucleus)")
         tex_c = st.slider("Texture contrast (0 = uniform blob)", 0.0, 0.8, float(base["nucleus_texture"]["contrast"]), 0.05)
         n_nuc = st.slider("Dark nucleoli per nucleus (average)", 0.0, 5.0, float(base["nucleus_texture"]["n_nucleoli"]), 0.5)
-        st.markdown("**Imaging**")
+        st.markdown("**Imaging**"); st.caption("Basic microscope and camera settings. Many more sources of image error are under Image errors below.")
         photons = st.number_input("Photons/pixel/s (brightness)", 10, 100000, int(base["optics"]["photons_per_px_s"]), 100, help="Nuclear brightness. Lower values mean a noisier image.")
         read_noise = st.number_input("Camera read noise (e-)", 0.0, 20.0, float(base["optics"]["read_noise_e"]), 0.5, help="Electrons of camera noise added to every pixel.")
         pix = st.number_input("Pixel size (nm)", 50, 2000, int(base["optics"]["pixel_size_nm"]), 10, help="Size of one pixel in the sample plane.")
         NA = st.number_input("NA", 0.3, 1.7, float(base["optics"]["NA"]), 0.05, help="Numerical aperture of the objective: sets the blur (PSF) size.")
-        st.markdown("**Segmentation and tracker**")
+        st.markdown("**Segmentation and tracker**"); st.caption("The software being tested: first find every nucleus in each image (segmentation), then follow them through time (tracking).")
         seg_method = st.selectbox("Segmentation", ["cellpose", "threshold_watershed"],
                                   0 if base["segmentation"]["method"] == "cellpose" else 1)
         mode = st.selectbox("Trackastra mode", ["greedy", "greedy_nodiv", "ilp"], 0)
+        ie_ov = error_controls("sim")
         go = st.form_submit_button("▶ Run simulation", type="primary", width="stretch")
 
 with st.sidebar.expander("🔬 New single-cell loci run"):
@@ -233,6 +249,7 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_tx = st.checkbox("Model distance-dependent transcription: MS2 spots (settings from the ⚡ Transcription tab)", False, key="l_tx",
                            help="Adds bright MS2 spots at the promoter in the nuclear channel; the promoter turns ON more often when the "
                                 "enhancer is close. Works best with the saved chromatin library (real distances).")
+        l_ie = error_controls("loci")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
 
@@ -274,11 +291,11 @@ if go:
         f"geometry.shape.persistence={persist}", f"optics.photons_per_px_s={photons}",
         f"optics.read_noise_e={read_noise}", f"optics.pixel_size_nm={pix}", f"optics.NA={NA}",
         f"tracking.mode={mode}", f"nucleus_texture.contrast={tex_c}", f"nucleus_texture.n_nucleoli={n_nuc}",
-        f"segmentation.method={seg_method}", f"motion.speed_scale={speed}"])
+        f"segmentation.method={seg_method}", f"motion.speed_scale={speed}", *ie_ov])
 if go_loci:
     common = [f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
               f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
-              f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}"]
+              f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", *l_ie]
     if l_probes:      # the checkboxes used to be ignored: nothing was passed on
         import probe_tab  # noqa: E402
         common += probe_tab.overrides_for_movie()
@@ -328,6 +345,44 @@ style.hero(st, "Cell tracking: how well did we do?",
            f"Run {run_path.name} · {R['cells'].cell_id.nunique()} cell IDs · {T} frames · "
            f"{R['cfg']['optics']['pixel_size_nm']} nm/px")
 style.guide(st)
+style.glossary(st)
+
+
+def run_summary() -> None:
+    """Plain-language description of what this run simulated, so the pictures and numbers below can be read in context."""
+    cfg, cells = R["cfg"], R["cells"]
+    lc = cfg.get("loci") or {}
+    dt, n_t = cfg["acquisition"]["frame_interval_s"], T
+    px = cfg["optics"]["pixel_size_nm"]
+    fov = cfg["geometry"]["fov_um"]
+    n0, n1 = cells[cells.t == 0].cell_id.nunique(), cells[cells.t == T - 1].cell_id.nunique()
+    divs = cells[cells.parent_id > 0].cell_id.nunique()
+    s3 = run_path / "stage3_microscopy" / "imaging_errors.json"
+    if s3.exists():
+        srcs = json.loads(s3.read_text())["sources"]
+        n_on = sum(v["on"] for v in srcs.values())
+        err_txt = f"{n_on} of {len(srcs)} sources on" if json.loads(s3.read_text()).get("master_switch") else "original model only"
+    else:
+        err_txt = "original model (older run)"
+    items = [("Nuclei", f"{n0} → {n1}", f"{n0} nuclei at the start, {n1} at the end; {divs} formed by division. Each has a persistent true ID."),
+             ("Movie", f"{n_t} frames · {n_t * dt / 60:.0f} min", f"one image every {dt:g} s"),
+             ("Field of view", f"{fov[1]:g} × {fov[0]:g} µm", f"{int(fov[1] * 1000 / px)} × {int(fov[0] * 1000 / px)} pixels of {px} nm"),
+             ("Nuclear radius", f"{cfg['geometry']['cell_radius_um']:g} µm", "typical size of a nucleus"),
+             ("Image errors", err_txt, "see the 🖼 Images tab for what each source does to the pictures")]
+    if lc:
+        src = lc.get("library") if lc.get("source") == "library" else "stand-in motion (invented)"
+        items += [("Loci", f"{lc['n_loci']} colours", f"locus 0 = promoter, locus 1 = enhancer; positions from: {src}"),
+                  ("Probe binding", "on" if (lc.get("probes") or {}).get("enabled") else "off", "stochastic probe attachment sets the locus brightness"),
+                  ("MS2 transcription", "on" if (lc.get("transcription") or {}).get("enabled") else "off",
+                   "distance-dependent bursts of transcription produce a bright spot in the nuclear channel")]
+    items += [("Segmentation", cfg["segmentation"]["method"], "finds the nuclei in every image"),
+              ("Tracker", f"{cfg['tracking']['tracker']} ({cfg['tracking']['mode']})", "links the nuclei through time")]
+    with st.expander("What was simulated in this run", expanded=True):
+        st.caption("A summary of the selected run's settings. Hover a box for details.")
+        style.stat_grid(st, items)
+
+
+run_summary()
 st.caption("Headline scores for the selected run. Both rows score the tracker against the true cell IDs: the first on masks from automatic "
            "segmentation (realistic), the second on perfect masks (isolates the linking error). 1.0 is perfect for CHOTA and LNK.")
 for v in ("auto_masks", "gt_masks"):
@@ -340,8 +395,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_img, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🖼 Images", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -367,7 +422,7 @@ def movie_tab():
     b1.button("▶", help="Next frame", on_click=lambda: st.session_state.update(frame=min(T - 1, st.session_state["frame"] + 1)))
     b2.button("⏮ Previous error", on_click=go_prev_err, disabled=not errs)
     b3.button("Next error ⏭", on_click=go_next_err, disabled=not errs, type="primary")
-    show_img = b4.checkbox("Also show raw image panel", value=False)
+    show_img = b4.checkbox("Also show raw image panel", value=False, help="Adds the camera image the segmentation and tracker actually see (nuclear channel, including all image errors). All colour channels, the truth behind them and an error-free version are in the 🖼 Images tab.")
     t = st.slider("Frame", 0, T - 1, key="frame")
     st.caption(f"{len(errs)} of {T} frames contain an error: "
                + (", ".join(map(str, errs[:40])) + (" …" if len(errs) > 40 else "") if errs else "none"))
@@ -404,6 +459,14 @@ def movie_tab():
 # ----------------------------------------------------------------------------- metrics
 @st.fragment
 def metrics_tab():
+    def words(v):
+        m = R["metrics"][v]
+        return (f"found {100 * m['CTCMetrics']['DET']:.1f}% of the nuclei (DET), linked {100 * m['CTCMetrics']['LNK']:.1f}% of the links correctly "
+                f"(LNK), and kept the right ID in {100 * m['Identity']['identity_preserved_fraction']:.1f}% of cell-frames with "
+                f"{m['Identity']['id_switches']} identity switch(es) affecting {m['Identity']['cells_with_any_switch']} of "
+                f"{m['Identity']['n_gt_cells']} cells")
+    st.info(f"**In words.** On automatic segmentation (what you would really get) the tracker {words('auto_masks')}. On perfect masks, where only "
+            f"the linking can go wrong, it {words('gt_masks')}. Any gap between the two is caused by the segmentation, not the tracker.")
     rows = {}
     for v in ("auto_masks", "gt_masks"):
         flat = {}
@@ -442,7 +505,20 @@ def traj_tab():
 with tab_cfg:
     style.intro(st, "The exact, fully resolved settings this run was made with (every default filled in), plus where its files are.",
                 "Copy it to a new file under configs/ to repeat or modify the run from a terminal. The same config and seed always give the same run.")
-    st.code(yaml.safe_dump(R["cfg"], sort_keys=False), language="yaml")
+    SECTION_HELP = {"acquisition": "frame count, frame interval and exposure time", "geometry": "field of view, nuclear size and shape",
+                    "cells": "number of cells and division", "motion": "how nuclei move", "optics": "the nuclear channel's microscope and camera",
+                    "nucleus_texture": "chromatin-like texture and dark nucleoli inside nuclei",
+                    "loci": "the two labelled loci: where their motion comes from, brightness, probes and transcription",
+                    "imaging_errors": "the sources of image error and their settings (🖼 Images tab)",
+                    "isolation": "how single-cell movies are cut out", "locus_analysis": "settings of the placeholder locus finder",
+                    "segmentation": "finding nuclei in each image", "tracking": "linking nuclei through time"}
+    st.markdown("**Settings by section**")
+    for sec, val in R["cfg"].items():
+        if isinstance(val, dict):
+            with st.expander(f"{sec}" + (f" · {SECTION_HELP[sec]}" if sec in SECTION_HELP else "")):
+                st.code(yaml.safe_dump(val, sort_keys=False), language="yaml")
+    with st.expander("The whole file (copy this to repeat the run)"):
+        st.code(yaml.safe_dump(R["cfg"], sort_keys=False), language="yaml")
     st.caption(f"Files for this run: {run_path}")
 
 # ----------------------------------------------------------------------------- scans
@@ -555,6 +631,16 @@ with tab_scan:
     scan_tab()
 with tab_cells:
     cells_frag()
+
+
+@st.fragment
+def images_frag():
+    import images_tab  # noqa: E402  (app/images_tab.py)
+    images_tab.render(st, run_path, R)
+
+
+with tab_img:
+    images_frag()
 
 import chromatin_tab  # noqa: E402  (app/chromatin_tab.py)
 import library_tab  # noqa: E402  (app/library_tab.py)
