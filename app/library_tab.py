@@ -220,12 +220,28 @@ def _picker() -> None:
         ov.append(f"loci.sim_ids=[{', '.join(pool_ids)}]")
     if pinned:
         ov.append("loci.pin={" + ", ".join(f"{k}: {v}" for k, v in pinned.items()) + "}")
+    ov += locus_overrides(lib)
     st.session_state["library_choice"] = {"library": lib, "pool": pool_ids, "pinned": pinned}   # read by the sidebar
     with st.expander("Use this in a movie"):
         st.markdown("In the sidebar, open **New single-cell loci run** and choose **Saved chromatin library, with my "
                     "choice from the Library tab**. Or from a terminal / config file:")
         st.code("scripts\\run.cmd python scripts\\run_tracking_demo.py --config configs\\loci_library.yaml " +
                 " ".join(f'--set "{o}"' for o in ov) + f" --set seed={seed} --set cells.n_cells={n_cells}", language="bash")
+
+
+def locus_overrides(library: str) -> list[str]:
+    """Locus positions (promoter, enhancer) and the nm / seconds placeholders for a library movie. Uses what was set in the
+    ⚡ Transcription tab if that tab looked at the same library; otherwise a pair 100 kb apart in the middle of THIS library's
+    region (the config's fixed 5050/4950 kb only fits a 10 Mb region: in a smaller one both loci landed on the last monomer)."""
+    c = st.session_state.get("tx_movie_loci")
+    if c and c["library"] == library:
+        pos, nm, blk = c["positions_kb"], c["nm_per_unit"], c["block_duration_s"]
+    else:
+        df = L.list_library(library)
+        n = int(df.n_monomers.min()) if len(df) else 10_000
+        mid = (n // 2) // 10 * 10
+        pos, nm, blk = [mid + 50, mid - 50], 50, 10
+    return [f"loci.positions_kb=[{pos[0]}, {pos[1]}]", f"loci.nm_per_unit={nm:g}", f"loci.block_duration_s={blk:g}"]
 
 
 def overrides_for_movie(n_cells: int) -> list[str] | None:
@@ -240,7 +256,7 @@ def overrides_for_movie(n_cells: int) -> list[str] | None:
         ov.append(f"loci.sim_ids=[{', '.join(c['pool'])}]")
     if c["pinned"]:
         ov.append("loci.pin={" + ", ".join(f"{k}: {v}" for k, v in c["pinned"].items()) + "}")
-    return ov
+    return ov + locus_overrides(c["library"])
 
 
 def render() -> None:

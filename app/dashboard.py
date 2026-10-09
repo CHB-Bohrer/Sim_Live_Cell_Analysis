@@ -245,7 +245,8 @@ def launch(overrides, config=None):
         cmd += ["--set", o]
     with st.status("Running simulation…", expanded=True) as status:
         proc = subprocess.Popen(cmd, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                env={**os.environ, "PYTHONUNBUFFERED": "1"})
+                                encoding="utf-8", errors="replace",   # default cp1252 crashed the page on any non-ASCII output
+                                env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"})
         log, run_name = [], None
         for line in proc.stdout:
             line = line.rstrip()
@@ -278,6 +279,12 @@ if go_loci:
     common = [f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
               f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
               f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}"]
+    if l_probes:      # the checkboxes used to be ignored: nothing was passed on
+        import probe_tab  # noqa: E402
+        common += probe_tab.overrides_for_movie()
+    if l_tx:
+        import transcription_tab  # noqa: E402
+        common += transcription_tab.overrides_for_movie()
     if l_src == "library":
         import library_tab  # noqa: E402
         picked = library_tab.overrides_for_movie(l_cells)

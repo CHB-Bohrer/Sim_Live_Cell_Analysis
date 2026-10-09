@@ -86,3 +86,14 @@ def test_pool_restricts_and_pin_forces(fake_library):
         lib.assign_simulations("demo", [1], np.random.default_rng(0), pinned={1: "nope_seed9"})
     with pytest.raises(ValueError):
         lib.assign_simulations("demo", [1, 2, 3], np.random.default_rng(0), pool=ids[:2])   # 3 cells, 2 sims, no replace
+
+
+def test_random_rotation_is_a_proper_rotation():
+    from simlive.stage1_chromatin.library_loci import _random_rotation
+    rng = np.random.default_rng(3)
+    for _ in range(20):
+        R = _random_rotation(rng)
+        assert np.allclose(R @ R.T, np.eye(3), atol=1e-12) and np.isclose(np.linalg.det(R), 1.0)
+    # mean of many random rotations applied to a fixed vector is ~0 (uniform over the sphere)
+    v = np.mean([_random_rotation(rng)[:, 0] for _ in range(4000)], axis=0)
+    assert np.abs(v).max() < 0.05

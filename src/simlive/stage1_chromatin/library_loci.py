@@ -24,12 +24,24 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.spatial.transform import Rotation
 
 from simlive.stage1_chromatin import library as lib
 from simlive.stage1_chromatin.toy_loci import R_MAX
 from simlive.stage1_chromatin.transcription import pingpong
 from simlive.stage2_cells.motion import nucleus_to_lab_um
+
+
+def _random_rotation(rng: np.random.Generator) -> np.ndarray:
+    """Uniformly random 3x3 rotation matrix (from a normalised Gaussian quaternion). Not scipy's Rotation: its `.apply` loads a
+    second OpenMP runtime (libiomp5md + libomp), after which `import torch` in the tracking step fails with WinError 127 on shm.dll
+    (every library-source movie crashed at tracking until this was replaced). The same holds for ANY numpy matmul (`@`, dot):
+    numpy here is MKL-linked and the first BLAS call loads those runtimes, so the code that runs before the tracker must use
+    elementwise arithmetic (the loci are applied with a broadcast sum for that reason)."""
+    q = rng.normal(size=4)
+    w, x, y, z = q / np.linalg.norm(q)
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
 def _territory_centre(p: np.ndarray, rng: np.random.Generator, cell_id, tries: int = 1000) -> np.ndarray:
@@ -75,8 +87,7 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
         w = (tau - i0)[:, None, None]
         pos = (1 - w) * ext[i0] + w * ext[i0 + 1]                               # linear interpolation between blocks
         nuc_um = float(g.radius_um.min())                                       # smallest nuclear radius of this cell
-        p = Rotation.random(random_state=int(rng.integers(2**31))).apply(
-            pos.reshape(-1, 3)).reshape(len(tau), -1, 3) * (nm_per_unit / 1000.0 / nuc_um)  # nuclear radii
+        p = (pos[..., None, :] * _random_rotation(rng)).sum(-1) * (nm_per_unit / 1000.0 / nuc_um)   # nuclear radii; no BLAS call here
         p += _territory_centre(p, rng, cid)
         for i, r in enumerate(g.itertuples()):
             y, x = nucleus_to_lab_um(r, p[i, :, 0], p[i, :, 1])

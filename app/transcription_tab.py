@@ -70,7 +70,7 @@ def _distance_source(dt: float, minutes: float):
     libs = library_tab.libraries()
     opts = (["library"] if libs else []) + ["standin"]
     src = st.radio("Where does the distance come from?", opts, horizontal=True, key="tx_src",
-                   format_func={"library": "A saved polymer simulation", "standin": "Invented stand-in (no library yet)"}.get)
+                   format_func={"library": "A saved polymer simulation", "standin": "Invented stand-in (not from the polymer simulations)"}.get)
     if src == "library":
         c = st.columns(4)
         lib = c[0].selectbox("Library", libs, key="tx_lib")
@@ -79,14 +79,17 @@ def _distance_source(dt: float, minutes: float):
             st.warning("This library has no finished simulations yet.")
             return None
         sim = c[1].selectbox("Simulation", df.sort_values("seed").sim_id.tolist(), key="tx_sim")
-        prom = int(c[2].number_input("Promoter position (kb)", 0, 100000, 5050, 10, key="tx_prom"))
-        enh = int(c[3].number_input("Enhancer position (kb)", 0, 100000, 4950, 10, key="tx_enh"))
+        n_kb = int(df[df.sim_id == sim].n_monomers.iloc[0])      # 1 monomer = 1 kb; defaults sit 100 kb apart in the middle of THIS region
+        mid = (n_kb // 2) // 10 * 10
+        prom = int(c[2].number_input(f"Promoter position (kb, 0-{n_kb - 1})", 0, n_kb - 1, mid + 50, 10, key=f"tx_prom_{n_kb}"))
+        enh = int(c[3].number_input(f"Enhancer position (kb, 0-{n_kb - 1})", 0, n_kb - 1, mid - 50, 10, key=f"tx_enh_{n_kb}"))
         c = st.columns(3)
         nm = float(c[0].number_input("nm per polymer unit", 1.0, 1000.0, 50.0, 5.0, key="tx_nm",
                                      help="PLACEHOLDER until the MSD calibration exists."))
         blk = float(c[1].number_input("Seconds per saved block", 0.01, 3600.0, 10.0, 1.0, key="tx_blk",
                                       help="PLACEHOLDER until the MSD calibration exists."))
         c[2].metric("Genomic separation", f"{abs(prom - enh)} kb")
+        st.session_state["tx_movie_loci"] = {"library": lib, "positions_kb": [prom, enh], "nm_per_unit": nm, "block_duration_s": blk}   # read by the sidebar
         traj, beads = L.locus_trajectories(df[df.sim_id == sim].path.iloc[0], [prom, enh])
         d = np.linalg.norm(traj[:, 0] - traj[:, 1], axis=1) * nm
         st.caption(f"Monomers actually used: promoter {beads[0]} kb, enhancer {beads[1]} kb (positions snap to the stored 10 kb grid). "

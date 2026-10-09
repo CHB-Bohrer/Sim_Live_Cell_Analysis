@@ -69,8 +69,9 @@ def apply(st) -> None:
         "axes.edgecolor": PALETTE["line"], "axes.labelcolor": PALETTE["ink"], "text.color": PALETTE["ink"],
         "xtick.color": PALETTE["muted"], "ytick.color": PALETTE["muted"],
         "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.color": "#e8ece9",
-        "grid.linewidth": 0.8, "axes.axisbelow": True, "axes.titlesize": 13, "axes.titleweight": "bold",
-        "axes.titlelocation": "left", "axes.labelsize": 11, "legend.frameon": False, "font.size": 10.5,
+        "grid.linewidth": 0.8, "axes.axisbelow": True, "axes.titlesize": 17, "axes.titleweight": "bold",
+        "axes.titlelocation": "left", "axes.labelsize": 14, "legend.frameon": False, "font.size": 14,
+        "xtick.labelsize": 13, "ytick.labelsize": 13, "legend.fontsize": 12,   # figures are ~14 in wide shown at ~70 dpi: small fonts were unreadable
         "axes.prop_cycle": mpl.cycler(color=CYCLE), "lines.linewidth": 2.0,
     })
 
