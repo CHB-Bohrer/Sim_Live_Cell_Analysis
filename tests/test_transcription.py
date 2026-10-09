@@ -149,7 +149,8 @@ def test_ms2_spot_appears_in_the_nuclear_channel_and_scales_with_loops():
     from simlive.stage3_microscopy.render import render_nuclei
     cfg = load_config(REPO_ROOT / "configs" / "loci_demo.yaml", ["geometry.fov_um=[20, 20]", "acquisition.n_frames=2",
                                                                 "cells.n_cells=1", "optics.read_noise_e=0", "optics.bleach_tau_s=null",
-                                                                "optics.photons_per_px_s=0", "optics.background_photons=0"])
+                                                                "optics.photons_per_px_s=0", "optics.background_photons=0",
+                                                                "imaging_errors.enabled=false"])
     cells = pd.DataFrame({"t": [0, 1], "cell_id": 1, "y_um": 10.0, "x_um": 10.0, "radius_um": 5.0, "aspect": 1.0, "angle_rad": 0.0,
                           "bound_radius_um": 5.5, "parent_id": 0, "amp2": 0.0, "phase2": 0.0, "amp3": 0.0, "phase3": 0.0,
                           "amp4": 0.0, "phase4": 0.0, "amp5": 0.0, "phase5": 0.0})

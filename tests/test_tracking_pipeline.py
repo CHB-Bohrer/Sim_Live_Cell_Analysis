@@ -10,7 +10,7 @@ CFG = REPO_ROOT / "configs" / "tracking_demo.yaml"
 
 
 def small_cfg(**over):
-    return load_config(CFG, ["acquisition.n_frames=12", "cells.n_cells=8", *[f"{k}={v}" for k, v in over.items()]])
+    return load_config(CFG, ["acquisition.n_frames=12", "cells.n_cells=8", "imaging_errors.enabled=false", *[f"{k}={v}" for k, v in over.items()]])
 
 
 def test_motion_is_deterministic_and_collision_free():

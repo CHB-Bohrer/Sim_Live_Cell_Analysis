@@ -14,7 +14,8 @@ from simlive.stage6_analysis.localize import localize_loci, locus_distances, sco
 
 CFG = REPO_ROOT / "configs" / "loci_demo.yaml"
 SMALL = ["geometry.fov_um=[30, 30]", "geometry.cell_radius_um=3.0", "cells.n_cells=3", "acquisition.n_frames=8",
-         "motion.speed_scale=0.3", "loci.photons_per_locus_s=8000"]
+         "motion.speed_scale=0.3", "loci.photons_per_locus_s=8000",
+         "imaging_errors.enabled=false"]
 
 
 @pytest.fixture(scope="module")

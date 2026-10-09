@@ -21,7 +21,7 @@ from simlive.stage1_chromatin.library_loci import simulate_library_loci
 from simlive.stage1_chromatin.probes import simulate_probe_occupancy
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
 from simlive.stage1_chromatin.transcription import ms2_spots, simulate_transcription, traces_from_truth
-from simlive.stage3_microscopy.render import render_loci, render_nuclei
+from simlive.stage3_microscopy.render import Imager, cells_in_image, entropy_for, truth_in_image
 from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
@@ -70,16 +70,24 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
             tx_events.to_csv(run / "stage1_chromatin" / "transcription_events.csv", index=False)
             spots = ms2_spots(tx, truth, cfg)
 
-    progress("Stage 3: rendering nuclear channel" + (" (with MS2 spots in the same channel)" if spots is not None else ""))
     stage_dir(run, "stage3_microscopy")
-    img, lab = render_nuclei(cells, cfg, np.random.default_rng(ss[1]), spots=spots)
-    tifffile.imwrite(s3 / "nucleus.tif", _stored(img, cfg))
-    tifffile.imwrite(s3 / "labels.tif", lab)
+    imager = Imager(cfg, cells, truth, spots, occ, entropy_for(seed))
+    on = imager.E.enabled_ids()
+    progress("Stage 3: rendering " + " + ".join(imager.channels) + (" (MS2 spots are in the nuclear channel)" if spots is not None else "")
+             + f" with {len(on)} image-error sources on: {', '.join(on)}")
+    mv = imager.render_movie(progress=progress, dtype=np.uint16 if cfg.get("image_dtype") == "uint16" else np.float32)
+    for name, arr in mv["images"].items():                                   # one image channel (colour) per locus + the nucleus
+        tifffile.imwrite(s3 / f"{name}.tif", arr, photometric="minisblack")
+    tifffile.imwrite(s3 / "labels.tif", mv["labels"], photometric="minisblack")
+    # ground truth of the imaging itself: what drift / focus / power / blur each frame really had, and the truth in image coordinates
+    it = imager.imaging_truth()
+    it.to_csv(s3 / "imaging_truth.csv", index=False)
+    px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
+    cells_in_image(cells, it, px_um).to_csv(s3 / "cells_image.csv", index=False)
     if truth is not None:
-        progress("Stage 3: rendering locus channels")
-        for k, rk in enumerate(ss[3].spawn(int(cfg["loci"]["n_loci"]))):  # one image channel (colour) per locus
-            tifffile.imwrite(s3 / f"locus{k}.tif", _stored(render_loci(truth, cfg, np.random.default_rng(rk), locus_id=k,
-                                                                       occupancy=occ), cfg))
+        truth_in_image(truth, it, px_um, imager.static_truth()["channel_shift_px"]).to_csv(s3 / "loci_truth_image.csv", index=False)
+    (s3 / "imaging_errors.json").write_text(json.dumps(imager.static_truth(), indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+    del mv
     write_provenance(s3, cfg, seed)
 
     progress("Stage 4: segmenting")
@@ -134,7 +142,8 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress) -> None:
     px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
     images = {"nucleus": s3 / "nucleus.tif",
               **{f"locus{k}": s3 / f"locus{k}.tif" for k in range(int(cfg["loci"]["n_loci"]))}}
-    truth = pd.read_csv(run / "stage1_chromatin" / "loci_truth.csv")
+    ti = s3 / "loci_truth_image.csv"        # truth moved by the stage drift (a localizer cannot know it); chromatic shift stays an error
+    truth = pd.read_csv(ti if ti.exists() else run / "stage1_chromatin" / "loci_truth.csv")
     ana = cfg.get("locus_analysis", {})
     scores = {}
     for src in sources:

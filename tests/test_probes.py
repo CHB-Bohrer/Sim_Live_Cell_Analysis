@@ -72,11 +72,12 @@ def test_locus_brightness_follows_attached_probes():
     from simlive.stage3_microscopy.render import render_loci
     cfg = load_config(REPO_ROOT / "configs" / "loci_demo.yaml", ["geometry.fov_um=[10, 10]", "acquisition.n_frames=2",
                                                                 "optics.read_noise_e=0", "optics.background_photons=0",
-                                                                "loci.bleach_tau_s=null", "loci.probes.enabled=true"])
+                                                                "loci.bleach_tau_s=null", "loci.probes.enabled=true", "loci.probes.photons_per_probe_s=5000",
+                                                                "imaging_errors.enabled=false"])
     loci = pd.DataFrame({"t": [0, 1], "cell_id": [1, 1], "locus_id": [0, 0], "y_um": [5.0, 5.0], "x_um": [5.0, 5.0]})
     occ = pd.DataFrame({"t": [0, 1], "cell_id": [1, 1], "locus_id": [0, 0], "mean_attached": [10.0, 20.0]})
     img = render_loci(loci, cfg, np.random.default_rng(0), 0, occupancy=occ)
     signal = (img - cfg["optics"]["offset_adu"]).reshape(2, -1).sum(1)
-    assert abs(signal[1] / signal[0] - 2.0) < 0.1                       # shot noise only (~1% at these counts)
-    expect = 300 * cfg["acquisition"]["exposure_s"] * 10 * cfg["optics"]["quantum_efficiency"]
+    assert abs(signal[1] / signal[0] - 2.0) < 0.25                      # shot noise only (~3% per frame at these counts)
+    expect = 5000 * cfg["acquisition"]["exposure_s"] * 10 * cfg["optics"]["quantum_efficiency"]
     assert abs(signal[0] - expect) < 0.1 * expect

@@ -110,3 +110,40 @@ tracking:
   tracker: trackastra
   model: general_2d
   mode: greedy
+
+
+
+
+# Sources of image error (stage 3). Each has its own switch; `enabled: false` at the top turns the whole block off and leaves only the
+# original model (blur, bleaching, constant background, QE, shot noise, read noise). All values are PLACEHOLDERS until measured on the
+# real microscope; see src/simlive/stage3_microscopy/errors.py (or the dashboard's Images tab) for what each one does.
+imaging_errors:
+  enabled: true
+  # ---- Sample position
+  stage_drift: {enabled: true, drift_px_per_frame: 0.15, jitter_px: 0.05}
+  chromatic_shift: {enabled: true, shift_px: {"locus0": [0.25, -0.15], "locus1": [-0.3, 0.2]}}
+  # ---- Optics
+  psf_blur: {enabled: true}          # Diffraction blur (PSF)
+  defocus: {enabled: true, rms_um: 0.1, memory: 0.9, immersion_n: 1.33}
+  exposure_motion: {enabled: true, locus_sigma_nm: 25.0}
+  haze: {enabled: true, fraction: 0.06, sigma_um: 2.5}
+  # ---- Illumination
+  bleaching: {enabled: true}          # Photobleaching
+  flat_field: {enabled: true, vignette: 0.15, tilt: 0.03}
+  flicker: {enabled: true, cv: 0.01, memory: 0.8}
+  # ---- Background
+  background: {enabled: true}          # Constant background light
+  autofluorescence: {enabled: true, photons: 6.0, cv: 0.3, correlation_um: 10.0}
+  crosstalk: {enabled: true, pairs: [["nucleus", "locus0", 0.02], ["locus0", "locus1", 0.02]]}
+  # ---- Detection
+  qe: {enabled: true}          # Quantum efficiency
+  shot_noise: {enabled: true, excess_noise_factor: 1.0}
+  dark_current: {enabled: true, e_per_s: 0.2}
+  # ---- Camera electronics
+  hot_pixels: {enabled: true, fraction: 0.0003, e_per_frame: 40.0}
+  cosmic_rays: {enabled: true, rate_per_frame: 0.05, e: 3000.0}
+  prnu: {enabled: true, cv: 0.01}
+  read_noise: {enabled: true, pixel_cv: 0.25}
+  row_noise: {enabled: true, adu: 0.6}
+  dsnu: {enabled: true, adu: 1.0}
+  adc: {enabled: true, bit_depth: 16, full_well_e: 30000.0}
