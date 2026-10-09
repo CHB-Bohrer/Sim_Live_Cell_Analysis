@@ -25,6 +25,9 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
     h, w = frames[0].shape[:2]
     uris = [_jpeg_b64(f) for f in frames]
     labels = labels or [f"frame {i}" for i in range(len(frames))]
+    # The speed menu must contain `fps`: with fps=8 and no "8" option the select's value was "" -> NaN delay -> it never played.
+    speeds = sorted({2, 5, 10, 20, 40, int(fps)})
+    options = "".join(f'<option value="{s}">{s} fps</option>' for s in speeds)
     html = f"""
 <div style="font-family:system-ui,sans-serif;color:#444">
   <img id="im{key}" style="width:100%;display:block;border-radius:4px;background:#000" />
@@ -32,10 +35,7 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
     <button id="pp{key}" style="padding:4px 14px;font-size:14px;cursor:pointer">&#9654; Play</button>
     <input id="sl{key}" type="range" min="0" max="{len(frames) - 1}" value="0" style="flex:1" />
     <span id="lb{key}" style="min-width:210px;font-size:13px"></span>
-    <select id="fp{key}" style="font-size:13px">
-      <option value="2">2 fps</option><option value="5">5 fps</option>
-      <option value="10">10 fps</option><option value="20">20 fps</option><option value="40">40 fps</option>
-    </select>
+    <select id="fp{key}" style="font-size:13px">{options}</select>
   </div>
 </div>
 <script>
@@ -48,9 +48,9 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
   let i = 0, playing = false, last = 0;
   F.forEach(u => {{ const p = new Image(); p.src = u; }});          // preload every frame
   function show(k) {{ i = k; im.src = F[k]; sl.value = k; lb.textContent = L[k]; }}
-  function tick(ts) {{
-    if (playing && ts - last >= 1000 / parseFloat(fp.value)) {{ last = ts; show((i + 1) % F.length); }}
-    requestAnimationFrame(tick);
+  function tick() {{          // a timer, not requestAnimationFrame: rAF is paused in hidden / embedded panes
+    const ts = performance.now();
+    if (playing && ts - last >= 1000 / (parseFloat(fp.value) || {int(fps)})) {{ last = ts; show((i + 1) % F.length); }}
   }}
   pp.onclick = () => {{ playing = !playing; pp.innerHTML = playing ? "&#10074;&#10074; Pause" : "&#9654; Play"; }};
   sl.oninput = () => {{ playing = false; pp.innerHTML = "&#9654; Play"; show(parseInt(sl.value)); }};
@@ -59,7 +59,7 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
     if (e.key === "ArrowLeft") show(Math.max(i - 1, 0));
     if (e.key === " ") {{ e.preventDefault(); pp.click(); }}
   }});
-  show(0); requestAnimationFrame(tick);
+  show(0); setInterval(tick, 20);
 }})();
 </script>"""
     height = int(column_width_px * h / w) + 70
