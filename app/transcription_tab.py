@@ -146,16 +146,16 @@ def _coupling_inputs() -> dict:
 
 def _kinetics_inputs() -> dict:
     c = st.columns(3)
-    off = c[0].number_input("Mean OFF time when the enhancer is far (min)", 0.1, 10000.0, 60.0, 5.0, key="tx_off")
-    on = c[1].number_input("Mean ON time (min)", 0.1, 1000.0, 6.0, 0.5, key="tx_on")
-    ini = c[2].number_input("While ON, a Pol II starts every (s)", 1.0, 3600.0, 30.0, 5.0, key="tx_ini")
+    off = c[0].number_input("Mean OFF time when the enhancer is far (min)", 0.1, 10000.0, 50.0, 5.0, key="tx_off")
+    on = c[1].number_input("Mean ON time (min)", 0.1, 1000.0, 16.0, 0.5, key="tx_on")
+    ini = c[2].number_input("While ON, a Pol II starts every (s)", 1.0, 3600.0, 600.0, 30.0, key="tx_ini")
     c = st.columns(5)
     out = {"k_on": 1 / (off * 60.0), "k_off": 1 / (on * 60.0), "k_init": 1 / ini}
     out["elongation_kb_min"] = float(c[0].number_input("Pol II speed (kb/min)", 0.2, 20.0, 2.5, 0.5, key="tx_v", help=T.HELP["elongation_kb_min"]))
     out["cassette_kb"] = float(c[1].number_input("MS2 cassette (kb)", 0.0, 20.0, 1.3, 0.1, key="tx_cas", help=T.HELP["cassette_kb"]))
     out["gene_kb"] = float(c[2].number_input("Gene after cassette (kb)", 0.0, 200.0, 5.0, 0.5, key="tx_gene", help=T.HELP["gene_kb"]))
     out["n_loops"] = int(c[3].number_input("MS2 loops", 1, 200, 24, 1, key="tx_loops", help=T.HELP["n_loops"]))
-    out["dwell_s"] = float(c[4].number_input("Wait at gene end (s)", 1.0, 600.0, 30.0, 5.0, key="tx_dw", help=T.HELP["dwell_s"]))
+    out["dwell_s"] = float(c[4].number_input("Wait at gene end (s)", 1.0, 600.0, 116.0, 5.0, key="tx_dw", help=T.HELP["dwell_s"]))
     return out
 
 
@@ -166,9 +166,9 @@ def current_params() -> dict:
     p.update(coupling=g("tx_kind", "contact"), coupled_rate=g("tx_rate", "k_on"), fold=float(g("tx_fold", 12.0)),
              d_contact_nm=float(g("tx_dc", 150.0)), d_half_nm=float(g("tx_dh", 200.0)), hill_n=float(g("tx_hn", 4.0)),
              d_decay_nm=float(g("tx_dd", 150.0)), f_const=float(g("tx_fc", 0.1)),
-             k_on=1 / (g("tx_off", 60.0) * 60.0), k_off=1 / (g("tx_on", 6.0) * 60.0), k_init=1 / g("tx_ini", 30.0),
+             k_on=1 / (g("tx_off", 50.0) * 60.0), k_off=1 / (g("tx_on", 16.0) * 60.0), k_init=1 / g("tx_ini", 600.0),
              elongation_kb_min=float(g("tx_v", 2.5)), cassette_kb=float(g("tx_cas", 1.3)), gene_kb=float(g("tx_gene", 5.0)),
-             n_loops=int(g("tx_loops", 24)), dwell_s=float(g("tx_dw", 30.0)))
+             n_loops=int(g("tx_loops", 24)), dwell_s=float(g("tx_dw", 116.0)))
     return p
 
 

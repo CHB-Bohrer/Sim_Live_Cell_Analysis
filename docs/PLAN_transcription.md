@@ -108,3 +108,5 @@ on top of the nuclear channel and can disturb segmentation and tracking, which w
 3. Which rate depends on distance (k_on is the usual choice), and what shape: sharp contact threshold, or smooth?
 4. Biology numbers when available: ON/OFF times, initiation rate, Pol II speed, gene and MS2-cassette length, number of loops.
 5. Frame interval and movie length (decides how much the time-scale problem matters).
+
+DEFAULTS NOW MIMIC TFF1 (picked 2026-10-09, user: 'just pick one for now'): mean OFF 50 min, ON 16 min, one Pol II per 600 s while ON (~1.6 per burst), dwell 116 s, 2.5 kb/min. Change in docs/configs/tab if another gene is wanted.

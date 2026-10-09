@@ -77,9 +77,9 @@ loci:                       # source: library = saved polychrom simulations (nee
     enabled: false           # true: MS2 spots appear at the promoter, in the SAME channel as the nuclear NLS-GFP
     photons_per_loop_s: 100  # PLACEHOLDER photons per MS2 loop per second of exposure (one Pol II with all 24 loops = 24x this)
     params:                  # all rates per SECOND of real time (independent of the frame interval); see docs/PLAN_transcription.md
-      k_on: 0.000278         # OFF -> ON when the enhancer is far (1/3600 s: one burst per hour)
-      k_off: 0.00278         # ON -> OFF (1/360 s: bursts last 6 min)
-      k_init: 0.0333         # Pol II initiations per second while ON (one per 30 s)
+      k_on: 0.000333         # OFF -> ON when the enhancer is far (1/3000 s: mean OFF 50 min; TFF1 burst period 66 min, Rodriguez 2019)
+      k_off: 0.00104         # ON -> OFF (1/960 s: bursts last 16 min, TFF1)
+      k_init: 0.00167        # Pol II initiations per second while ON (one per 600 s: ~1.6 per burst; TFF1 1.5 +/- 0.5)
       coupling: contact      # contact (sharp) | hill | exp | none (control)
       coupled_rate: k_on     # which rate depends on distance: k_on | k_init | k_off
       fold: 12               # coupled rate is this many times faster at full contact
@@ -92,7 +92,7 @@ loci:                       # source: library = saved polychrom simulations (nee
       cassette_kb: 1.3       # MS2 cassette at the 5' end
       gene_kb: 5.0           # gene after the cassette
       n_loops: 24
-      dwell_s: 30            # mean wait at the end of the gene before release
+      dwell_s: 116           # mean wait at the end of the gene before release (Coulon 2014: 116 s)
 
 isolation:                  # stage 5: one single-cell movie per cell ID
   sources: [truth, tracked_auto_masks]   # truth | tracked_gt_masks | tracked_auto_masks
