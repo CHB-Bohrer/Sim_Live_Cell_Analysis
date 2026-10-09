@@ -242,3 +242,23 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 38 tests at 2026-10-08. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
+
+## Dashboard walk-through findings (2026-10-09)
+- Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,
+  Library/Chromatin tabs (Streamlit `AppTest` scripts + the browser), and 4 sidebar movies (toy, library+probes, library+MS2, toy+MS2) all
+  finish with DET/CHOTA 1.0 (8 cells, 1 seed; the default MS2 spots, up to ~250 loops x 100 photons, did NOT disturb segmentation; more seeds
+  and brighter spots not tested).
+- BUG FIXED (important gotcha): every library-source movie died at the tracker with `OSError WinError 127 ... torch\lib\shm.dll`. Cause: the
+  FIRST numpy BLAS call (any `@`/dot/`scipy Rotation.apply`) in the main process loads MKL's OpenMP runtimes (libiomp5md + libomp), after which
+  `import torch` (Trackastra) fails. Code that runs before the tracker must avoid matmul; `library_loci.py` now uses a broadcast sum and its
+  own `_random_rotation`. Diagnose with `psutil.Process().memory_maps()` filtered on "omp". Same class of problem as the Cellpose worker note.
+- Fixed: sidebar probe/transcription checkboxes did nothing (never passed on); movie locus positions came from the config's fixed 5050/4950 kb
+  (both loci on the last monomer in a 3 Mb library) -> now from the Transcription tab or the middle of the library region; Transcription tab default
+  positions follow region size; run log decode crashed on non-ASCII (cp1252) -> UTF-8; figure fonts were tiny.
+- `st.rerun(scope="fragment")` buttons work in the browser but raise under AppTest (test artefact only).
+- Not done: the 100-simulation library (waiting for go-ahead; the live monitor is still only tested with fake files + finished libraries);
+  one library selector exists in the monitor and a separate one in the picker (confusing; not merged); the header metrics of the selected run
+  sit above the Transcription/Probes/Library/Chromatin tabs although unrelated to them; default seed-1 cell in Transcription step 5 shows no Pol II
+  (empty plots); with 50 nm/unit and 150 nm contact the smoke distances rarely touch, so coupling looks inert (placeholder scale).
+- Literature checked against PMC full texts, see docs/PLAN_transcription.md: TFF1 ON 16 min (not 6), burst period 66-86 min, 1.5 transcripts/burst;
+  Pol II 2.6 kb/min, 3' dwell 116 s (our default 30 s). Defaults not changed: needs the user's choice of gene.

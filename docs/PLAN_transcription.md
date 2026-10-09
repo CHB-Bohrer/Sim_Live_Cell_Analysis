@@ -15,7 +15,19 @@ Decisions made by the user on 2026-10-09:
   library loci are interpolated between polymer blocks, so nothing has to be re-entered. The dashboard warns when a frame interval is too
   coarse for the chosen kinetics). If the user meant something different by "automatically change kinetic rates", revisit.
 
-Literature numbers (SEARCH-RESULT SUMMARIES ONLY; the primary papers could not be opened because PMC / eLife / Europe PMC are blocked from the
+**CHECKED AGAINST THE PRIMARY PAPERS (2026-10-09, full text on PMC):**
+- Rodriguez et al. 2019 Cell (TFF1-MS2, MCF7, [PMC6331006](https://pmc.ncbi.nlm.nih.gov/articles/PMC6331006)): active period (ON) 16.0 +/- 0.5 min,
+  narrowly distributed; the gene bursts every 66 +/- 7 min (complete media) or 86 +/- 18 min (0.5 nM E2), 185 +/- 34 min near the EC50, so mean OFF is
+  roughly 50-70 min, with a broad distribution and some alleles inactive > 12 h; burst size 1.5 +/- 0.5 transcripts; nascent-RNA dwell 13.0 +/- 0.8 min;
+  initiation 0.5 +/- 0.02 per min. No elongation rate is reported there. (Read only the first 100,000 characters of the page.)
+- Coulon et al. 2014 eLife (beta-globin reporter, [PMC4210818](https://pmc.ncbi.nlm.nih.gov/articles/PMC4210818)): elongation ~2.6 kb/min (Table 1: 2.60 +/- 0.16),
+  dwell of transcripts at the transcription site (3' end) 116 +/- 6 s. No initiation interval reported. (First 100,000 characters read.)
+- So: the ON time of ~6 min used below is the MYC-paper number and is ~2.7x shorter than TFF1's 16 min; our dwell default of 30 s is 4x shorter than
+  Coulon's 116 s; 2.5 kb/min matches 2.6. Decide which gene to mimic and set ON (16 min for TFF1), OFF (~50 min), dwell (~116 s) accordingly.
+  The initiation rate while ON is not a literature value here (TFF1: ~1.5 transcripts per 16 min burst means fewer than one initiation per 10 min).
+  Note that makes our default "a Pol II every 30 s while ON" (about 12 per 6-min burst) far busier than TFF1.
+
+Earlier (unverified) summary, kept for history (SEARCH-RESULT SUMMARIES ONLY; the primary papers could not be opened because PMC / eLife / Europe PMC are blocked from the
 build machine; VERIFY against the papers before relying on them): MCF7 cells, MS2 live imaging: mean ON ~5.6-7.1 min, mean OFF ~44-70 min (Cell
 Reports 2021, MYC paper, Larson co-author); TFF1 (Rodriguez et al. 2019 Cell, review by Rodriguez and Larson): ~1-2 transcripts per burst, burst
 period ~86 min, estradiol ~2x more bursts; human Pol II elongation spans ~1-6 kb/min across studies (Darzacq 2007: ~1.9-4.3), yeast (Larson 2011

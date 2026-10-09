@@ -103,3 +103,7 @@ fire Pol II that carry MS2 loops, which appear as a bright spot at the promoter 
 a movie with `loci.transcription.enabled=true` (sidebar checkbox: "Model distance-dependent transcription"), e.g.
 `scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml --set loci.transcription.enabled=true --set acquisition.frame_interval_s=10`.
 All kinetic rates are per second, so any frame interval works. Sweep a setting in the tab, or across whole movies with `scripts\sweep.py --grid loci.transcription.params.fold=3,12,48`.
+
+### Sidebar checkboxes and library movies
+The single-cell loci form now really passes the **probe binding** and **transcription** settings from their tabs to the run, and library movies place the
+two loci at the positions set in the Transcription tab (default: 100 kb apart in the middle of the chosen library's region).
