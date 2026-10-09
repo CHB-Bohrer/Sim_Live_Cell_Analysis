@@ -77,6 +77,12 @@ h3 {{ margin-top: 2rem; }}
 .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {{
   background: linear-gradient(135deg, #0f766e, #0e7490); border: 0; }}
 [data-testid="stAlert"] {{ border-radius: .8rem; }}
+/* compact metric cards (the headline scores were too large) */
+[data-testid="stMetric"] {{ padding: .35rem .7rem; border-radius: .6rem; }}
+[data-testid="stMetricLabel"] p {{ font-size: .78rem; }}
+[data-testid="stMetricValue"] {{ font-size: 1.35rem !important; line-height: 1.25; }}
+[data-testid="stMetric"]:hover {{ transform: none; }}
+.stMarkdown strong {{ font-weight: 600; }}
 [data-baseweb="input"], [data-baseweb="select"] > div {{ border-radius: .55rem; }}
 [data-testid="stSidebar"] h2 {{ font-size: 1.25rem; letter-spacing: -0.01em; }}
 [data-testid="stSidebar"] [data-testid="stExpander"] {{ background: #fff; }}
