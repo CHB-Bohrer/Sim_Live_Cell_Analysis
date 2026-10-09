@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as _st
+import style
 import tifffile
 from PIL import Image
 
@@ -57,6 +58,7 @@ def _all_cells_movie(sdir: str, stamp: float, loc_names: tuple, tile: int = 150)
 
 
 def render(st, run_path: Path, cfg: dict):
+    style.intro(st, "Every cell isolated into its own small movie (nucleus plus one colour channel per locus), so each cell can be analysed on its own.", "Choose which cell identities to use (true or tracker), look at all cells at one frame, then pick one cell to watch through time with its located loci.")
     s5 = run_path / "stage5_cells"
     sources = [p.name for p in sorted(s5.glob("*")) if (p / "cell_summary.csv").exists()] if s5.exists() else []
     if not sources:

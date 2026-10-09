@@ -230,6 +230,7 @@ def _sweep_section() -> None:
 # ----------------------------------------------------------------------------- tab
 @st.fragment
 def render(run_path: Path | None = None) -> None:
+    style.intro(st, "A stochastic model of fluorescent probes landing on, sliding along and leaving a locus. The number attached sets the locus brightness, so binding noise appears in the movie.", "Pick a preset or change the rates for the promoter and enhancer, scrub the example trace, then run a sweep to see how one rate changes the signal. Tick the probe option in the sidebar loci form to use these settings in a movie.")
     st.markdown("### How probes bind a locus")
     c = st.columns(4)
     with c[0]:

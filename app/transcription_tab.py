@@ -182,6 +182,10 @@ def overrides_for_movie() -> list[str]:
 # ----------------------------------------------------------------------------- the tab
 @st.fragment
 def render(run_path: Path | None = None) -> None:
+    style.intro(st, "How the distance between a promoter and its enhancer, taken from a saved polymer simulation, makes the promoter switch ON, "
+                    "fire polymerases, and produce a bright MS2 spot. Every step has its own plot.",
+                "Work through steps 1 to 9 from top to bottom. Change any number and everything below updates. Step 8 sweeps one setting; "
+                "step 9 gives the command (or sidebar checkbox) to run it in a movie. Defaults mimic the TFF1 gene; rates are per second of real time.")
     st.markdown("### From chromosome distance to the MS2 spot")
     st.markdown(overview_svg(), unsafe_allow_html=True)
     st.caption("The polymer simulation tells us how far the enhancer is from the promoter at every moment. That distance sets how "

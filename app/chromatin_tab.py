@@ -15,6 +15,7 @@ from player import show_player
 from simlive.io.runs import DATA_ROOT, REPO_ROOT
 from simlive.stage1_chromatin import analysis as A
 
+import style
 CHROM = DATA_ROOT / "chromatin"
 
 
@@ -35,6 +36,7 @@ def _maps(sim_dir: str, n_snap: int):
 
 
 def render(st):
+    style.intro(st, "Look inside one saved polymer simulation: the chain moving through time, its contact map, and the distance between any two chosen loci.", "Pick a library and simulation, tick the player to watch the chromosome, then choose two genomic positions (kb) to plot their distance over time. Those distances drive the transcription model.")
     libs = sorted(p.name for p in CHROM.glob("*") if p.is_dir()) if CHROM.exists() else []
     if not libs:
         st.info("No chromatin simulations yet. Quick test (1 minute):\n\n"

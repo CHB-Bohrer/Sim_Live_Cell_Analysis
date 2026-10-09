@@ -260,6 +260,7 @@ def overrides_for_movie(n_cells: int) -> list[str] | None:
 
 
 def render() -> None:
+    style.intro(st, "The saved chromatin (polymer) simulations that movies draw their loci from: how far the generator has got, and which simulation each cell will use.", "Start a library from a terminal (the command is shown if none exists), watch progress live, then choose random, ticked or pinned simulations. The sidebar loci form uses your choice when the library source is selected.")
     _how_it_works()
     st.markdown("### Library generation: live status")
     _monitor()

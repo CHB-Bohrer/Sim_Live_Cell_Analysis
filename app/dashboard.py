@@ -185,28 +185,28 @@ with st.sidebar.expander("➕ New simulation", expanded=not list_runs()):
         st.caption("Defaults come from configs/tracking_demo.yaml")
         seed = st.number_input("Random seed", 0, 10_000, int(base["seed"]))
         st.markdown("**Acquisition**")
-        n_frames = st.slider("Frames", 10, 120, int(base["acquisition"]["n_frames"]))
-        dt = st.number_input("Frame interval (s)", 5, 3600, int(base["acquisition"]["frame_interval_s"]))
+        n_frames = st.slider("Frames", 10, 120, int(base["acquisition"]["n_frames"]), help="How many images the movie has. More frames = longer movie and a harder tracking problem.")
+        dt = st.number_input("Frame interval (s)", 5, 3600, int(base["acquisition"]["frame_interval_s"]), help="Seconds between images. Longer intervals let cells move farther between frames, which makes linking harder.")
         st.markdown("**Cells and motion**")
-        n_cells = st.slider("Initial cells", 3, 80, int(base["cells"]["n_cells"]))
-        fov = st.slider("Field of view (µm, square)", 60, 400, int(base["geometry"]["fov_um"][0]))
+        n_cells = st.slider("Initial cells", 3, 80, int(base["cells"]["n_cells"]), help="Cells at the start. More cells in the same field means more crowding and touching nuclei.")
+        fov = st.slider("Field of view (µm, square)", 60, 400, int(base["geometry"]["fov_um"][0]), help="Side length of the square imaged area.")
         radius = st.slider("Nuclear radius (µm)", 3.0, 12.0, float(base["geometry"]["cell_radius_um"]), 0.5)
-        speed = st.slider("Speed scale (1 = default, 0.5 = half as fast)", 0.0, 2.0, float(base["motion"]["speed_scale"]), 0.05)
-        D = st.number_input("Diffusion D (µm²/s)", 0.0, 1.0, float(base["motion"]["D_um2_s"]), 0.005, format="%.4f")
-        drift = st.number_input("Directed speed (µm/s)", 0.0, 0.1, float(base["motion"]["drift_um_s"]), 0.002, format="%.4f")
+        speed = st.slider("Speed scale (1 = default, 0.5 = half as fast)", 0.0, 2.0, float(base["motion"]["speed_scale"]), 0.05, help="Multiplies the cell speed. The most important setting for tracking errors.")
+        D = st.number_input("Diffusion D (µm²/s)", 0.0, 1.0, float(base["motion"]["D_um2_s"]), 0.005, format="%.4f", help="Random-walk part of the cell motion.")
+        drift = st.number_input("Directed speed (µm/s)", 0.0, 0.1, float(base["motion"]["drift_um_s"]), 0.002, format="%.4f", help="Persistent, directed part of the cell motion.")
         p_div = st.slider("Division probability per cell per frame", 0.0, 0.1, float(base["cells"]["p_divide_per_frame"]), 0.005)
         st.markdown("**Nuclear shape**")
-        aspect = st.slider("Mean aspect ratio (1 = round)", 1.0, 2.5, float(base["geometry"]["shape"]["aspect_mean"]), 0.05)
+        aspect = st.slider("Mean aspect ratio (1 = round)", 1.0, 2.5, float(base["geometry"]["shape"]["aspect_mean"]), 0.05, help="Average nucleus elongation: 1 is a circle, 2 is twice as long as wide.")
         deform = st.slider("Deformation (bumps/dents)", 0.0, 0.25, float(base["geometry"]["shape"]["deform_amp"]), 0.01)
-        persist = st.slider("Shape persistence", 0.0, 0.99, float(base["geometry"]["shape"]["persistence"]), 0.01)
+        persist = st.slider("Shape persistence", 0.0, 0.99, float(base["geometry"]["shape"]["persistence"]), 0.01, help="How slowly the shape changes from frame to frame (high = stable shapes).")
         st.markdown("**Nuclear texture** (chromatin-like structure, fixed to each nucleus)")
         tex_c = st.slider("Texture contrast (0 = uniform blob)", 0.0, 0.8, float(base["nucleus_texture"]["contrast"]), 0.05)
         n_nuc = st.slider("Dark nucleoli per nucleus (average)", 0.0, 5.0, float(base["nucleus_texture"]["n_nucleoli"]), 0.5)
         st.markdown("**Imaging**")
-        photons = st.number_input("Photons/pixel/s (brightness)", 10, 100000, int(base["optics"]["photons_per_px_s"]), 100)
-        read_noise = st.number_input("Camera read noise (e-)", 0.0, 20.0, float(base["optics"]["read_noise_e"]), 0.5)
-        pix = st.number_input("Pixel size (nm)", 50, 2000, int(base["optics"]["pixel_size_nm"]), 10)
-        NA = st.number_input("NA", 0.3, 1.7, float(base["optics"]["NA"]), 0.05)
+        photons = st.number_input("Photons/pixel/s (brightness)", 10, 100000, int(base["optics"]["photons_per_px_s"]), 100, help="Nuclear brightness. Lower values mean a noisier image.")
+        read_noise = st.number_input("Camera read noise (e-)", 0.0, 20.0, float(base["optics"]["read_noise_e"]), 0.5, help="Electrons of camera noise added to every pixel.")
+        pix = st.number_input("Pixel size (nm)", 50, 2000, int(base["optics"]["pixel_size_nm"]), 10, help="Size of one pixel in the sample plane.")
+        NA = st.number_input("NA", 0.3, 1.7, float(base["optics"]["NA"]), 0.05, help="Numerical aperture of the objective: sets the blur (PSF) size.")
         st.markdown("**Segmentation and tracker**")
         seg_method = st.selectbox("Segmentation", ["cellpose", "threshold_watershed"],
                                   0 if base["segmentation"]["method"] == "cellpose" else 1)
@@ -217,13 +217,13 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
     st.caption("Uses configs/loci_demo.yaml: fine pixels, a few cells, two coloured loci per nucleus (stand-in "
                "dynamics), then isolates every cell and locates the loci in each one in parallel (about 2 minutes).")
     with st.form("loci_sim"):
-        l_seed = st.number_input("Random seed", 0, 10_000, 1, key="l_seed")
-        l_cells = st.slider("Cells in the field", 2, 20, 8, key="l_cells")
-        l_frames = st.slider("Frames", 20, 300, 120, key="l_frames")
-        l_dt = st.number_input("Frame interval (s)", 1, 600, 10, key="l_dt")
-        l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed")
-        l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot")
-        l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div")
+        l_seed = st.number_input("Random seed", 0, 10_000, 1, key="l_seed", help="Same settings + same seed = the same movie every time.")
+        l_cells = st.slider("Cells in the field", 2, 20, 8, key="l_cells", help="Each cell gets its own two loci (and, with the library source, its own saved polymer simulation).")
+        l_frames = st.slider("Frames", 20, 300, 120, key="l_frames", help="Number of images. With transcription, make the movie long compared with the burst time (tens of minutes).")
+        l_dt = st.number_input("Frame interval (s)", 1, 600, 10, key="l_dt", help="Seconds between images. Overrides the interval in the Transcription tab for this run.")
+        l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed", help="Multiplies how fast the cells move (0.4 keeps tracking easy).")
+        l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot", help="Brightness of each locus spot. A placeholder until measured.")
+        l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div", help="Chance per frame that a cell divides into two.")
         l_src = st.radio("Where do the locus movements come from?", ["toy", "library"], key="l_src",
                          format_func={"toy": "Invented stand-in motion (fast, no library needed)",
                                       "library": "Saved chromatin library, with my choice from the 🗂 Library tab"}.get,
@@ -302,6 +302,7 @@ if not runs:
                                                 "The chromatin library can already be generated and monitored below.")
     import chromatin_tab  # noqa: E402
     import library_tab  # noqa: E402
+    style.guide(st)
     t_tx, t_probe, t_lib, t_chrom = st.tabs(["⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin"])
     with t_tx:
         import transcription_tab  # noqa: E402
@@ -317,7 +318,7 @@ if not runs:
 names = [r.name for r in runs]
 if st.session_state.get("run") not in names:
     st.session_state["run"] = names[0]
-st.sidebar.selectbox("Run to view", names, key="run")
+st.sidebar.selectbox("Run to view", names, key="run", help="Every finished movie is listed, newest first. Picking one reloads the page and the tabs show that run.")
 run_path = RUNS / st.session_state["run"]
 R = load_run(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime)
 T = len(R["gt"])
@@ -326,6 +327,9 @@ T = len(R["gt"])
 style.hero(st, "Cell tracking: how well did we do?",
            f"Run {run_path.name} · {R['cells'].cell_id.nunique()} cell IDs · {T} frames · "
            f"{R['cfg']['optics']['pixel_size_nm']} nm/px")
+style.guide(st)
+st.caption("Headline scores for the selected run. Both rows score the tracker against the true cell IDs: the first on masks from automatic "
+           "segmentation (realistic), the second on perfect masks (isolates the linking error). 1.0 is perfect for CHOTA and LNK.")
 for v in ("auto_masks", "gt_masks"):
     m = R["metrics"][v]
     st.markdown(f"**{VARIANT_LABEL[v]}**")
@@ -436,6 +440,8 @@ def traj_tab():
     plt.close(fig)
 
 with tab_cfg:
+    style.intro(st, "The exact, fully resolved settings this run was made with (every default filled in), plus where its files are.",
+                "Copy it to a new file under configs/ to repeat or modify the run from a terminal. The same config and seed always give the same run.")
     st.code(yaml.safe_dump(R["cfg"], sort_keys=False), language="yaml")
     st.caption(f"Files for this run: {run_path}")
 
@@ -528,13 +534,24 @@ def movie_player():
 
 
 with tab_movie:
+    style.intro(st, "The simulated movie with the true cells on the left and the tracker's result on the right. Matching colours mean a cell "
+                    "was followed correctly; red circles mark identity switches.",
+                "Press Play (smooth, in your browser) or drag the frame slider. 'Next error' jumps to the next frame where something went wrong. "
+                "Switch between tracking on automatic masks (realistic) and on ground-truth masks (linking error only).")
     movie_player()
     movie_tab()
 with tab_metrics:
+    style.intro(st, "Every tracking score for this run, plus a per-cell table of identity switches.",
+                "Compare the two columns: the gap between automatic and ground-truth masks is the error caused by segmentation. "
+                "Open 'What do these numbers mean?' for definitions. Single runs are not evidence: use 📈 Scans for several seeds.")
     metrics_tab()
 with tab_traj:
+    style.intro(st, "The true path of every cell (coloured) against the paths the tracker built (black dashed). Red crosses mark identity switches.",
+                "Look for places where a dashed line jumps between coloured paths: that is a swap. Choose which tracker result to compare.")
     traj_tab()
 with tab_scan:
+    style.intro(st, "Results of parameter sweeps (many seeds per setting) saved by scripts/sweep.py, so conclusions rest on more than one run.",
+                "Choose a scan, a metric, the x axis and which masks to score. Expect large seed-to-seed spread in ID switches; compare conditions over at least 5 seeds.")
     scan_tab()
 with tab_cells:
     cells_frag()
