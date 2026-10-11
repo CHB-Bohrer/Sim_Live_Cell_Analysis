@@ -27,7 +27,7 @@ from simlive.stage3_microscopy.render import Imager, cells_in_image, entropy_for
 from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
-from simlive.stage6_analysis.localize import localize_loci, locus_distances, score_localization
+from simlive.stage6_analysis.localize import localize_loci, locus_distances, photons_in_frame, score_localization
 from simlive.stage6_analysis.fiducials import (correct_with_beads, correct_with_plane_positions, score_variants, track_fiducials)
 from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances_3d, score_localization_3d
 from simlive.stage4_segtrack.trackers import make_tracker
@@ -185,6 +185,8 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
               **{f"locus{k}": s3 / f"locus{k}.tif" for k in range(int(cfg["loci"]["n_loci"]))}}
     ti = s3 / "loci_truth_image.csv"        # truth moved by the stage drift (a localizer cannot know it); chromatic shift stays an error
     truth = pd.read_csv(ti if ti.exists() else run / "stage1_chromatin" / "loci_truth.csv")
+    itp = s3 / "imaging_truth.csv"
+    truth = photons_in_frame(truth, pd.read_csv(itp) if itp.exists() else None)     # true photons per spot and frame, to score intensities
     ej = s3 / "imaging_errors.json"
     zinfo = json.loads(ej.read_text()).get("z_stack") if ej.exists() else None
     ana = cfg.get("locus_analysis", {})
@@ -223,7 +225,7 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
         if zinfo is not None:   # z-stacks: locate the loci in 3D from the full stacks (the 2D result above uses the projections)
             progress(f"Stage 6: locating loci in 3D in {len(summ)} cells")
             stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(int(cfg["loci"]["n_loci"]))}
-            ana3 = {**ana, "axial_sigma_um": nominal_axial_sigma(cfg)}      # the microscope's nominal axial PSF (for median_z: auto)
+            ana3 = {**ana, "axial_sigma_um": nominal_axial_sigma(cfg), "px_um": px_um}   # nominal axial PSF (median_z: auto); px for z scaling
             pos3 = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
                              n_loci=cfg["loci"]["n_loci"], **ana3)
             pos3.to_csv(out6 / "loci_positions_3d.csv", index=False)

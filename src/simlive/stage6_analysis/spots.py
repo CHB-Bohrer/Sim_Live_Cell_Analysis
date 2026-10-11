@@ -47,7 +47,12 @@ MAD_TO_SD = 1.4826
 # defaults chosen by scoring variants against the simulation's truth (scripts/compare_localizers.py; see docs/SPOT_FINDING.md)
 DEFAULTS = dict(median_px=3, median_z="auto", background="local", background_px=9, smooth_sigma_px=1.0, smooth_sigma_z=0.8,
                 threshold="noise", threshold_on="smoothed", threshold_scope="movie", min_snr=5.0, min_area_px=3, erode_px=0, min_sep_px=4,
-                select="track", track_window=3, track_gate_px=8.0, refine="gaussian", fit_half_px=3, fit_half_z=2)
+                select="track", track_window=3, track_gate_px=8.0, refine="gaussian", fit_half_px=3, fit_half_z=2,
+                # dog_viterbi (Chen et al. 2025; dog_viterbi.py)
+                dog_sigma_px=(1.0, 3.0), dog_sigma_z=(0.8, 2.0), dog_snr=3.0, max_candidates=5, viterbi_max_gap=5, viterbi_miss_cost=2.0,
+                viterbi_D_px2=None, viterbi_iterations=3, z_scale=1.0,
+                # ellipsoid intensity of every detection (Chen et al. 2025): diameters (x, y, z) in px / planes
+                intensity_inner_px=(7, 7, 5), intensity_outer_px=(19, 19, 7), intensity_background="median")
 
 
 def robust_bg_noise(vals: np.ndarray) -> tuple[float, float]:

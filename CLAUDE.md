@@ -240,7 +240,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 100 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 105 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -298,13 +298,24 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   3D tracking; calibration of the quantum efficiency and of the nuclear brightness; lens distortion / field-dependent chromatic shift (shifts are constant over the field).
 
 ## Spot finding (stage 6; built 2026-10-11; full description + numbers in docs/SPOT_FINDING.md)
-- The user asked to localize spots the way Bennabi et al. 2025 did (Sci. Adv. 11, eadv7790; code github.com/gregorlab/SizeProject2024,
+- DEFAULT method = `dog_viterbi` (`stage6_analysis/dog_viterbi.py`), after Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol., doi 10.1038/s41594-025-01615-4;
+  the user asked for it after Bennabi turned out not to localize spots; methods from arXiv 2304.08770v3 section III.2; no code published): per-cell crops -> median 3x3
+  -> difference of Gaussians (1, 3 px) with a LOW threshold (3 x noise, up to 5 candidates) -> one Viterbi path per cell and colour through the candidates (link =
+  -log diffusion propagator, gaps up to 5 frames at 2 nats each, reward = log SNR + log(region area / false candidates per frame), D re-estimated from the path) ->
+  Gaussian fit -> ellipsoid intensity (mean in (7,7,5) px minus the shell to (19,19,7); shell MEDIAN by default, paper = mean). The clutter term in the reward is
+  essential: without it the path skipped 547 of 1914 frames that held the right candidate. Every method now outputs `intensity`; scores add
+  `intensity_r_locusK` (Pearson r with the photons drawn in that frame, `photons_frame` = photons x bleach, `localize.photons_in_frame`).
+  Measured (calibrated): library run found 98.0% (median_peaks 90.7%, original 82.2%), 0 wrong picks, median 26 nm, p95 98 nm (higher than median_peaks' 74 nm
+  because the extra detections are faint spots); toy seed 12: 99.5% / 0.05% / 22 / 55 nm; 3D run in 3D: 100% / 0% / 84 / 177 nm (original 4.7% wrong, p95 320).
+  `select: viterbi` (Chen's path on median_peaks candidates) did not help (few candidates above its threshold). Variants: `default`, `chen_literal`, `bennabi`, ...
+  in compare.py. Open: one path per cell (an OFF period > 5 frames ends it: fine for loci, needs re-acquisition for MS2 spots); D per cell, not pooled.
+- The user first asked to localize spots the way Bennabi et al. 2025 did (Sci. Adv. 11, eadv7790; code github.com/gregorlab/SizeProject2024,
   `modules/raw_live_analysis.py`, read 2026-10-11). That paper finds Mesp2 expression POLES (hundreds of px), not diffraction-limited spots: rank median 7x7 ->
   one threshold per movie (median of per-frame Otsu, or th=70) -> area (fill holes, remove < 5000 px, erode) -> Gaussian sigma 20 -> peak_local_max(min_distance
   100). `spots.py` implements those steps rescaled to spots (median 3x3, Gaussian 1 px, min area 3 px, min distance 4 px) and ADDS: local background (9x9 median
   subtracted), threshold on the smoothed image (`threshold_on: smoothed`; the paper's order = `filtered`), candidate choice `select: track` (nearest the locus'
-  median position in +-3 frames, gate 8 px; skips one-frame cosmic rays), Gaussian-fit refinement. Config `locus_analysis:` (method `median_peaks` default,
-  `brightest` = the old placeholder); the sidebar loci form has method / choice / min_snr controls.
+  median position in +-3 frames, gate 8 px; skips one-frame cosmic rays), Gaussian-fit refinement = method `median_peaks` (`brightest` = the old placeholder);
+  the sidebar loci form has method / choice / min_snr controls. The numbers below are for median_peaks against the original.
 - Measured (4 runs, 1 seed each; `scripts/compare_localizers.py --run <run>` re-runs stage 6 only on saved crops and writes
   `stage6_analysis/method_comparison.csv` + `comparison/<variant>.csv`): library run (probes+MS2, all errors) calibrated: found 82.2% -> 90.7%, wrong-object picks
   0.13% -> 0.06%, median 27 -> 25 nm; uncalibrated wrong picks 9.8% -> 0.06%, p95 4.7 um -> 96 nm. 3D run: 2D-on-projection wrong picks 4.7% -> 0% (cosmic rays
@@ -315,9 +326,10 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   `n_false_on_dark`, `frac_far` (> 0.5 um = wrong object), `rms_error_near_um`. Old runs lack `photons`: `compare.truth_with_photons` rebuilds it.
 - Logic errors fixed in this review: u/v measured from the rounded crop centre (<= 0.5 px); `min_sep_px` silently ignored; loci without light counted as misses;
   single-cell player drew OTHER cells' true loci and put markers half a pixel off (PIL pixel-corner convention); 5x5 centroid pixel-locking (now Gaussian fit).
-- Dashboard 🔎 Spot finding tab (`app/spots_tab.py`): (1) step table paper vs here vs this run, (2) every intermediate image for any cell / colour / frame with
-  editable settings (form + Apply), problem-frame jump list, per-frame error and candidate plots, (3) run scores + error histogram, (4) "Compare methods" button
-  (shells out to the script) + table and bar charts. Uses `localize.analyse_channel` / `channel_inputs`, so it runs exactly the pipeline's code.
+- Dashboard 🔎 Spot finding tab (`app/spots_tab.py`): (1) step tables of both papers vs here vs this run, (2) every intermediate image for any cell / colour / frame
+  with editable settings incl. the method (form + Apply), intensity ellipses, problem-frame jump list, per-frame error, every candidate's distance to the truth with
+  the chosen one, intensity vs true photons, (3) run scores + error histogram, (4) "Compare methods" button (shells out to the script) + table and bar charts.
+  Uses `localize.analyse_channel` / `channel_inputs`, so it runs exactly the pipeline's code.
 - Open: `median_z: auto` keeps the axial median off at 0.8 um planes (it helped with bright spots: 0.3% -> 0% wrong; would hurt dim spots); dim spots (100-200
   photons) found 71%; all numbers are 1 seed each with placeholder brightness; sweep.py still reports tracking metrics only (locus metrics not in sweeps yet).
 - Gotcha: scripts that call `map_cells` with workers need `if __name__ == "__main__":` (Windows spawn re-imports the script). CLAUDE.md had one stray cp1252 byte

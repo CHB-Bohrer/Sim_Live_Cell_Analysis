@@ -1,12 +1,17 @@
 """Stage 6 PLACEHOLDER: a per-cell locus localizer, to be replaced by the user's own analysis.
 
 `localize_loci(cell)` takes one isolated cell (CellData). Every locus has its own colour channel (locus0, locus1, ...), so in each frame
-the locus is the one spot of that colour inside the (slightly dilated) cell mask. Two methods (`method`, config `locus_analysis.method`):
+the locus is the one spot of that colour inside the (slightly dilated) cell mask. Three methods (`method`, config `locus_analysis.method`):
 
 - `median_peaks` (default): the detection steps of Bennabi et al. 2025 (Sci. Adv. 11, eadv7790), rescaled to diffraction-limited spots:
   median filter -> one threshold per movie (median of the per-frame thresholds) -> area above it, small objects removed -> Gaussian
   smoothing -> local maxima (min distance) = candidates; the brightest is the locus, refined by a 2D Gaussian fit. See `spots.py`.
+- `dog_viterbi`: the spot pipeline of Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol.) for MS2 spots: median filter ->
+  difference of Gaussians with a low threshold (several candidates) -> a Viterbi path through the candidates over the whole movie with a
+  diffusion potential estimated from the path itself (at most one spot per cell; frames may have none). See `dog_viterbi.py`.
 - `brightest` (the original placeholder): smooth, take the brightest pixel if its SNR passes `min_snr`, refine by a 5 x 5 centroid.
+Every detection also gets the ellipsoid intensity of Chen et al. 2025 (`intensity`: mean in a (7, 7) px ellipse at the spot minus the mean
+of the (19, 19) px ellipse around it), so spot brightness can be compared with the truth.
 
 Positions are returned in three frames: crop pixels, lab pixels, and the cell's own frame (origin at the nucleus centroid, u along the
 nucleus' long axis, v perpendicular, micrometres). `score_localization` compares against the simulation's true positions (true cell IDs only).
@@ -17,10 +22,12 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter
 
+from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 
-METHODS = ("median_peaks", "brightest")
-COLUMNS = ["cell_id", "t", "locus_id", "crop_y_px", "crop_x_px", "lab_y_px", "lab_x_px", "u_um", "v_um", "snr", "n_candidates", "fit_ok"]
+METHODS = ("median_peaks", "dog_viterbi", "brightest")
+COLUMNS = ["cell_id", "t", "locus_id", "crop_y_px", "crop_x_px", "lab_y_px", "lab_x_px", "u_um", "v_um", "snr", "n_candidates", "fit_ok",
+           "intensity"]
 
 
 def _detect_one(img: np.ndarray, region: np.ndarray, sigma: float, min_snr: float, win: int = 2):
@@ -59,40 +66,62 @@ def spot_params(kw: dict) -> dict:
     return {k: kw.get(k, v) for k, v in SP.DEFAULTS.items()}
 
 
-def analyse_channel(stack, region, centre: np.ndarray | None = None, **kw) -> dict:
-    """median_peaks on every frame of one colour of one cell: stack (n, S, S), region (n, S, S) bool, centre (n, 2) the nucleus centroid in
-    crop pixels (used by select: track). Returns per frame: the frame's own threshold, the threshold used (one per movie by default), the
-    candidates (peaks brightest first, smoothed values, SNR), the chosen candidate (None = no locus) and its refined fit."""
+def analyse_channel(stack, region, centre: np.ndarray | None = None, method: str = "median_peaks", **kw) -> dict:
+    """median_peaks or dog_viterbi on every frame of one colour of one cell: stack (n, S, S), region (n, S, S) bool, centre (n, 2) the nucleus
+    centroid in crop pixels (used by select: track and by the Viterbi potential). Returns per frame: the frame's own threshold, the threshold
+    used, the candidates (peaks brightest first, filtered values, SNR), the chosen candidate (None = no locus), its refined fit and the
+    ellipsoid intensity at the fitted position; for dog_viterbi also the diffusion potential D (px^2 per frame)."""
     p = spot_params(kw)
     n = len(stack)
-    pres = [SP.prefilter(stack[i], region[i], **p) if region[i].sum() >= 20 else None for i in range(n)]
-    thr_f = [SP.frame_threshold(q, region[i], p["threshold"], p["min_snr"], p["threshold_on"]) if q is not None else np.nan for i, q in enumerate(pres)]
-    thr = SP.movie_threshold(thr_f, p["threshold_scope"])
-    cands = [SP.candidates(stack[i], region[i], thr[i], pres[i], **p) if pres[i] is not None else None for i in range(n)]
-    del pres
-    choice = _choose(cands, centre, p, S=stack.shape[-1])
+    centre = np.full((n, 2), stack.shape[-1] // 2, float) if centre is None else np.asarray(centre, float)
+    extra = {}
+    if method == "dog_viterbi":
+        cands = [DV.dog_candidates(stack[i], region[i], steps=True, **p) if region[i].sum() >= 20 else None for i in range(n)]
+        thr_f = [c["thr"] if c is not None else np.nan for c in cands]
+        thr = thr_f
+        choice, D = DV.viterbi_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands],
+                                     [c["snr"] if c is not None else np.zeros(0) for c in cands], centre,
+                                     **{**p, "search_volume": float(np.mean(region.sum(axis=(-2, -1))))})
+        extra["D_px2"] = D
+    elif method == "median_peaks":
+        pres = [SP.prefilter(stack[i], region[i], **p) if region[i].sum() >= 20 else None for i in range(n)]
+        thr_f = [SP.frame_threshold(q, region[i], p["threshold"], p["min_snr"], p["threshold_on"]) if q is not None else np.nan for i, q in enumerate(pres)]
+        thr = SP.movie_threshold(thr_f, p["threshold_scope"])
+        cands = [SP.candidates(stack[i], region[i], thr[i], pres[i], **p) if pres[i] is not None else None for i in range(n)]
+        del pres
+        choice = _choose(cands, centre, p, S=stack.shape[-1], area=float(np.mean(region.sum(axis=(-2, -1)))))
+    else:
+        raise ValueError(f"unknown locus_analysis.method {method!r}; use one of {METHODS}")
     fits = [SP.refine_peak(c, j, **p) if c is not None and j is not None else None for c, j in zip(cands, choice)]
+    for i, f in enumerate(fits):
+        if f is not None:
+            f["intensity"] = DV.ellipsoid_intensity(stack[i], f["pos"], p["intensity_inner_px"], p["intensity_outer_px"], p["intensity_background"])[0]
     light = [None if c is None else {k: c[k] for k in ("peaks", "values", "snr")} for c in cands]
-    return {"params": p, "thr_frame": thr_f, "thr": thr, "candidates": light, "choice": choice, "fits": fits}
+    return {"params": p, "method": method, "thr_frame": thr_f, "thr": thr, "candidates": light, "choice": choice, "fits": fits, **extra}
 
 
 def detect_channel(stack, region, method: str = "median_peaks", centre: np.ndarray | None = None, **kw) -> list:
     """Run one method on every frame of one colour of one cell (see `analyse_channel`). Returns one entry per frame: None or
-    (y, x, snr, n_candidates, fit_ok) in crop pixels."""
+    (y, x, snr, n_candidates, fit_ok, intensity) in crop pixels."""
     if method == "brightest":
+        p = spot_params(kw)
         out = []
         for i in range(len(stack)):
             d = _detect_one(np.asarray(stack[i], float), region[i], kw.get("smooth_sigma_px", 1.0), kw.get("min_snr", 5.0))
-            out.append(None if d is None else (d[0], d[1], d[2], 1, True))
+            out.append(None if d is None else (d[0], d[1], d[2], 1, True, DV.ellipsoid_intensity(
+                stack[i], (d[0], d[1]), p["intensity_inner_px"], p["intensity_outer_px"], p["intensity_background"])[0]))
         return out
-    if method != "median_peaks":
-        raise ValueError(f"unknown locus_analysis.method {method!r}; use one of {METHODS}")
-    return [None if f is None else (f["pos"][-2], f["pos"][-1], f["snr"], f["n_candidates"], f["fit_ok"])
-            for f in analyse_channel(stack, region, centre, **kw)["fits"]]
+    return [None if f is None else (f["pos"][-2], f["pos"][-1], f["snr"], f["n_candidates"], f["fit_ok"], f["intensity"])
+            for f in analyse_channel(stack, region, centre, method, **kw)["fits"]]
 
 
-def _choose(cands: list, centre, p: dict, S: int) -> list:
-    """Which candidate is the locus in each frame: the brightest, or (select: track) the one consistent with the neighbouring frames."""
+def _choose(cands: list, centre, p: dict, S: int, area: float | None = None) -> list:
+    """Which candidate is the locus in each frame: the brightest, (select: track) the one consistent with the neighbouring frames, or
+    (select: viterbi) the most likely path over the whole movie as in Chen et al. 2025 (dog_viterbi.viterbi_track)."""
+    if p["select"] == "viterbi":
+        c0 = np.full((len(cands), 2), S // 2, float) if centre is None else np.asarray(centre, float)
+        return DV.viterbi_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands],
+                                [c["snr"] if c is not None else np.zeros(0) for c in cands], c0, **{**p, "search_volume": area})[0]
     if p["select"] == "track":
         c0 = np.full((len(cands), 2), S // 2, float) if centre is None else np.asarray(centre, float)
         return SP.select_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands], c0, int(p["track_window"]),
@@ -119,7 +148,7 @@ def centroid_in_crop(fr: pd.DataFrame, S: int) -> np.ndarray:
     return np.full((len(fr), 2), S // 2, float)
 
 
-def localize_loci(cell, n_loci: int = 2, method: str = "median_peaks", dilate_px: int = 2, px_um: float = 0.13, calib: str | None = None,
+def localize_loci(cell, n_loci: int = 2, method: str = "dog_viterbi", dilate_px: int = 2, px_um: float = 0.13, calib: str | None = None,
                   **kw) -> pd.DataFrame:
     """Locate every locus (one colour channel each) in every frame of one isolated cell. One row per detection.
     With `calib` (folder of a saved Calibration) every crop is first dark-subtracted, flat-fielded and hot-pixel-corrected, and the measured
@@ -142,7 +171,7 @@ def localize_loci(cell, n_loci: int = 2, method: str = "median_peaks", dilate_px
             dy, dx = y - cen[i, 0], x - cen[i, 1]
             r = fr.iloc[i]
             rows.append((cell.cell_id, int(r.t), k, y, x, r.crop_y0 + y, r.crop_x0 + x, (dx * c + dy * s) * px_um, (dy * c - dx * s) * px_um,
-                         d[2], d[3], bool(d[4])))
+                         d[2], d[3], bool(d[4]), d[5]))
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
@@ -162,10 +191,41 @@ def _visible(truth: pd.DataFrame) -> pd.Series:
     return pd.Series(True, index=truth.index)
 
 
+def photons_in_frame(truth: pd.DataFrame, imaging_truth: pd.DataFrame | None) -> pd.DataFrame:
+    """Add `photons_frame` = the spot's photons in that frame (photons x that colour's bleaching factor), the quantity a spot intensity
+    should be proportional to (up to flat-field and flicker)."""
+    if "photons" not in truth.columns:
+        return truth
+    out = truth.copy()
+    out["photons_frame"] = out.photons.astype(float)
+    if imaging_truth is not None:
+        it = imaging_truth.set_index("t")
+        for k in out.locus_id.unique():
+            col = f"bleach_locus{int(k)}"
+            if col in it.columns:
+                m = out.locus_id == k
+                out.loc[m, "photons_frame"] = out.loc[m, "photons"].to_numpy() * it[col].reindex(out.loc[m, "t"]).to_numpy()
+    return out
+
+
+def intensity_scores(j: pd.DataFrame, near: pd.Series) -> dict:
+    """How well the measured spot intensity follows the true photons (correct detections only): Pearson r, per locus colour."""
+    out = {}
+    if "intensity" not in j.columns or "photons_frame" not in j.columns:
+        return out
+    for k, g in j[near & j.visible].groupby("locus_id"):
+        g = g[np.isfinite(g.intensity) & np.isfinite(g.photons_frame)]
+        if len(g) > 5 and g.photons_frame.std() > 0 and g.intensity.std() > 0:
+            out[f"intensity_r_locus{int(k)}"] = float(np.corrcoef(g.intensity, g.photons_frame)[0, 1])
+            out[f"counts_per_photon_locus{int(k)}"] = float(np.median(g.intensity / g.photons_frame))
+    return out
+
+
 def score_localization(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: float = 0.5) -> tuple[pd.DataFrame, dict]:
     """Compare detections with the true locus positions (same cell, frame and locus). Valid for true cell IDs only.
     detection_rate = detections / visible loci (a locus with no light cannot be found); `n_false_on_dark` = detections where no spot was
-    drawn; `frac_far` = share of detections more than `far_um` from the truth (a wrong object was picked: hot pixel, cosmic ray, ghost)."""
+    drawn; `frac_far` = share of detections more than `far_um` from the truth (a wrong object was picked: hot pixel, cosmic ray, ghost);
+    `intensity_r_locusK` = correlation of the measured ellipsoid intensity with the true photons in that frame (if both are known)."""
     est = pos.assign(est_y_um=pos.lab_y_px * px_um, est_x_um=pos.lab_x_px * px_um)
     tr = truth.assign(visible=_visible(truth))
     j = est.merge(tr, on=["cell_id", "t", "locus_id"], how="inner")
@@ -181,4 +241,5 @@ def score_localization(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far
                  "median_error_um": float(ok.err_um.median()) if len(ok) else np.nan,
                  "p95_error_um": float(ok.err_um.quantile(0.95)) if len(ok) else np.nan,
                  "frac_far": float((ok.err_um > far_um).mean()) if len(ok) else np.nan,
-                 "rms_error_near_um": float(np.sqrt((ok.err_um[ok.err_um <= far_um] ** 2).mean())) if (ok.err_um <= far_um).any() else np.nan}
+                 "rms_error_near_um": float(np.sqrt((ok.err_um[ok.err_um <= far_um] ** 2).mean())) if (ok.err_um <= far_um).any() else np.nan,
+                 **intensity_scores(j, j.err_um <= far_um)}

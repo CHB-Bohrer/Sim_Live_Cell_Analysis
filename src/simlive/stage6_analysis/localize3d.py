@@ -3,8 +3,10 @@
 The 2D crops written by stage 5 (maximum-intensity projections) give each cell's window in every frame (`frames.csv`: crop_y0, crop_x0)
 and its mask; this module re-reads the same window from the full z-stack TIFFs (memory-mapped, one frame at a time). Methods as in 2D
 (`localize.py`): `median_peaks` (default; Bennabi et al. 2025 steps in 3D: median filter with a (median_z, k, k) footprint, one threshold
-per movie, area above it, 3D Gaussian smoothing, 3D local maxima, brightest candidate refined by a 3D Gaussian fit) or `brightest` (the
-original: brightest voxel after 3D smoothing, refined by a centroid). Positions: lab pixels (y, x) and height z_um (nominal slice positions).
+per movie, area above it, 3D Gaussian smoothing, 3D local maxima, brightest candidate refined by a 3D Gaussian fit), `dog_viterbi` (Chen
+et al. 2025: 3D median, 3D difference of Gaussians, Viterbi path with a 3D diffusion potential, z distances scaled by plane spacing / pixel
+size) or `brightest` (the original: brightest voxel after 3D smoothing, refined by a centroid). Every detection gets the 3D ellipsoid
+intensity (inner (7, 7, 5), shell to (19, 19, 7) px / planes). Positions: lab pixels (y, x) and height z_um (nominal slice positions).
 `score_localization_3d` compares with the true 3D positions.
 
 Axial median: a cosmic ray hits ONE plane, a real spot spans several planes when they are closer than the axial PSF width. With
@@ -19,9 +21,10 @@ import pandas as pd
 import tifffile
 from scipy.ndimage import gaussian_filter
 
+from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 
-COLUMNS = ["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr", "n_candidates", "fit_ok"]
+COLUMNS = ["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr", "n_candidates", "fit_ok", "intensity"]
 THRESHOLD_FRAMES = 25          # the movie threshold (median over frames) is taken from at most this many evenly spaced frames
 MAX_TRACK_CANDIDATES = 5       # select: track considers the 5 brightest candidates of each frame
 
@@ -64,8 +67,8 @@ def median_z_for(median_z, step_um: float, axial_sigma_um: float | None) -> int:
     return int(median_z)
 
 
-def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: str = "median_peaks", dilate_px: int = 2,
-                     calib: str | None = None, axial_sigma_um: dict | None = None, **kw) -> pd.DataFrame:
+def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: str = "dog_viterbi", dilate_px: int = 2,
+                     calib: str | None = None, axial_sigma_um: dict | None = None, px_um: float = 0.13, **kw) -> pd.DataFrame:
     """Locate every locus in every frame of one isolated cell from the full z-stacks. `stacks`: {channel: path of (T, Z, Y, X) TIFF}.
     With `calib` (folder of a saved Calibration) the crops are dark/flat/hot-pixel corrected and the measured chromatic shift (lateral and
     axial) of the colour is subtracted from the detected position. `axial_sigma_um`: {channel: nominal axial PSF sigma} for median_z: auto."""
@@ -91,11 +94,29 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
             return cal.correct(v, name, int(r.crop_y0), int(r.crop_x0)).astype(np.float32) if cal is not None else v
 
         frames = list(fr.itertuples())
+        inner, outer, ibg = p["intensity_inner_px"], p["intensity_outer_px"], p["intensity_background"]
         if method == "brightest":
             dets = []
             for i, r in enumerate(frames):
-                d = _detect_one_3d(volume(i, r), reg[i], kw.get("smooth_sigma_px", 1.0), kw.get("smooth_sigma_z", 0.8), kw.get("min_snr", 5.0))
-                dets.append(None if d is None else (d[0], d[1], d[2], d[3], 1, True))
+                v = volume(i, r)
+                d = _detect_one_3d(v, reg[i], kw.get("smooth_sigma_px", 1.0), kw.get("smooth_sigma_z", 0.8), kw.get("min_snr", 5.0))
+                dets.append(None if d is None else (d[0], d[1], d[2], d[3], 1, True, DV.ellipsoid_intensity(v, d[:3], inner, outer, ibg)[0]))
+        elif method == "dog_viterbi":
+            pz = {**p, "median_z": median_z_for(p["median_z"], step, (axial_sigma_um or {}).get(name)), "z_scale": step / px_um}
+            refined = []
+            for i, r in enumerate(frames):
+                v = volume(i, r)
+                c = DV.dog_candidates(v, reg[i], **pz) if reg[i].sum() >= 20 else None
+                rr = [] if c is None else [SP.refine_peak(c, j, **pz) for j in range(len(c["peaks"]))]
+                for q in rr:
+                    q["intensity"] = DV.ellipsoid_intensity(v, q["pos"], inner, outer, ibg)[0]
+                refined.append(rr)
+            vol = float(np.mean(reg.sum(axis=(-2, -1)))) * len(z) * pz["z_scale"]      # where candidates can appear, z in pixel units
+            choice, _ = DV.viterbi_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined],
+                                         [np.array([q["snr"] for q in rr]) for rr in refined], centroid_in_crop(fr, S),
+                                         **{**pz, "search_volume": vol})
+            dets = [None if j is None else (*rr[j]["pos"], rr[j]["snr"], rr[j]["n_candidates"], rr[j]["fit_ok"], rr[j]["intensity"])
+                    for rr, j in zip(refined, choice)]
         elif method == "median_peaks":
             mz = median_z_for(p["median_z"], step, (axial_sigma_um or {}).get(name))
             pz = {**p, "median_z": mz}
@@ -106,18 +127,28 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
                         for i in pick if reg[i].sum() >= 20]
                 thr = float(np.median(vals)) if vals else None
             # pass 2: candidates of every frame, refined (only the brightest unless select: track, which needs the alternatives too)
-            n_keep = MAX_TRACK_CANDIDATES if p["select"] == "track" else 1
+            n_keep = MAX_TRACK_CANDIDATES if p["select"] in ("track", "viterbi") else 1
             refined = []
             for i, r in enumerate(frames):
-                c = SP.candidates(volume(i, r), reg[i], thr, None, **pz) if reg[i].sum() >= 20 else None
-                refined.append([] if c is None else [SP.refine_peak(c, j, **pz) for j in range(min(len(c["peaks"]), n_keep))])
-            if p["select"] == "track":
+                v = volume(i, r)
+                c = SP.candidates(v, reg[i], thr, None, **pz) if reg[i].sum() >= 20 else None
+                rr = [] if c is None else [SP.refine_peak(c, j, **pz) for j in range(min(len(c["peaks"]), n_keep))]
+                for q in rr:
+                    q["intensity"] = DV.ellipsoid_intensity(v, q["pos"], inner, outer, ibg)[0]
+                refined.append(rr)
+            if p["select"] == "viterbi":
+                vol = float(np.mean(reg.sum(axis=(-2, -1)))) * len(z) * step / px_um
+                choice, _ = DV.viterbi_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined],
+                                             [np.array([q["snr"] for q in rr]) for rr in refined], centroid_in_crop(fr, S),
+                                             **{**pz, "z_scale": step / px_um, "search_volume": vol})
+            elif p["select"] == "track":
                 centre = centroid_in_crop(fr, S)
                 choice = SP.select_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined], centre,
                                          int(p["track_window"]), float(p["track_gate_px"]))
             else:
                 choice = [0 if rr else None for rr in refined]
-            dets = [None if j is None else (*rr[j]["pos"], rr[j]["snr"], rr[j]["n_candidates"], rr[j]["fit_ok"]) for rr, j in zip(refined, choice)]
+            dets = [None if j is None else (*rr[j]["pos"], rr[j]["snr"], rr[j]["n_candidates"], rr[j]["fit_ok"], rr[j]["intensity"])
+                    for rr, j in zip(refined, choice)]
         else:
             raise ValueError(f"unknown locus_analysis.method {method!r}")
         for i, d in enumerate(dets):
@@ -128,7 +159,7 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
             if cal is not None:
                 sy, sx = cal.shift_px(name)
                 y, x, zz = y - sy, x - sx, zz - cal.shift_z_um(name)
-            rows.append((cell.cell_id, int(r.t), k, y, x, zz, d[3], d[4], bool(d[5])))
+            rows.append((cell.cell_id, int(r.t), k, y, x, zz, d[3], d[4], bool(d[5]), d[6]))
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
@@ -144,7 +175,7 @@ def locus_distances_3d(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
 def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: float = 0.5) -> tuple[pd.DataFrame, dict]:
     """Compare 3D detections with the true positions (same cell, frame, locus; truth in image coordinates, i.e. drift-corrected).
     err_um = 3D error, err_xy_um = lateral error, err_z_um = signed axial error. Rates and far fraction as in `score_localization`."""
-    from simlive.stage6_analysis.localize import _visible
+    from simlive.stage6_analysis.localize import _visible, intensity_scores
 
     est = pos.assign(est_y_um=pos.lab_y_px * px_um, est_x_um=pos.lab_x_px * px_um)
     tr = truth.assign(visible=_visible(truth))
@@ -163,4 +194,5 @@ def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, 
                  "rms_error_um": float(np.sqrt((ok.err_um ** 2).mean())), "median_error_um": float(ok.err_um.median()),
                  "p95_error_um": float(ok.err_um.quantile(0.95)), "rms_xy_um": float(np.sqrt((ok.err_xy_um ** 2).mean())),
                  "rms_z_um": float(np.sqrt((ok.err_z_um ** 2).mean())), "median_z_um": float(ok.err_z_um.median()),
-                 "frac_far": float((~near).mean()), "rms_error_near_um": float(np.sqrt((ok.err_um[near] ** 2).mean())) if near.any() else np.nan}
+                 "frac_far": float((~near).mean()), "rms_error_near_um": float(np.sqrt((ok.err_um[near] ** 2).mean())) if near.any() else np.nan,
+                 **intensity_scores(j, j.err_um <= far_um)}

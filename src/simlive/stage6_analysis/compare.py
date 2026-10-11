@@ -14,18 +14,23 @@ import pandas as pd
 import yaml
 
 from simlive.stage5_linking.celldata import map_cells
-from simlive.stage6_analysis.localize import localize_loci, score_localization
+from simlive.stage6_analysis.localize import localize_loci, photons_in_frame, score_localization
 from simlive.stage6_analysis.localize3d import localize_loci_3d, score_localization_3d
 
-# key -> (label, settings that differ from the defaults in spots.DEFAULTS). Every median_peaks variant starts from the defaults (not from the
-# run's own locus_analysis block, except dilate_px), so the table means the same thing for every run.
+# key -> (label, settings that differ from spots.DEFAULTS). Every variant starts from the defaults (not from the run's own locus_analysis block,
+# except dilate_px), so the table means the same thing for every run. "default" = the configs' default (dog_viterbi, Chen et al. 2025, with a
+# Gaussian fit and a median shell background); "bennabi" = median_peaks, and the "..." variants change one thing of it.
 VARIANTS = {
     "original": ("Original placeholder: brightest pixel after smoothing + 5x5 centroid", {"method": "brightest"}),
+    "default": ("Default: Chen et al. 2025 (median 3x3, difference of Gaussians at 3 x noise, Viterbi path with a diffusion potential) "
+                "+ Gaussian fit, median shell background for the intensity", {"method": "dog_viterbi"}),
+    "chen_literal": ("Chen et al. 2025 as described: spot centroid, mean shell background",
+                     {"method": "dog_viterbi", "refine": "centroid", "intensity_background": "mean"}),
     "paper_literal": ("As close to Bennabi 2025 as the scale allows: median 3x3, one background per cell, Otsu movie threshold on the "
                       "filtered image, area, smoothing, local maxima, brightest, integer pixel",
                       {"method": "median_peaks", "background": "cell", "threshold": "otsu", "threshold_on": "filtered", "select": "brightest",
                        "refine": "none"}),
-    "default": ("Default: Bennabi 2025 steps + local background, noise threshold on the smoothed image, track choice, Gaussian fit",
+    "bennabi": ("Bennabi 2025 steps + local background, noise threshold on the smoothed image, track choice, Gaussian fit (median_peaks)",
                 {"method": "median_peaks"}),
     "no_median": ("... without the median filter (k = 1)", {"method": "median_peaks", "median_px": 1}),
     "median5": ("... median 5x5", {"method": "median_peaks", "median_px": 5}),
@@ -33,18 +38,23 @@ VARIANTS = {
     "otsu": ("... the paper's Otsu threshold instead of the noise threshold", {"method": "median_peaks", "threshold": "otsu"}),
     "on_filtered": ("... threshold on the median-filtered image (the paper's order)", {"method": "median_peaks", "threshold_on": "filtered"}),
     "brightest_choice": ("... brightest candidate instead of the track choice", {"method": "median_peaks", "select": "brightest"}),
+    "viterbi_choice": ("... Chen et al.'s Viterbi path instead of the track choice", {"method": "median_peaks", "select": "viterbi"}),
     "per_frame": ("... each frame's own threshold instead of one per movie", {"method": "median_peaks", "threshold_scope": "frame"}),
     "integer": ("... integer peak position, no sub-pixel step (as the paper)", {"method": "median_peaks", "refine": "none"}),
     "centroid": ("... centroid instead of the Gaussian fit", {"method": "median_peaks", "refine": "centroid"}),
 }
 VARIANTS_3D = {
     "original": ("Original placeholder (3D): brightest voxel + centroid", {"method": "brightest"}),
-    "default": ("Default in 3D (axial median: auto = only when the planes are closer than the axial PSF sigma)", {"method": "median_peaks"}),
+    "default": ("Default in 3D: Chen et al. 2025 (3D median auto, 3D DoG, Viterbi with a 3D diffusion potential) + 3D Gaussian fit",
+                {"method": "dog_viterbi"}),
+    "chen_literal": ("Chen et al. 2025 in 3D as described: spot centroid, mean shell background",
+                     {"method": "dog_viterbi", "refine": "centroid", "intensity_background": "mean"}),
+    "bennabi": ("median_peaks in 3D (axial median: auto = only when the planes are closer than the axial PSF sigma)", {"method": "median_peaks"}),
     "zmed3": ("... axial median over 3 planes always", {"method": "median_peaks", "median_z": 3}),
     "brightest_choice": ("... brightest candidate instead of the track choice", {"method": "median_peaks", "select": "brightest"}),
-    "brightest_zmed3": ("... brightest candidate with the axial median over 3 planes", {"method": "median_peaks", "select": "brightest", "median_z": 3}),
 }
-SCORE_COLS = ["detection_rate", "n_false_on_dark", "median_error_um", "p95_error_um", "rms_error_um", "frac_far", "rms_error_near_um"]
+SCORE_COLS = ["detection_rate", "n_false_on_dark", "median_error_um", "p95_error_um", "rms_error_um", "frac_far", "rms_error_near_um",
+              "intensity_r_locus0", "intensity_r_locus1"]
 
 
 def run_config(run: Path) -> dict:
@@ -62,7 +72,8 @@ def truth_with_photons(run: Path) -> pd.DataFrame:
 
         ph = imager_for_run(run, run_config(run)).locus_photons()
         truth = truth.merge(ph, on=["t", "cell_id", "locus_id"], how="left")
-    return truth
+    it = s3 / "imaging_truth.csv"
+    return photons_in_frame(truth, pd.read_csv(it) if it.exists() else None)
 
 
 def compare(run: Path, keys: list[str] | None = None, n_workers: int | None = None, calibrated: bool = True, three_d: bool = True,
@@ -100,7 +111,7 @@ def compare(run: Path, keys: list[str] | None = None, n_workers: int | None = No
 
                 stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(n_loci)}
                 pos = map_cells(localize_loci_3d, out5, n_workers=n_workers, stacks=stacks, z_um=zinfo["z_positions_um"],
-                                axial_sigma_um=nominal_axial_sigma(cfg), **kw)
+                                axial_sigma_um=nominal_axial_sigma(cfg), px_um=px_um, **kw)
                 err, sc = score_localization_3d(pos, truth, px_um) if len(pos) else (pd.DataFrame(), {"n_detections": 0})
             name = f"{key}{'_cal' if cal else ''}{'_3d' if dim == '3d' else ''}"
             if len(err):
@@ -110,5 +121,13 @@ def compare(run: Path, keys: list[str] | None = None, n_workers: int | None = No
             progress(f"{name:>22}: detected {sc.get('detection_rate', 0):.3f}, median {1000 * (sc.get('median_error_um') or 0):.0f} nm, "
                      f"p95 {1000 * (sc.get('p95_error_um') or 0):.0f} nm, far {sc.get('frac_far') or 0:.3f}  ({time.time() - t0:.0f}s)")
     tab = pd.DataFrame(rows)
-    tab.to_csv(s6 / "method_comparison.csv", index=False)
+    out = s6 / "method_comparison.csv"
+    if out.exists() and len(tab):           # keep the rows of variants not re-run this time
+        old = pd.read_csv(out)
+        key = set(zip(tab.variant, tab.dim, tab.calibrated))
+        old = old[[k not in key for k in zip(old.variant, old.dim, old.calibrated)]]
+        order = {k: i for i, k in enumerate(list(VARIANTS) + [k for k in VARIANTS_3D if k not in VARIANTS])}
+        tab = pd.concat([old, tab], ignore_index=True)
+        tab = tab.assign(_o=tab.variant.map(order).fillna(99)).sort_values(["dim", "_o", "calibrated"]).drop(columns="_o")
+    tab.to_csv(out, index=False)
     return tab

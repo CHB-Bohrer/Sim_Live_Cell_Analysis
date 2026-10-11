@@ -131,3 +131,75 @@ def test_3d_axial_median_removes_a_single_plane_cosmic_ray():
     axial = SP.find_spot(vol, reg, median_z=3, smooth_sigma_z=0.8)
     assert np.hypot(lateral["pos"][1] - 9, lateral["pos"][2] - 28) < 1.0          # lateral median only: the ray wins
     assert np.hypot(axial["pos"][1] - 20.2, axial["pos"][2] - 19.6) < 0.4 and abs(axial["pos"][0] - zc) < 0.5
+
+
+# ----------------------------------------------------------------------------- dog_viterbi (Chen et al. 2025)
+from simlive.stage6_analysis import dog_viterbi as DV  # noqa: E402
+
+
+def test_ellipsoid_intensity_is_inner_mean_minus_shell_mean():
+    img = np.full((41, 41), 100.0)
+    yy, xx = np.indices(img.shape)
+    inner = ((yy - 20) / 3.5) ** 2 + ((xx - 20) / 3.5) ** 2 <= 1
+    img[inner] += 50.0
+    val, n = DV.ellipsoid_intensity(img, (20, 20), (7, 7, 5), (19, 19, 7))
+    assert n == inner.sum() and val == pytest.approx(50.0)
+    assert DV.ellipsoid_intensity(np.full((9, 41, 41), 7.0), (4, 20, 20))[0] == pytest.approx(0.0)
+
+
+def test_diffusion_potential_is_recovered_from_a_random_walk():
+    rng = np.random.default_rng(8)
+    D = 1.5                                                     # px^2 per frame: per-axis step variance 2 D
+    walk = np.cumsum(rng.normal(0, np.sqrt(2 * D), (2000, 2)), axis=0)
+    est = DV.estimate_D([w[None] for w in walk], [0] * len(walk))
+    assert abs(est - D) < 0.1 * D
+
+
+def test_viterbi_follows_the_spot_past_a_cosmic_ray_and_a_dark_frame():
+    rng = np.random.default_rng(9)
+    n, centre = 12, np.full((12, 2), 20.0)
+    truth = np.cumsum(rng.normal(0, 0.7, (n, 2)), axis=0) + 20
+    peaks, snr = [], []
+    for t in range(n):
+        p, s = [truth[t]], [15.0]
+        if t == 5:
+            p, s = [np.array([5.0, 33.0])], [400.0]                  # spot not detected; only a bright cosmic ray elsewhere
+        p += [rng.uniform(5, 35, 2) for _ in range(2)]               # noise candidates just above the low threshold
+        s += [3.5, 3.2]
+        order = np.argsort(s)[::-1]
+        peaks.append(np.array(p)[order]); snr.append(np.array(s)[order])
+    choice, D = DV.viterbi_track(peaks, snr, centre)
+    for t in range(n):
+        if t == 5:
+            assert choice[t] is None or np.hypot(*(peaks[t][choice[t]] - [5, 33])) > 1, "the cosmic ray was taken"
+        else:
+            assert np.hypot(*(peaks[t][choice[t]] - truth[t])) < 1e-9, t
+    assert 0.25 <= D < 3
+
+
+def test_dog_viterbi_localizes_a_moving_spot_through_noise_and_a_cosmic_ray():
+    rng = np.random.default_rng(10)
+    n, reg = 9, _region()
+    truth = [(20 + 0.2 * np.sin(i), 18 + 0.2 * np.cos(i)) for i in range(n)]
+    stack = np.stack([_noisy(_spot(y, x, 600), rng) for y, x in truth])
+    stack[4] += _spot(10.0, 27.0, 4000, sigma=0.8)
+    out = detect_channel(stack, np.repeat(reg[None], n, 0), "dog_viterbi", np.full((n, 2), S // 2, float))
+    for i in range(n):
+        assert out[i] is not None and np.hypot(out[i][0] - truth[i][0], out[i][1] - truth[i][1]) < 0.3, i
+        assert out[i][5] > 0                                        # the ellipsoid intensity of a real spot is positive
+
+
+def test_viterbi_keeps_a_faint_spot_among_noise_candidates_instead_of_skipping_frames():
+    """Regression: without the clutter term of the track likelihood the path skipped ~30% of frames that held the right (faint) candidate."""
+    rng = np.random.default_rng(11)
+    n = 40
+    truth = 20 + np.cumsum(rng.normal(0, np.sqrt(2 * 1.5), (n, 2)), axis=0) * 0.5
+    peaks, snr = [], []
+    for t in range(n):
+        p = np.vstack([truth[t] + rng.normal(0, 0.3, 2), rng.uniform(0, 40, (3, 2))])
+        s = np.r_[4.0, rng.uniform(3.0, 4.5, 3)]
+        order = np.argsort(s)[::-1]
+        peaks.append(p[order]); snr.append(s[order])
+    choice, _ = DV.viterbi_track(peaks, snr, np.full((n, 2), 20.0), search_volume=40 * 40)
+    right = sum(c is not None and np.hypot(*(peaks[t][c] - truth[t])) < 1.5 for t, c in enumerate(choice))
+    assert right >= n - 1, right                 # without the clutter term: 37 of 40

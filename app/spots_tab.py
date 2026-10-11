@@ -20,14 +20,36 @@ from matplotlib.patches import Circle, Rectangle
 import style
 from simlive.io.runs import REPO_ROOT
 from simlive.stage5_linking.celldata import load_cell
+from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 from simlive.stage6_analysis.compare import VARIANTS, VARIANTS_3D, truth_with_photons
 from simlive.stage6_analysis.localize import analyse_channel, channel_inputs
 
 PAPER_URL = "https://pmc.ncbi.nlm.nih.gov/articles/PMC12372888"
 CODE_URL = "https://github.com/gregorlab/SizeProject2024"
+CHEN_URL = "https://doi.org/10.1038/s41594-025-01615-4"
+CHEN_ARXIV = "https://arxiv.org/abs/2304.08770"
 CH_SHORT = {"locus0": "locus 0 (promoter)", "locus1": "locus 1 (enhancer)"}
 FAR_UM = 0.5
+METHOD_LABEL = {"median_peaks": "median_peaks (Bennabi et al. 2025 steps)", "dog_viterbi": "dog_viterbi (Chen et al. 2025)",
+                "brightest": "brightest (original placeholder)"}
+
+STEPS_CHEN = [
+    ("1 One stack per nucleus", "nuclei segmented (DoG + watershed) and tracked (Voronoi overlap); one 3D stack per nucleus over time",
+     "stage 5's single-cell crops (true or tracked cell IDs), the cell mask grown by dilate_px", "dilate_px"),
+    ("2 Median filter", "3D median filter against salt-and-pepper noise", "median_px × median_px (× median_z planes in z-stacks)", "median_px"),
+    ("3 Difference of Gaussians", "3D DoG for round objects, tuned to high sensitivity: several candidates per nucleus",
+     "DoG with σ = dog_sigma_px (inner ≈ PSF, outer 3×); candidates = local maxima above dog_snr × noise, at most max_candidates", "dog_snr"),
+    ("4 Trajectory", "modified Viterbi: at most one spot per nucleus; links scored by distance with a diffusion potential built "
+                     "iteratively from the random walk of all spots",
+     "Viterbi over the whole movie: link cost = −log of the diffusion propagator, reward = log SNR + log(area / false candidates per frame), "
+     "frames may have no spot "
+     "(viterbi_miss_cost each, gaps up to viterbi_max_gap); D re-estimated from the path itself, per cell", "viterbi_miss_cost"),
+    ("5 Position", "centroid of the spot", "centroid, or the Gaussian fit (refine)", "refine"),
+    ("6 Intensity", "mean in a (7, 7, 5) px ellipsoid minus mean of the (19, 19, 7) px shell around it (removes free MCP-GFP)",
+     "the same ellipsoids, for every method (column intensity; compared with the true photons); the ring's median by default "
+     "(intensity_background: mean = the paper)", "intensity_background"),
+]
 
 STEPS = [
     ("1 Median filter", "rank median, 7 × 7 px", "median, median_px × median_px (3: a spot is ~2 px wide; 5 or more erases it)", "median_px"),
@@ -71,14 +93,26 @@ def _analyse(sdir: str, cid: int, name: str, params: str, calib: str | None, dil
         rows.append({"i": i, "t": int(r.t), "crop_y0": int(r.crop_y0), "crop_x0": int(r.crop_x0), "thr_frame": a["thr_frame"][i],
                      "thr": a["thr"][i], "n_candidates": 0 if c is None else len(c["peaks"]), "chosen": a["choice"][i],
                      "found": f is not None, "y_crop": f["pos"][0] - sy if f else np.nan, "x_crop": f["pos"][1] - sx if f else np.nan,
-                     "snr": f["snr"] if f else np.nan, "fit_ok": f["fit_ok"] if f else None, "sigma_fit_px": f["sigma_fit_px"] if f else np.nan})
+                     "snr": f["snr"] if f else np.nan, "fit_ok": f["fit_ok"] if f else None, "sigma_fit_px": f["sigma_fit_px"] if f else np.nan,
+                     "intensity": f["intensity"] if f else np.nan})
     cands = [None if c is None else c["peaks"] for c in a["candidates"]]
-    return pd.DataFrame(rows), cands
+    return pd.DataFrame(rows), cands, a.get("D_px2")
 
 
 def _frame_steps(sdir: str, cid: int, name: str, params: dict, calib: str | None, dilate_px: int, i: int, thr: float):
+    """Every intermediate image of one frame, in one form for both methods: raw, med, bg, sub (filtered minus background / DoG), smooth
+    (the image the candidates are taken from), area (above the threshold), thr, noise, noise_smooth, candidates."""
     ci = _inputs(sdir, cid, name, calib, dilate_px)
-    return SP.find_spot(ci["stack"][i], ci["region"][i], thr, steps=True, **params), ci["region"][i]
+    img, reg = ci["stack"][i], ci["region"][i]
+    if params.get("method") == "dog_viterbi":
+        c = DV.dog_candidates(img, reg, steps=True, **params)
+        if c is None:
+            return None, reg
+        dog = c["pre"]["sub"]
+        steps = {"raw": c["img"], "med": c["pre"]["med"], "bg": c["pre"]["bg"], "sub": dog, "smooth": dog, "area": (dog > c["thr"]) & reg,
+                 "thr": c["thr"], "noise": c["pre"]["noise_smooth"], "noise_smooth": c["pre"]["noise_smooth"], "candidates": c["peaks"]}
+        return {"found": len(c["peaks"]) > 0, "steps": steps}, reg
+    return SP.find_spot(img, reg, thr, steps=True, **params), reg
 
 
 # ----------------------------------------------------------------------------- parts
@@ -87,13 +121,30 @@ def _part_method(cfg: dict) -> dict:
     la = cfg.get("locus_analysis") or {}
     method = la.get("method", "brightest" if "method" not in la and "median_px" not in la else "median_peaks")
     p = {**SP.DEFAULTS, "dilate_px": 2, **la}
-    st.markdown(f"This run located the loci with **`{method}`**. The `median_peaks` method follows the detection steps of "
-                f"[Bennabi et al. 2025, *Science Advances* 11, eadv7790]({PAPER_URL}) ([their code]({CODE_URL}), "
-                "`modules/raw_live_analysis.py`), who find Mesp2 expression *poles* in live gastruloid movies. Their objects are hundreds of "
-                "pixels across; a locus here is about 2 pixels across, so every size had to be rescaled, and two steps were added.")
-    lines = ["| step | Bennabi et al. 2025 (Mesp2 poles) | here (one locus per colour) | this run |", "|---|---|---|---|"]
-    lines += [f"| **{s}** | {a} | {b} | " + (f"`{k}: {p.get(k)}`" if method == "median_peaks" else "—") + " |" for s, a, b, k in STEPS]
-    st.markdown("\n".join(lines))
+    st.markdown(f"This run located the loci with **{METHOD_LABEL.get(method, method)}**. Two published pipelines are implemented; both are "
+                "scored against the simulation's truth in part 4 and can be tried on any cell in part 2.")
+    with st.expander("median_peaks: the detection steps of Bennabi et al. 2025 (Mesp2 poles in gastruloids), rescaled to spots",
+                     expanded=method == "median_peaks"):
+        st.markdown(f"[Bennabi et al. 2025, *Science Advances* 11, eadv7790]({PAPER_URL}) ([their code]({CODE_URL}), "
+                    "`modules/raw_live_analysis.py`) find Mesp2 expression *poles* in live gastruloid movies. Their objects are hundreds of "
+                    "pixels across; a locus here is about 2 pixels across, so every size had to be rescaled, and two steps were added.")
+        lines = ["| step | Bennabi et al. 2025 (Mesp2 poles) | here (one locus per colour) | this run |", "|---|---|---|---|"]
+        lines += [f"| **{s}** | {a} | {b} | " + (f"`{k}: {p.get(k)}`" if method == "median_peaks" else "—") + " |" for s, a, b, k in STEPS]
+        st.markdown("\n".join(lines))
+    with st.expander("dog_viterbi: the MS2 spot pipeline of Chen, Levo, Zoller & Gregor 2025 (transcription sites in fly embryos)",
+                     expanded=method == "dog_viterbi"):
+        st.markdown(f"[Chen et al. 2025, *Nat. Struct. Mol. Biol.*]({CHEN_URL}) (methods from the [arXiv version]({CHEN_ARXIV}), section III.2; no "
+                    "code was published, so this follows the text) find faint MS2 transcription spots, one labelled allele per nucleus, on the "
+                    "background of free MCP-GFP in the nucleus: the same situation as a locus (or the MS2 spot) in one of our cells. Their 220 nm "
+                    "pixels and two-photon PSF are close to our 130 nm pixels and PSF in units of the PSF, so their sizes are kept.")
+        lines = ["| step | Chen et al. 2025 (MS2 spots) | here | this run |", "|---|---|---|---|"]
+        lines += [f"| **{s}** | {a} | {b} | " + (f"`{k}: {p.get(k)}`" if method == "dog_viterbi" else "—") + " |" for s, a, b, k in STEPS_CHEN]
+        st.markdown("\n".join(lines))
+        st.caption("What the text leaves open and was chosen here: the DoG widths, the threshold (3 × noise), the Viterbi score (link = "
+                   "−log diffusion propagator; reward = log SNR plus the clutter term log(area / false candidates per frame), without which "
+                   "the path skipped ~30% of frames holding the right spot; a cost per frame without a spot) and estimating the diffusion "
+                   "potential per cell rather than pooled over all spots of the movie. Details: src/simlive/stage6_analysis/dog_viterbi.py "
+                   "and docs/SPOT_FINDING.md.")
     with st.expander("Why the sizes change, and what was measured"):
         st.markdown(
             "- **Median filter.** Theirs (7 px) is tiny next to a pole, so it only removes pixel noise. A 3 × 3 median already halves a spot "
@@ -113,14 +164,36 @@ def _part_method(cfg: dict) -> dict:
 
 def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
     keys = list(SP.DEFAULTS) + ["dilate_px"]
+
+    def run_settings():
+        return {**{k: p[k] for k in keys}, "method": p["method"] if p["method"] in ("median_peaks", "dog_viterbi") else "dog_viterbi"}
+
     if st.session_state.get("spt_params_run") != st.session_state.get("_run_path"):     # new run: start from its own settings
-        st.session_state["spt_params"] = {k: p[k] for k in keys}
+        st.session_state["spt_params"] = run_settings()
         st.session_state["spt_params_run"] = st.session_state.get("_run_path")
     cur = st.session_state["spt_params"]
     with st.expander("⚙ Settings of the spot finder (start from this run's; change and press Apply)", expanded=False):
         with st.form("spt_form"):
-            c1, c2, c3, c4 = st.columns(4)
             new = dict(cur)
+            new["method"] = st.radio("Method", ["dog_viterbi", "median_peaks"], ["dog_viterbi", "median_peaks"].index(cur["method"]),
+                                     format_func=METHOD_LABEL.get, horizontal=True)
+            st.markdown("**dog_viterbi (Chen et al. 2025)**")
+            d1, d2, d3, d4 = st.columns(4)
+            ds = list(cur["dog_sigma_px"])
+            new["dog_sigma_px"] = [d1.slider("DoG inner σ (px)", 0.5, 3.0, float(ds[0]), 0.25),
+                                   d1.slider("DoG outer σ (px)", 1.0, 8.0, float(ds[1]), 0.5)]
+            new["dog_snr"] = d2.slider("Candidate threshold (× noise)", 1.5, 10.0, float(cur["dog_snr"]), 0.5,
+                                       help="Chen et al. tune it low (high sensitivity): the Viterbi path then picks the real spot")
+            new["max_candidates"] = d2.slider("Candidates kept per frame", 1, 15, int(cur["max_candidates"]))
+            new["viterbi_miss_cost"] = d3.slider("Cost of a frame without a spot", 0.0, 10.0, float(cur["viterbi_miss_cost"]), 0.5,
+                                                 help="Higher = the path takes a weak or distant candidate rather than skip a frame")
+            new["viterbi_max_gap"] = d3.slider("Longest gap (frames)", 1, 20, int(cur["viterbi_max_gap"]))
+            new["intensity_inner_px"] = [d4.slider("Intensity ellipse (px)", 3, 15, int(cur["intensity_inner_px"][0]), 2)] * 2 + [int(cur["intensity_inner_px"][2])]
+            new["intensity_outer_px"] = [d4.slider("Background ellipse (px)", 9, 31, int(cur["intensity_outer_px"][0]), 2)] * 2 + [int(cur["intensity_outer_px"][2])]
+            new["intensity_background"] = d4.radio("Background of the ring", ["median", "mean"], ["median", "mean"].index(cur["intensity_background"]),
+                                                   horizontal=True, help="mean = Chen et al.; median = robust to a cosmic ray or another spot in the ring")
+            st.markdown("**median_peaks (Bennabi et al. 2025 steps) and shared settings**")
+            c1, c2, c3, c4 = st.columns(4)
             new["median_px"] = c1.select_slider("Median filter (px)", [1, 3, 5, 7], int(cur["median_px"]), help="1 = off. The paper uses 7 for objects hundreds of px wide.")
             new["background"] = c2.radio("Background", ["local", "cell"], ["local", "cell"].index(cur["background"]), horizontal=True,
                                          help="local: wider median subtracted; cell: one value per cell and frame")
@@ -133,7 +206,8 @@ def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
             new["min_snr"] = c4.slider("min_snr", 2.0, 10.0, float(cur["min_snr"]), 0.5)
             new["min_area_px"] = c1.slider("Smallest area (px)", 1, 15, int(cur["min_area_px"]))
             new["min_sep_px"] = c2.slider("Min distance between maxima (px)", 1, 15, int(cur["min_sep_px"]))
-            new["select"] = c3.radio("Choice", ["track", "brightest"], ["track", "brightest"].index(cur["select"]), horizontal=True)
+            new["select"] = c3.radio("Choice", ["track", "viterbi", "brightest"], ["track", "viterbi", "brightest"].index(cur["select"]), horizontal=True,
+                                     help="track: nearest the neighbouring frames' position (ours); viterbi: Chen et al.'s most likely path; brightest")
             new["refine"] = c4.radio("Position", ["gaussian", "centroid", "none"], ["gaussian", "centroid", "none"].index(cur["refine"]), horizontal=True)
             new["dilate_px"] = c1.slider("Grow the cell mask by (px)", 0, 8, int(cur["dilate_px"]))
             new["track_gate_px"] = c2.slider("Track gate (px)", 2.0, 20.0, float(cur["track_gate_px"]), 1.0, help="choice = track: max distance from the neighbours' median position")
@@ -141,7 +215,7 @@ def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
                 st.session_state["spt_params"] = new
                 cur = new
         if st.button("Reset to this run's settings"):
-            st.session_state["spt_params"] = {k: p[k] for k in keys}
+            st.session_state["spt_params"] = run_settings()
             cur = st.session_state["spt_params"]
     use_cal = st.checkbox("Apply the run's calibration (dark, flat-field, hot pixels, chromatic shift)", has_cal, key="spt_cal",
                           disabled=not has_cal, help="Only for runs made with 'Simulate and apply a calibration'.")
@@ -163,7 +237,7 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
     first = sdir / "cells" / f"cell_{int(summ.cell_id.iloc[0]):04d}"
     chans = sorted(q.stem for q in first.glob("locus*.tif"))
     name = c2.radio("Colour", chans, format_func=lambda c: CH_SHORT.get(c, c), horizontal=True, key="spt_ch")
-    df, cands = _analyse(str(sdir), int(cid), name, json.dumps(params, sort_keys=True), calib, dil)
+    df, cands, D = _analyse(str(sdir), int(cid), name, json.dumps(params, sort_keys=True), calib, dil)
     lid = int(name[5:])
     if truth is not None:
         tr = truth[(truth.cell_id == cid) & (truth.locus_id == lid)].set_index("t")
@@ -171,16 +245,24 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
         df["x_true"] = tr.reindex(df.t).x_um.to_numpy() / px_um - df.crop_x0
         df["visible"] = (tr.reindex(df.t).photons.to_numpy() > 0) if "photons" in tr else True
         df["photons"] = tr.reindex(df.t).photons.to_numpy() if "photons" in tr else np.nan
+        df["photons_frame"] = tr.reindex(df.t).photons_frame.to_numpy() if "photons_frame" in tr else df["photons"]
         df["err_nm"] = 1000 * px_um * np.hypot(df.y_crop - df.y_true, df.x_crop - df.x_true)
     n_vis = int(df.visible.sum()) if "visible" in df else len(df)
     found = df[df.found]
     far = (found.err_nm > 1000 * FAR_UM).sum() if "err_nm" in df else 0
+    good = found[found.err_nm <= 1000 * FAR_UM] if "err_nm" in df else found
+    r_int = (np.corrcoef(good.intensity, good.photons_frame)[0, 1] if "photons_frame" in good and len(good) > 5
+             and good.photons_frame.std() > 0 and good.intensity.std() > 0 else np.nan)
     style.stat_grid(st, [("frames", f"{len(df)}", "frames this cell exists in"),
                          ("found", f"{len(found)} of {n_vis}", "frames with a locus found / frames where a spot was drawn"),
                          ("wrong object", f"{far}", f"found more than {FAR_UM} µm from the truth (hot pixel, cosmic ray, noise peak)"),
                          ("median error", f"{found.err_nm.median():.0f} nm" if "err_nm" in df and len(found) else "–", "typical distance to the truth"),
                          ("threshold used", f"{df.thr.iloc[0]:.1f} counts" if np.isfinite(df.thr.iloc[0]) else "–", "above background"),
-                         ("frames with >1 candidate", f"{(df.n_candidates > 1).sum()}", "where the choice mattered")])
+                         ("frames with >1 candidate", f"{(df.n_candidates > 1).sum()}", "where the choice mattered"),
+                         ("intensity vs true photons", f"r = {r_int:.2f}" if np.isfinite(r_int) else "–",
+                          "correlation of the ellipsoid intensity with the photons the simulation drew (correct detections)")]
+                    + ([("diffusion potential D", f"{D:.2f} px²/frame", "estimated by the Viterbi iterations from the path's own steps "
+                         "(relative to the nucleus centroid)")] if D is not None else []))
     # jump list: problem frames first
     probs = []
     if "err_nm" in df:
@@ -202,7 +284,7 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
         st.info("The cell region is too small in this frame.")
         return
     _steps_figure(res, region, row, cands[i], params)
-    _time_figure(df, i)
+    _time_figure(df, i, cands, px_um)
 
 
 def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, params: dict):
@@ -214,8 +296,13 @@ def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, p
     ref = (row.y_true, row.x_true) if "y_true" in row and np.isfinite(row.y_true) else ((row.y_crop, row.x_crop) if row.found else None)
     fig, axes = plt.subplots(2, 4, figsize=(17, 8.6))
     bgimg = bg if np.ndim(bg) else np.full(raw.shape, float(bg))
-    panels = [("① recorded", raw, (lo, hi)), ("① median filtered", med, (lo, hi)), ("background (wider median)", bgimg, (lo, hi)),
-              ("⑤ smoothed, ④ area, ⑥ candidates", sm, (0, max(np.percentile(sm[region], 99.9), 1e-9)))]
+    dog = params.get("method") == "dog_viterbi"
+    t = (["recorded", "② median filtered", "③ outer Gaussian (local background)", "③ DoG, area above threshold, candidates",
+          "zoom: DoG", "zoom: DoG and threshold", "⑤ position, ⑥ intensity ellipses"] if dog else
+         ["① recorded", "① median filtered", "background (wider median)", "⑤ smoothed, ④ area, ⑥ candidates",
+          "zoom: median − background", "zoom: smoothed and threshold", "⑦ position, intensity ellipses"])
+    panels = [(t[0], raw, (lo, hi)), (t[1], med, (lo, hi)), (t[2], bgimg, (lo, hi)),
+              (t[3], sm, (0, max(np.percentile(sm[region], 99.9), 1e-9)))]
     for ax, (title, im, (a, b)) in zip(axes[0], panels):
         ax.imshow(im[y0:y1, x0:x1], cmap="gray", vmin=a, vmax=b, extent=(x0 - 0.5, x1 - 0.5, y1 - 0.5, y0 - 0.5))
         ax.contour(np.arange(x0, x1), np.arange(y0, y1), region[y0:y1, x0:x1], levels=[0.5], colors="#eab308", linewidths=0.8)
@@ -237,8 +324,8 @@ def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, p
         zy1, zx1 = min(cy + h + 1, raw.shape[0]), min(cx + h + 1, raw.shape[1])
         ext = (zx0 - 0.5, zx1 - 0.5, zy1 - 0.5, zy0 - 0.5)
         zl, zh = np.percentile(raw[zy0:zy1, zx0:zx1], 1), raw[zy0:zy1, zx0:zx1].max()
-        zpanels = [("zoom: recorded", raw, (zl, zh)), ("zoom: median − background", sub, (0, max(sub[zy0:zy1, zx0:zx1].max(), 1e-9))),
-                   ("zoom: smoothed and threshold", sm, (0, max(sm[zy0:zy1, zx0:zx1].max(), 1e-9))), ("⑦ position (recorded pixels)", raw, (zl, zh))]
+        zpanels = [("zoom: recorded", raw, (zl, zh)), (t[4], sub, (0, max(sub[zy0:zy1, zx0:zx1].max(), 1e-9))),
+                   (t[5], sm, (0, max(sm[zy0:zy1, zx0:zx1].max(), 1e-9))), (t[6], raw, (zl, zh))]
         for ax, (title, im, (a, b)) in zip(axes[1], zpanels):
             ax.imshow(im[zy0:zy1, zx0:zx1], cmap="gray", vmin=a, vmax=b, extent=ext, interpolation="nearest")
             ax.set_title(title, fontsize=13)
@@ -252,8 +339,12 @@ def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, p
             axp.plot(row.x_crop, row.y_crop, "+", color="#ef4444", ms=18, mew=2.5, label="found")
             fh = int(params.get("fit_half_px", 3))
             pk = cand[int(row.chosen)] if cand is not None and row.chosen is not None and not pd.isna(row.chosen) else None
-            if pk is not None:
+            if pk is not None and params.get("refine") == "gaussian":
                 axp.add_patch(Rectangle((pk[1] - fh - 0.5, pk[0] - fh - 0.5), 2 * fh + 1, 2 * fh + 1, fill=False, ec="#f59e0b", lw=1.2, ls="--"))
+            from matplotlib.patches import Ellipse
+
+            for diam, col in ((params.get("intensity_inner_px", (7, 7, 5)), "#22c55e"), (params.get("intensity_outer_px", (19, 19, 7)), "#a78bfa")):
+                axp.add_patch(Ellipse((row.x_crop, row.y_crop), float(diam[0]), float(diam[1]), fill=False, ec=col, lw=1.4))
     else:
         for ax in axes[1]:
             ax.axis("off")
@@ -267,16 +358,22 @@ def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, p
                          ("candidates", f"{len(s['candidates'])}", "local maxima inside the area; red circle = chosen"),
                          ("SNR of the choice", f"{row.snr:.1f}" if row.found else "–", "smoothed peak / smoothed noise"),
                          ("error", f"{row.err_nm:.0f} nm" if "err_nm" in row and row.found else "–", "distance to the true position"),
-                         ("fitted σ", f"{row.sigma_fit_px:.2f} px" if row.found and np.isfinite(row.sigma_fit_px) else "–", "width of the fitted Gaussian")])
+                         ("fitted σ", f"{row.sigma_fit_px:.2f} px" if row.found and np.isfinite(row.sigma_fit_px) else "–", "width of the fitted Gaussian"),
+                         ("intensity", f"{row.intensity:.1f}" if row.found and np.isfinite(row.intensity) else "–",
+                          "mean in the green ellipse minus mean of the ring out to the purple one (Chen et al. 2025)"),
+                         ("true photons (this frame)", f"{row.photons_frame:.0f}" if "photons_frame" in row and np.isfinite(row.photons_frame) else "–",
+                          "photons the simulation drew for this spot, after bleaching")])
     st.caption("Top: the whole cell (yellow = its mask grown by the dilation). Purple square = the zoom below. Cyan outline = the area above the "
-               "threshold; numbered circles = candidates (red = the one chosen as the locus). Bottom right: cyan ○ = true position (drift-corrected), "
-               "red + = found (after removing the measured chromatic shift if the calibration is applied), dashed square = the fit window.")
+               "threshold; numbered circles = candidates (red = the one chosen as the locus; with dog_viterbi the choice is the Viterbi path over "
+               "the whole movie, so it need not be the brightest). Bottom right: cyan ○ = true position (drift-corrected), red + = found (after "
+               "removing the measured chromatic shift if the calibration is applied), dashed square = the fit window, green / purple ellipses = "
+               "where the intensity and its background are measured.")
 
 
-def _time_figure(df: pd.DataFrame, i: int):
+def _time_figure(df: pd.DataFrame, i: int, cands: list, px_um: float):
     if "err_nm" not in df:
         return
-    fig, axes = plt.subplots(1, 2, figsize=(17, 3.6))
+    fig, axes = plt.subplots(1, 3, figsize=(17, 3.8))
     f = df[df.found]
     axes[0].semilogy(f.t, f.err_nm.clip(lower=1), ".", color="#0f766e", ms=6)
     far = f[f.err_nm > 1000 * FAR_UM]
@@ -286,18 +383,32 @@ def _time_figure(df: pd.DataFrame, i: int):
         axes[0].plot(miss.t, np.full(len(miss), 2.0), "|", color="#b45309", ms=14, mew=2, label="missed")
     axes[0].set_title("Error per frame (nm)")
     axes[0].legend(fontsize=10)
-    axes[1].plot(df.t, df.n_candidates, drawstyle="steps-mid", color="#64748b", label="candidates")
-    ax2 = axes[1].twinx()
-    ax2.plot(df.t, df.snr, ".", color="#2563eb", ms=5)
-    ax2.set_ylabel("SNR", color="#2563eb")
-    ax2.grid(False)
-    axes[1].set_title("Candidates per frame (grey) and SNR of the choice (blue)")
+    # every candidate's distance from the true spot: shows whether the right one was there and whether the choice took it
+    for r, pk in zip(df.itertuples(), cands):
+        if pk is None or not len(pk) or not np.isfinite(r.y_true):
+            continue
+        d = 1000 * px_um * np.hypot(pk[:, -2] - r.y_true, pk[:, -1] - r.x_true)
+        axes[1].semilogy(np.full(len(d), r.t), np.clip(d, 1, None), ".", color="#94a3b8", ms=5)
+        if r.chosen is not None and not pd.isna(r.chosen):
+            axes[1].semilogy([r.t], [max(d[int(r.chosen)], 1)], ".", color="#ef4444", ms=7)
+    axes[1].axhline(1000 * FAR_UM, color="#b91c1c", lw=0.8, ls=":")
+    axes[1].set_title("Candidates: distance to truth (nm)")
+    g = df[df.found & np.isfinite(df.get("photons_frame", np.nan))] if "photons_frame" in df else df.iloc[:0]
+    if len(g):
+        axes[2].plot(g.t, g.photons_frame / g.photons_frame.max(), color="#64748b", lw=1.5, label="true photons")
+        axes[2].plot(g.t, g.intensity / max(np.nanmax(g.intensity), 1e-9), ".", color="#0f766e", ms=5, label="measured intensity")
+        axes[2].legend(fontsize=10)
+    axes[2].set_title("Brightness (scaled to max)")
     for ax in axes:
         ax.axvline(df.t.iloc[i], color="orange", lw=1.2)
         ax.set_xlabel("frame")
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)
+    st.caption("Left: distance of the found locus from the truth in every frame. Middle: every candidate's distance from the true spot (grey) and "
+               "the one chosen (red); a red dot above the dotted 0.5 µm line is a wrong pick, a frame with a grey dot below the line but no red "
+               "dot is a spot that was there but not taken. Right: the measured ellipsoid intensity (dots) and the photons the simulation drew "
+               "(line), each scaled to its maximum. Orange line = the frame shown above.")
 
 
 def _part_scores(run: Path):
@@ -314,7 +425,8 @@ def _part_scores(run: Path):
             rows.append({"analysis": label, "found (of visible)": s.get("detection_rate"), "wrong object": s.get("frac_far"),
                          "median error (nm)": 1000 * s["median_error_um"], "95th pct (nm)": 1000 * s["p95_error_um"],
                          "rms of good ones (nm)": 1000 * s["rms_error_near_um"] if s.get("rms_error_near_um") is not None else None,
-                         "spots with no light": s.get("n_false_on_dark")})
+                         "spots with no light": s.get("n_false_on_dark"),
+                         "intensity r (locus 0 / 1)": " / ".join(f"{s[k]:.2f}" for k in ("intensity_r_locus0", "intensity_r_locus1") if k in s) or None})
     if rows:
         st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
         st.caption(f"'Wrong object' = share of detections more than {FAR_UM} µm from the truth (the finder picked a hot pixel, cosmic ray or noise "
@@ -362,7 +474,9 @@ def _part_compare(run: Path):
     tab["what"] = tab.name.map(labels).fillna(tab.label)
     show = pd.DataFrame({"variant": tab.name, "calibrated": tab.calibrated, "found": tab.detection_rate, "wrong object": tab.frac_far,
                          "median (nm)": 1000 * tab.median_error_um, "95th pct (nm)": 1000 * tab.p95_error_um,
-                         "rms of good ones (nm)": 1000 * tab.rms_error_near_um, "what changes": tab.what})
+                         "rms of good ones (nm)": 1000 * tab.rms_error_near_um,
+                         "intensity r locus 0": tab.get("intensity_r_locus0"), "intensity r locus 1": tab.get("intensity_r_locus1"),
+                         "what changes": tab.what})
     st.dataframe(show.round(3), hide_index=True, width="stretch")
     for cal in sorted(tab.calibrated.unique()):
         d = tab[(tab.calibrated == cal) & (tab.dim == "2d")]
@@ -384,7 +498,7 @@ def _part_compare(run: Path):
 
 
 def render(st_, run_path: Path, R: dict):
-    style.intro(st, "How stage 6 finds each locus in each cell: the steps (adapted from Bennabi et al. 2025), every intermediate image for "
+    style.intro(st, "How stage 6 finds each locus in each cell: the steps (Chen et al. 2025 by default, or Bennabi et al. 2025), every intermediate image for "
                     "any cell and frame, the error of every frame against the simulation's truth, and a comparison of methods.",
                 "Part 2: pick a cell, a colour and a frame (or jump to a problem frame), and change the settings to see what each step "
                 "does. Part 4: press Compare methods to score every variant on this whole run.")

@@ -271,15 +271,20 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
                                 "enhancer is close. Works best with the saved chromatin library (real distances).")
         st.markdown("**Spot finding (stage 6)**")
         st.caption("How each locus is found in each cell. The 🔎 Spot finding tab shows every step and compares methods.")
-        l_meth = st.radio("Method", ["median_peaks", "brightest"], key="l_meth", horizontal=True,
-                          format_func={"median_peaks": "Bennabi 2025 steps (median, threshold, peaks)", "brightest": "Original: brightest pixel"}.get,
+        l_meth = st.radio("Method", ["dog_viterbi", "median_peaks", "brightest"], key="l_meth", horizontal=True,
+                          format_func={"median_peaks": "Bennabi 2025 steps", "dog_viterbi": "Chen 2025 (DoG + Viterbi)",
+                                       "brightest": "Original: brightest pixel"}.get,
                           help="median_peaks: median filter, local background, one threshold per movie, local maxima, Gaussian fit "
-                               "(adapted from Bennabi et al. 2025, Sci. Adv.). brightest: the original placeholder.")
-        l_sel = st.radio("Which candidate is the locus", ["track", "brightest"], key="l_sel", horizontal=True,
-                         format_func={"track": "Consistent with neighbouring frames", "brightest": "Brightest"}.get,
-                         help="Consistent with neighbouring frames skips one-frame events such as cosmic rays (our addition, not in the paper).")
-        l_snr = st.slider("Detection threshold (signal-to-noise)", 3.0, 10.0, 5.0, 0.5, key="l_snr",
-                          help="Lower finds dimmer spots but risks picking noise peaks.")
+                               "(adapted from Bennabi et al. 2025, Sci. Adv.). dog_viterbi: median filter, difference of Gaussians with a low "
+                               "threshold, then the most likely path through the candidates over the whole movie (Chen et al. 2025, NSMB). "
+                               "brightest: the original placeholder.")
+        l_sel = st.radio("Which candidate is the locus (median_peaks)", ["track", "viterbi", "brightest"], key="l_sel", horizontal=True,
+                         format_func={"track": "Consistent with neighbouring frames", "viterbi": "Most likely path (Chen 2025)",
+                                      "brightest": "Brightest"}.get,
+                         help="Consistent with neighbouring frames skips one-frame events such as cosmic rays (our addition, not in the paper). "
+                              "dog_viterbi always chooses by its Viterbi path.")
+        l_snr = st.slider("Detection threshold (signal-to-noise, median_peaks)", 3.0, 10.0, 5.0, 0.5, key="l_snr",
+                          help="Lower finds dimmer spots but risks picking noise peaks. dog_viterbi uses its own low threshold (dog_snr, 3).")
         l_ie = error_controls("loci")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 

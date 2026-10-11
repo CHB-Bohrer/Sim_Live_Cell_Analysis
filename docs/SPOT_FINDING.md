@@ -1,11 +1,93 @@
-# Spot finding (stage 6): method, source, measured performance
+# Spot finding (stage 6): methods, sources, measured performance
 
 Stage 6 finds one locus per colour in every frame of every isolated cell. It is still a placeholder for the user's own analysis, but it is
-now a defensible one: its steps follow a published pipeline, every step can be inspected in the dashboard (🔎 Spot finding tab), and every
+now a defensible one: two published pipelines are implemented, every step can be inspected in the dashboard (🔎 Spot finding tab), and every
 choice below was scored against the simulation's ground truth.
 
-Code: `src/simlive/stage6_analysis/spots.py` (the steps), `localize.py` (2D, per cell), `localize3d.py` (z-stacks), `compare.py` +
-`scripts/compare_localizers.py` (method comparison). Config: the `locus_analysis:` block (`configs/loci_*.yaml`).
+| `locus_analysis.method` | source | code |
+|---|---|---|
+| `dog_viterbi` (**default**) | Chen, Levo, Zoller & Gregor 2025, *Nat. Struct. Mol. Biol.* (MS2 transcription spots) | `stage6_analysis/dog_viterbi.py` |
+| `median_peaks` | Bennabi et al. 2025, *Sci. Adv.* (Mesp2 poles), rescaled to spots | `stage6_analysis/spots.py` |
+| `brightest` | the original placeholder | `localize.py` |
+
+Code around them: `localize.py` (2D, per cell), `localize3d.py` (z-stacks), `compare.py` + `scripts/compare_localizers.py` (method comparison).
+Every method also reports Chen et al.'s ellipsoid **intensity** of each detection, scored against the photons the simulation drew.
+
+# Part A: `dog_viterbi`, after Chen et al. 2025 (default)
+
+## Source
+
+Chen, Levo, Zoller & Gregor, "A conserved coupling of transcriptional ON and OFF periods underlies bursting dynamics", *Nat. Struct. Mol.
+Biol.* (2025), doi [10.1038/s41594-025-01615-4](https://doi.org/10.1038/s41594-025-01615-4); methods read from the open arXiv version
+[2304.08770v3](https://arxiv.org/abs/2304.08770) (section III.2 "Transcription spot tracking and signal integration") on 2026-10-11. No code
+was published, so this implementation follows the text. Their setting: MS2 spots of ONE labelled allele per nucleus on the background of free
+MCP-GFP in the nucleus, two-photon microscope, 40x/1.3 NA, 220 nm pixels, 12 planes 1 um apart, 10 s per stack. That is the situation of a
+locus (or the MS2 spot) in one of our cells; in units of the PSF their pixel sizes match ours, so their numbers are kept.
+
+## The steps
+
+| step | Chen et al. 2025 (text) | here | config key |
+|---|---|---|---|
+| 1 one stack per nucleus | nuclei segmented (DoG + watershed), tracked by Voronoi overlap; one 3D stack per nucleus over time | stage 5's single-cell crops | `dilate_px` |
+| 2 median filter | 3D median filter against salt-and-pepper noise | 3 x 3 (x `median_z` planes in z-stacks; auto) | `median_px`, `median_z` |
+| 3 candidates | 3D difference of Gaussians, "tuned to high sensitivity": several candidates per nucleus | DoG sigma 1 and 3 px (z: 0.8 and 2 planes); local maxima above 3 x the DoG noise; at most 5 | `dog_sigma_px`, `dog_snr`, `max_candidates` |
+| 4 trajectory | "modified Viterbi": at most one spot per nucleus; links scored by pairwise distance with a diffusion potential built iteratively from the random walk of the spots | Viterbi over the whole movie (below) | `viterbi_*` |
+| 5 position | centroid of the spot | Gaussian fit (`refine: gaussian`; `centroid` = as described) | `refine` |
+| 6 intensity | mean in a (7, 7, 5) px ellipsoid minus the MEAN of the (19, 19, 7) px shell | same ellipsoids; the shell's MEDIAN by default (`mean` = as described) | `intensity_*` |
+
+The Viterbi score (the text gives no formula; this is the standard track likelihood): nodes are candidates, positions relative to the nucleus
+centroid (z scaled to pixels). Link cost over a gap of g frames = -log of the diffusion propagator, |d|^2 / (4 D g) + (ndim/2) log(4 pi D g);
+each skipped frame costs `viterbi_miss_cost` (2); gaps up to `viterbi_max_gap` (5). Node reward = log(SNR) + log(region size / false
+candidates per frame). The second term is the clutter density of a track likelihood: a candidate left off the path must be explained as a
+false one. **Without it the path skipped 547 of 1914 frames that held the right candidate** (the extra link normalisation made skipping
+cheaper than keeping a faint spot); with it, 1 of 1914 (`tests/test_spots.py::test_viterbi_keeps_a_faint_spot...`). D starts from the
+brightest-candidate path and is re-estimated from the chosen path's own steps (median of |d|^2 / g, robust) up to 3 times, per cell and
+colour (the paper pools all spots of a movie; `viterbi_D_px2` fixes it). Estimated D here: 1.4-2.3 px^2 per frame (0.13 um, 10 s frames).
+
+## Measured: dog_viterbi (default) against the alternatives
+
+Same protocol as part B below (stage 6 re-run on the saved crops with `scripts/compare_localizers.py`; "found" over loci with light; "wrong" =
+> 0.5 um from the truth; errors in nm; intensity r = Pearson correlation of the measured intensity with the photons drawn in that frame,
+correct detections only, locus 0 / locus 1). One seed per run.
+
+| run | finder | cal. | found | wrong | median | p95 | intensity r |
+|---|---|---|---|---|---|---|---|
+| library (probes + MS2, all errors) | original | yes | 82.2% | 0.13% | 27 | 76 | 0.79 / 0.82 |
+| | median_peaks | yes | 90.7% | 0.06% | 25 | 74 | 0.80 / 0.81 |
+| | **dog_viterbi** | yes | **98.0%** | **0%** | 26 | 98 | 0.78 / 0.81 |
+| | original | no | 86.5% | 9.8% | 54 | 4681 | 0.77 / 0.80 |
+| | **dog_viterbi** | no | **97.8%** | 0.1% | 50 | 124 | 0.76 / 0.79 |
+| toy (seed 12, probes + MS2, all errors) | original | yes | 95.9% | 0.1% | 25 | 60 | 0.83 / 0.87 |
+| | median_peaks | yes | 97.9% | 0% | 21 | 54 | 0.83 / 0.86 |
+| | **dog_viterbi** | yes | **99.5%** | 0.05% | 22 | 55 | 0.83 / 0.87 |
+| 3D (seed 22), 2D on projections | original | yes | 100% | 4.7% | 40 | 110 | |
+| | **dog_viterbi** | yes | 100% | **0%** | 39 | 81 | |
+| 3D (seed 22), in 3D | original | yes | 99.7% | 4.7% | 101 | 320 | 0.40 / 0.59 |
+| | median_peaks | yes | 99.1% | 0.3% | 84 | 183 | 0.41 / 0.56 |
+| | **dog_viterbi** | yes | **100%** | **0%** | 84 | 177 | 0.40 / 0.58 |
+
+A second 3D run (seed 23, made with dog_viterbi as the pipeline default; harder: the original picks the wrong object 7-10% of the time):
+calibrated 2D found / wrong / p95 = original 100% / 7.2% / 3258 nm, **dog_viterbi 100% / 0.3% / 91 nm**, median_peaks 98.8% / 0% / 90 nm;
+calibrated 3D = original 100% / 6.9% / 5137 nm, **dog_viterbi 100% / 0% / 274 nm** (median 106 nm), median_peaks 99.1% / 0.3% / 275 nm;
+uncalibrated 3D wrong picks: original 9.7%, dog_viterbi 1.6%, median_peaks 0.9%. With bright spots the two new methods are about equal.
+
+Intensities use the median of the background ring (the default, for every method). With the paper's MEAN, one frame of the toy run where a
+bright object sat in the ring got a negative intensity, and locus 1's r fell from 0.87 to 0.75 (dog_viterbi) or 0.72 (median_peaks).
+
+Reading it: dog_viterbi finds 7-16% more of the spots on the hard (faint, probe-model) run without picking more wrong objects; the median
+error is unchanged. With bright spots (the 3D runs) it and median_peaks are about equal (both far better than the original). Its
+95th percentile is higher there only because the extra detections are the faint spots (100-300 photons), which no method locates well; filter
+on `snr` if a use needs only bright ones. Variants as described in the paper (`chen_literal`: centroid, mean background) and one-change
+variants are in each run's `stage6_analysis/method_comparison.csv` (🔎 Spot finding tab, part 4). The intensity follows the true photons only
+moderately in 2D (r ~0.8 in the probe runs: shot noise of ~300-photon spots, flat-field). Read r only where the true brightness varies: in the
+3D runs the probe model is off, every spot has the same 600 photons apart from slow bleaching, so r is low (0.2-0.6) whatever the method; the
+measured intensity there mostly varies with the spot's height between the 0.8 um planes.
+
+Open for dog_viterbi: one path per cell, so an OFF period longer than `viterbi_max_gap` frames ends the track (fine for loci, which are
+always there; for MS2 spots, add re-acquisition after long gaps); D per cell rather than pooled; DoG widths and `dog_snr` set by reasoning,
+not tuned; the paper's two-photon PSF and our widefield PSF differ in axial shape.
+
+# Part B: `median_peaks`, after Bennabi et al. 2025
 
 ## Source
 
@@ -44,7 +126,7 @@ Two additions (not in the paper), both measured below:
 - **track choice**: a cosmic ray lasts one frame; the locus stays near where it was. In max projections of z-stacks every plane's cosmic rays
   end up in the 2D image (17 planes: ~17x the rate), and the brightest-candidate rule picked them in ~4.5% of frames.
 
-The default thresholds the *smoothed* image (`threshold_on: smoothed`) rather than the median-filtered one as the paper does: the Gaussian is
+median_peaks thresholds the *smoothed* image (`threshold_on: smoothed`) rather than the median-filtered one as the paper does: the Gaussian is
 then also the detection filter, which has the better signal-to-noise ratio for a spot. `threshold_on: filtered` is the paper's order.
 
 ## Measured (stage 6 re-run on saved crops, true cell IDs; `scripts/compare_localizers.py`; 2026-10-11)
@@ -59,12 +141,12 @@ Library run (seed 11, 8 cells x 120 frames, probes + MS2 on, all image errors; t
 |---|---|---|---|---|---|---|
 | original (brightest pixel + 5x5 centroid) | no | 86.5% | 9.8% | 54 | 4681 | 64 |
 | paper literal (cell background, Otsu, brightest, integer) | no | 100% | 15.1% | 79 | 6519 | 86 |
-| **default** | no | 89.8% | 0.06% | 48 | 96 | 59 |
+| **median_peaks** | no | 89.8% | 0.06% | 48 | 96 | 59 |
 | original | yes | 82.2% | 0.13% | 27 | 76 | 42 |
-| **default** | yes | 90.7% | 0.06% | 25 | 74 | 41 |
+| **median_peaks** | yes | 90.7% | 0.06% | 25 | 74 | 41 |
 
 Toy-loci run (seed 12, probes + MS2, all errors): original 96.3% found / 3.8% wrong / p95 104 nm (uncalibrated) and 95.9% / 0.1% / median 25 /
-p95 61 nm (calibrated); default 97.0% / 0% / p95 83 nm and 97.9% / 0% / median 21 / p95 54 nm.
+p95 61 nm (calibrated); median_peaks 97.0% / 0% / p95 83 nm and 97.9% / 0% / median 21 / p95 54 nm.
 Older toy run (seed 1, bright spots): every variant finds 100%; Gaussian fit p95 64 nm vs 72 nm for the centroid; median 44 nm in all (the
 uncorrected chromatic shift, ~0.3 px).
 
@@ -73,12 +155,12 @@ uncorrected chromatic shift, ~0.3 px).
 | finder | analysis | calibrated | found | wrong | median | p95 |
 |---|---|---|---|---|---|---|
 | original | 2D on max projection | yes | 100% | 4.7% | 40 | 110 |
-| **default** | 2D on max projection | yes | 99.4% | 0% | 39 | 80 |
+| **median_peaks** | 2D on max projection | yes | 99.4% | 0% | 39 | 80 |
 | original | 3D | yes | 99.7% | 4.7% | 101 | 320 |
-| **default** (axial median off: auto, spacing > axial sigma) | 3D | yes | 99.1% | 0.3% | 84 | 183 |
-| default + axial median always (`median_z: 3`) | 3D | yes | 99.1% | 0% | 85 | 177 |
+| **median_peaks** (axial median off: auto, spacing > axial sigma) | 3D | yes | 99.1% | 0.3% | 84 | 183 |
+| median_peaks + axial median always (`median_z: 3`) | 3D | yes | 99.1% | 0% | 85 | 177 |
 
-What each one-at-a-time change does (library run, calibrated, vs default 90.7% found / 0.06% wrong / 25 nm):
+What each one-at-a-time change does (library run, calibrated, vs median_peaks 90.7% found / 0.06% wrong / 25 nm):
 no median 89.6% / 0% (but uncalibrated: 4.1% wrong, the hot pixels); 5 x 5 median 86.4% found; **one background per cell 56.0% found**; Otsu
 100% found but 1.4% wrong (rejects nothing); threshold on the filtered image 82.9% found; brightest choice 0.7% wrong; per-frame threshold
 same as one per movie; integer position median 59 nm (the paper's choice costs ~35 nm at this scale); centroid 29 nm and p95 84 nm.
