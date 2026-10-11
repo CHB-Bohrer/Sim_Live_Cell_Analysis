@@ -1,12 +1,9 @@
 """Stage 6 PLACEHOLDER: a per-cell locus localizer, to be replaced by the user's own analysis.
 
 `localize_loci(cell)` takes one isolated cell (CellData). Every locus has its own colour channel (locus0, locus1, ...), so in each frame
-the locus is the one spot of that colour inside the (slightly dilated) cell mask. Three methods (`method`, config `locus_analysis.method`):
+the locus is the one spot of that colour inside the (slightly dilated) cell mask. Two methods (`method`, config `locus_analysis.method`):
 
-- `median_peaks` (default): the detection steps of Bennabi et al. 2025 (Sci. Adv. 11, eadv7790), rescaled to diffraction-limited spots:
-  median filter -> one threshold per movie (median of the per-frame thresholds) -> area above it, small objects removed -> Gaussian
-  smoothing -> local maxima (min distance) = candidates; the brightest is the locus, refined by a 2D Gaussian fit. See `spots.py`.
-- `dog_viterbi`: the spot pipeline of Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol.) for MS2 spots: median filter ->
+- `dog_viterbi` (default): the spot pipeline of Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol.) for MS2 spots: median filter ->
   difference of Gaussians with a low threshold (several candidates) -> a Viterbi path through the candidates over the whole movie with a
   diffusion potential estimated from the path itself (at most one spot per cell; frames may have none). See `dog_viterbi.py`.
 - `brightest` (the original placeholder): smooth, take the brightest pixel if its SNR passes `min_snr`, refine by a 5 x 5 centroid.
@@ -25,7 +22,7 @@ from scipy.ndimage import gaussian_filter
 from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 
-METHODS = ("median_peaks", "dog_viterbi", "brightest")
+METHODS = ("dog_viterbi", "brightest")
 COLUMNS = ["cell_id", "t", "locus_id", "crop_y_px", "crop_x_px", "lab_y_px", "lab_x_px", "u_um", "v_um", "snr", "n_candidates", "fit_ok",
            "intensity"]
 
@@ -62,45 +59,34 @@ def _load_calibration(path):
 
 
 def spot_params(kw: dict) -> dict:
-    """The median_peaks settings from a locus_analysis config block (defaults for anything missing)."""
+    """The spot-finder settings from a locus_analysis config block (defaults for anything missing)."""
     return {k: kw.get(k, v) for k, v in SP.DEFAULTS.items()}
 
 
-def analyse_channel(stack, region, centre: np.ndarray | None = None, method: str = "median_peaks", **kw) -> dict:
-    """median_peaks or dog_viterbi on every frame of one colour of one cell: stack (n, S, S), region (n, S, S) bool, centre (n, 2) the nucleus
-    centroid in crop pixels (used by select: track and by the Viterbi potential). Returns per frame: the frame's own threshold, the threshold
-    used, the candidates (peaks brightest first, filtered values, SNR), the chosen candidate (None = no locus), its refined fit and the
-    ellipsoid intensity at the fitted position; for dog_viterbi also the diffusion potential D (px^2 per frame)."""
+def analyse_channel(stack, region, centre: np.ndarray | None = None, method: str = "dog_viterbi", **kw) -> dict:
+    """dog_viterbi on every frame of one colour of one cell: stack (n, S, S), region (n, S, S) bool, centre (n, 2) the nucleus centroid in crop
+    pixels (for the Viterbi potential). Returns per frame: the candidate threshold, the candidates (peaks brightest first, DoG values, SNR),
+    the chosen candidate (None = no locus), its refined fit and the ellipsoid intensity at the fitted position, plus the diffusion potential D
+    (px^2 per frame)."""
+    if method != "dog_viterbi":
+        raise ValueError(f"unknown locus_analysis.method {method!r}; use one of {METHODS}")
     p = spot_params(kw)
     n = len(stack)
     centre = np.full((n, 2), stack.shape[-1] // 2, float) if centre is None else np.asarray(centre, float)
-    extra = {}
-    if method == "dog_viterbi":
-        cands = [DV.dog_candidates(stack[i], region[i], steps=True, **p) if region[i].sum() >= 20 else None for i in range(n)]
-        thr_f = [c["thr"] if c is not None else np.nan for c in cands]
-        thr = thr_f
-        choice, D = DV.viterbi_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands],
-                                     [c["snr"] if c is not None else np.zeros(0) for c in cands], centre,
-                                     **{**p, "search_volume": float(np.mean(region.sum(axis=(-2, -1))))})
-        extra["D_px2"] = D
-    elif method == "median_peaks":
-        pres = [SP.prefilter(stack[i], region[i], **p) if region[i].sum() >= 20 else None for i in range(n)]
-        thr_f = [SP.frame_threshold(q, region[i], p["threshold"], p["min_snr"], p["threshold_on"]) if q is not None else np.nan for i, q in enumerate(pres)]
-        thr = SP.movie_threshold(thr_f, p["threshold_scope"])
-        cands = [SP.candidates(stack[i], region[i], thr[i], pres[i], **p) if pres[i] is not None else None for i in range(n)]
-        del pres
-        choice = _choose(cands, centre, p, S=stack.shape[-1], area=float(np.mean(region.sum(axis=(-2, -1)))))
-    else:
-        raise ValueError(f"unknown locus_analysis.method {method!r}; use one of {METHODS}")
+    cands = [DV.dog_candidates(stack[i], region[i], steps=True, **p) if region[i].sum() >= 20 else None for i in range(n)]
+    thr = [c["thr"] if c is not None else np.nan for c in cands]
+    choice, D = DV.viterbi_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands],
+                                 [c["snr"] if c is not None else np.zeros(0) for c in cands], centre,
+                                 **{**p, "search_volume": float(np.mean(region.sum(axis=(-2, -1))))})
     fits = [SP.refine_peak(c, j, **p) if c is not None and j is not None else None for c, j in zip(cands, choice)]
     for i, f in enumerate(fits):
         if f is not None:
             f["intensity"] = DV.ellipsoid_intensity(stack[i], f["pos"], p["intensity_inner_px"], p["intensity_outer_px"], p["intensity_background"])[0]
     light = [None if c is None else {k: c[k] for k in ("peaks", "values", "snr")} for c in cands]
-    return {"params": p, "method": method, "thr_frame": thr_f, "thr": thr, "candidates": light, "choice": choice, "fits": fits, **extra}
+    return {"params": p, "method": method, "thr_frame": thr, "thr": thr, "candidates": light, "choice": choice, "fits": fits, "D_px2": D}
 
 
-def detect_channel(stack, region, method: str = "median_peaks", centre: np.ndarray | None = None, **kw) -> list:
+def detect_channel(stack, region, method: str = "dog_viterbi", centre: np.ndarray | None = None, **kw) -> list:
     """Run one method on every frame of one colour of one cell (see `analyse_channel`). Returns one entry per frame: None or
     (y, x, snr, n_candidates, fit_ok, intensity) in crop pixels."""
     if method == "brightest":
@@ -113,20 +99,6 @@ def detect_channel(stack, region, method: str = "median_peaks", centre: np.ndarr
         return out
     return [None if f is None else (f["pos"][-2], f["pos"][-1], f["snr"], f["n_candidates"], f["fit_ok"], f["intensity"])
             for f in analyse_channel(stack, region, centre, method, **kw)["fits"]]
-
-
-def _choose(cands: list, centre, p: dict, S: int, area: float | None = None) -> list:
-    """Which candidate is the locus in each frame: the brightest, (select: track) the one consistent with the neighbouring frames, or
-    (select: viterbi) the most likely path over the whole movie as in Chen et al. 2025 (dog_viterbi.viterbi_track)."""
-    if p["select"] == "viterbi":
-        c0 = np.full((len(cands), 2), S // 2, float) if centre is None else np.asarray(centre, float)
-        return DV.viterbi_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands],
-                                [c["snr"] if c is not None else np.zeros(0) for c in cands], c0, **{**p, "search_volume": area})[0]
-    if p["select"] == "track":
-        c0 = np.full((len(cands), 2), S // 2, float) if centre is None else np.asarray(centre, float)
-        return SP.select_track([c["peaks"] if c is not None else np.zeros((0, 2)) for c in cands], c0, int(p["track_window"]),
-                               float(p["track_gate_px"]))
-    return [0 if c is not None and len(c["peaks"]) else None for c in cands]
 
 
 def channel_inputs(cell, name: str, dilate_px: int = 2, calib: str | None = None) -> dict:

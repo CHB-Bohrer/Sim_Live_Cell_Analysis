@@ -14,6 +14,7 @@ import pandas as pd
 
 from simlive.io.runs import DATA_ROOT
 from simlive.stage6_analysis.compare import compare
+from simlive.stage6_analysis.ms2 import analyse_run_ms2
 
 
 def main() -> None:
@@ -23,8 +24,12 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=None, help="processes (default: CPU cores - 2, max 8)")
     ap.add_argument("--no-cal", action="store_true", help="skip the calibrated versions")
     ap.add_argument("--no-3d", action="store_true", help="skip the 3D versions of z-stack runs")
+    ap.add_argument("--ms2-only", action="store_true", help="only (re)compute the MS2 spot traces (runs with transcription)")
     a = ap.parse_args()
     run = Path(a.run) if Path(a.run).exists() else DATA_ROOT / "runs" / a.run
+    analyse_run_ms2(run, a.workers)                     # MS2 spot traces, if the run has the transcription model
+    if a.ms2_only:
+        return
     tab = compare(run, a.variants.split(",") if a.variants else None, a.workers, not a.no_cal, not a.no_3d)
     pd.set_option("display.width", 250)
     show = tab.drop(columns=["label", "settings"]).copy()

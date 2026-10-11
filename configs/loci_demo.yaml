@@ -91,34 +91,23 @@ isolation:                  # stage 5: one single-cell movie per cell ID
   n_workers: null           # null = CPU cores - 2 (max 8); 1 = no multiprocessing
   min_frames: 1
 
-locus_analysis:             # stage 6 spot finder: src/simlive/stage6_analysis/spots.py, docs/SPOT_FINDING.md, dashboard tab 🔎 Spot finding
-  method: dog_viterbi       # dog_viterbi = Chen et al. 2025 (NSMB) spot pipeline | median_peaks = Bennabi et al. 2025 (Sci. Adv.) steps rescaled to spots | brightest = old
-  median_px: 3              # step 1: median filter (paper: 7 px for objects hundreds of px wide; a spot here is ~2 px, 5 px erases it)
+locus_analysis:             # stage 6 spot finder: src/simlive/stage6_analysis/dog_viterbi.py, docs/SPOT_FINDING.md, dashboard tab 🔎 Spot finding
+  method: dog_viterbi       # dog_viterbi = Chen, Levo, Zoller & Gregor 2025 (NSMB) spot pipeline | brightest = the original placeholder
+  median_px: 3              # median filter against salt-and-pepper noise (a spot is ~2 px wide)
   median_z: auto            # z-stacks: axial median over 3 planes if the plane spacing <= axial PSF sigma (removes one-plane cosmic rays), else 1
-  background: local         # local = a wider median (background_px) subtracted (removes cross-talk ghost / autofluorescence) | cell = one value per cell
-  background_px: 9
-  smooth_sigma_px: 1.0      # step 5: Gaussian smoothing ~ the PSF sigma (paper: 20 px)
-  smooth_sigma_z: 0.8       # z-stacks: axial smoothing, in planes
-  threshold: noise          # step 3: noise = min_snr x robust noise | otsu (the paper's; splits background noise for single spots) | a number
-  threshold_on: smoothed    # smoothed (better SNR for spots) | filtered (the paper: the median-filtered image)
-  threshold_scope: movie    # movie = median of the per-frame thresholds (the paper) | frame
-  min_snr: 5.0
-  min_area_px: 3            # step 4: smallest area above the threshold (paper: 5000 px)
-  min_sep_px: 4             # step 6: min distance between local maxima (paper: 100 px)
-  select: track             # track = candidate nearest the locus' position in neighbouring frames (OUR addition; skips cosmic rays) | brightest
-  track_window: 3           # frames on each side used by track
-  track_gate_px: 8          # no locus in a frame if no candidate is this close to the neighbours' median position
-  refine: gaussian          # step 7: gaussian fit | centroid | none (integer pixel, as the paper)
-  dilate_px: 2              # grow the cell mask by this much (PSF halo of loci at the nuclear edge)
-  # dog_viterbi (Chen, Levo, Zoller & Gregor 2025, Nat. Struct. Mol. Biol.; src/simlive/stage6_analysis/dog_viterbi.py): median_px / median_z as above, then
   dog_sigma_px: [1.0, 3.0]  # difference of Gaussians: inner ~ PSF sigma, outer 3x (px)
   dog_sigma_z: [0.8, 2.0]   # z-stacks: the same along z (planes)
   dog_snr: 3.0              # candidate threshold (x noise of the DoG image): low on purpose, the Viterbi path picks the spot
   max_candidates: 5         # candidates kept per frame
+  min_sep_px: 4             # min distance between candidates (px)
   viterbi_miss_cost: 2.0    # cost of a frame without a spot (nats)
   viterbi_max_gap: 5        # longest run of frames without a spot that a path may bridge
   viterbi_D_px2: null       # diffusion potential (px^2 per frame); null = re-estimated from the path itself
-  # every method: spot intensity = mean in an ellipsoid minus mean of the shell around it (Chen et al. 2025), diameters (x, y, z) in px / planes
+  refine: gaussian          # position: gaussian fit | centroid (the paper) | none (integer pixel)
+  smooth_sigma_px: 1.0      # starting width of the Gaussian fit; also the smoothing of method brightest
+  min_snr: 5.0              # method brightest only
+  dilate_px: 2              # grow the cell mask by this much (PSF halo of loci at the nuclear edge)
+  # spot intensity = mean in an ellipsoid minus the background of the shell around it (Chen et al. 2025), diameters (x, y, z) in px / planes
   intensity_inner_px: [7, 7, 5]
   intensity_outer_px: [19, 19, 7]
   intensity_background: median   # median of the shell (robust to a cosmic ray in it) | mean (Chen et al. 2025)

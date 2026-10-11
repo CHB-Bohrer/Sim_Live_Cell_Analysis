@@ -2,10 +2,9 @@
 
 The 2D crops written by stage 5 (maximum-intensity projections) give each cell's window in every frame (`frames.csv`: crop_y0, crop_x0)
 and its mask; this module re-reads the same window from the full z-stack TIFFs (memory-mapped, one frame at a time). Methods as in 2D
-(`localize.py`): `median_peaks` (default; Bennabi et al. 2025 steps in 3D: median filter with a (median_z, k, k) footprint, one threshold
-per movie, area above it, 3D Gaussian smoothing, 3D local maxima, brightest candidate refined by a 3D Gaussian fit), `dog_viterbi` (Chen
-et al. 2025: 3D median, 3D difference of Gaussians, Viterbi path with a 3D diffusion potential, z distances scaled by plane spacing / pixel
-size) or `brightest` (the original: brightest voxel after 3D smoothing, refined by a centroid). Every detection gets the 3D ellipsoid
+(`localize.py`): `dog_viterbi` (default; Chen et al. 2025: 3D median, 3D difference of Gaussians, Viterbi path with a 3D diffusion
+potential, z distances scaled by plane spacing / pixel size, 3D Gaussian fit) or `brightest` (the original: brightest voxel after 3D
+smoothing, refined by a centroid). Every detection gets the 3D ellipsoid
 intensity (inner (7, 7, 5), shell to (19, 19, 7) px / planes). Positions: lab pixels (y, x) and height z_um (nominal slice positions).
 `score_localization_3d` compares with the true 3D positions.
 
@@ -25,8 +24,6 @@ from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 
 COLUMNS = ["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr", "n_candidates", "fit_ok", "intensity"]
-THRESHOLD_FRAMES = 25          # the movie threshold (median over frames) is taken from at most this many evenly spaced frames
-MAX_TRACK_CANDIDATES = 5       # select: track considers the 5 brightest candidates of each frame
 
 
 def _crop3d(vol, y0: int, x0: int, S: int, pad_value: float) -> np.ndarray:
@@ -115,38 +112,6 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
             choice, _ = DV.viterbi_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined],
                                          [np.array([q["snr"] for q in rr]) for rr in refined], centroid_in_crop(fr, S),
                                          **{**pz, "search_volume": vol})
-            dets = [None if j is None else (*rr[j]["pos"], rr[j]["snr"], rr[j]["n_candidates"], rr[j]["fit_ok"], rr[j]["intensity"])
-                    for rr, j in zip(refined, choice)]
-        elif method == "median_peaks":
-            mz = median_z_for(p["median_z"], step, (axial_sigma_um or {}).get(name))
-            pz = {**p, "median_z": mz}
-            thr = None
-            if p["threshold_scope"] == "movie":           # pass 1: per-frame thresholds on evenly spaced frames, median over them
-                pick = np.unique(np.linspace(0, len(frames) - 1, min(THRESHOLD_FRAMES, len(frames))).round().astype(int))
-                vals = [SP.frame_threshold(SP.prefilter(volume(i, frames[i]), reg[i], **pz), reg[i], p["threshold"], p["min_snr"], p["threshold_on"])
-                        for i in pick if reg[i].sum() >= 20]
-                thr = float(np.median(vals)) if vals else None
-            # pass 2: candidates of every frame, refined (only the brightest unless select: track, which needs the alternatives too)
-            n_keep = MAX_TRACK_CANDIDATES if p["select"] in ("track", "viterbi") else 1
-            refined = []
-            for i, r in enumerate(frames):
-                v = volume(i, r)
-                c = SP.candidates(v, reg[i], thr, None, **pz) if reg[i].sum() >= 20 else None
-                rr = [] if c is None else [SP.refine_peak(c, j, **pz) for j in range(min(len(c["peaks"]), n_keep))]
-                for q in rr:
-                    q["intensity"] = DV.ellipsoid_intensity(v, q["pos"], inner, outer, ibg)[0]
-                refined.append(rr)
-            if p["select"] == "viterbi":
-                vol = float(np.mean(reg.sum(axis=(-2, -1)))) * len(z) * step / px_um
-                choice, _ = DV.viterbi_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined],
-                                             [np.array([q["snr"] for q in rr]) for rr in refined], centroid_in_crop(fr, S),
-                                             **{**pz, "z_scale": step / px_um, "search_volume": vol})
-            elif p["select"] == "track":
-                centre = centroid_in_crop(fr, S)
-                choice = SP.select_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined], centre,
-                                         int(p["track_window"]), float(p["track_gate_px"]))
-            else:
-                choice = [0 if rr else None for rr in refined]
             dets = [None if j is None else (*rr[j]["pos"], rr[j]["snr"], rr[j]["n_candidates"], rr[j]["fit_ok"], rr[j]["intensity"])
                     for rr, j in zip(refined, choice)]
         else:

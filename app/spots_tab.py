@@ -1,6 +1,6 @@
 """The dashboard's 🔎 Spot finding tab: how stage 6 finds each locus, step by step, and how well it does against the truth.
 
-Four parts: (1) the method and where it comes from (Bennabi et al. 2025, rescaled from Mesp2 poles to diffraction-limited spots);
+Four parts: (1) the method and where it comes from (Chen, Levo, Zoller & Gregor 2025);
 (2) every step on one cell and frame, with settings you can change and the error of every frame of that cell; (3) the run's scores and
 its worst detections; (4) a comparison of methods on this run (scripts/compare_localizers.py).
 Imports numpy / scipy / scikit-image / pandas only, never torch.
@@ -23,15 +23,14 @@ from simlive.stage5_linking.celldata import load_cell
 from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 from simlive.stage6_analysis.compare import VARIANTS, VARIANTS_3D, truth_with_photons
-from simlive.stage6_analysis.localize import analyse_channel, channel_inputs
+from simlive.stage6_analysis.localize import analyse_channel, channel_inputs, spot_params
+from simlive.stage6_analysis.ms2 import ERODE_PX, ms2_inputs, ms2_truth, trace_from_analysis
 
-PAPER_URL = "https://pmc.ncbi.nlm.nih.gov/articles/PMC12372888"
-CODE_URL = "https://github.com/gregorlab/SizeProject2024"
 CHEN_URL = "https://doi.org/10.1038/s41594-025-01615-4"
 CHEN_ARXIV = "https://arxiv.org/abs/2304.08770"
-CH_SHORT = {"locus0": "locus 0 (promoter)", "locus1": "locus 1 (enhancer)"}
+CH_SHORT = {"locus0": "locus 0 (promoter)", "locus1": "locus 1 (enhancer)", "nucleus": "MS2 spot (nuclear channel)"}
 FAR_UM = 0.5
-METHOD_LABEL = {"median_peaks": "median_peaks (Bennabi et al. 2025 steps)", "dog_viterbi": "dog_viterbi (Chen et al. 2025)",
+METHOD_LABEL = {"median_peaks": "median_peaks (removed method)", "dog_viterbi": "dog_viterbi (Chen et al. 2025)",
                 "brightest": "brightest (original placeholder)"}
 
 STEPS_CHEN = [
@@ -51,24 +50,6 @@ STEPS_CHEN = [
      "(intensity_background: mean = the paper)", "intensity_background"),
 ]
 
-STEPS = [
-    ("1 Median filter", "rank median, 7 × 7 px", "median, median_px × median_px (3: a spot is ~2 px wide; 5 or more erases it)", "median_px"),
-    ("2 Region", "inside the gastruloid (bright-field mask)", "inside the cell's own nuclear mask, grown by dilate_px", "dilate_px"),
-    ("· Background", "none", "a wider median (background_px) of the filtered image, subtracted: removes the nuclear cross-talk ghost, "
-                              "autofluorescence and haze under the spot ('cell' = one value per cell)", "background"),
-    ("3 Threshold", "one per movie: median over frames of each frame's Otsu threshold (or fixed, 70)",
-     "one per movie (threshold_scope): median over frames of each frame's min_snr × robust noise ('noise') or Otsu ('otsu')", "threshold"),
-    ("4 Area", "pixels above it; holes filled; objects < 5000 px removed; eroded", "pixels above it (threshold_on: filtered image as the "
-                                                                                   "paper, or the smoothed image); objects < min_area_px removed", "threshold_on"),
-    ("5 Smoothing", "Gaussian, σ = 20 px (pole scale)", "Gaussian, σ = smooth_sigma_px (≈ the PSF: a matched filter)", "smooth_sigma_px"),
-    ("6 Local maxima", "peak_local_max, min_distance 100 px: each maximum is a pole",
-     "peak_local_max, min_distance = min_sep_px: candidates; one locus per colour", "min_sep_px"),
-    ("· Choice", "(all poles are kept and counted)", "'brightest' candidate, or 'track' (ours, not the paper's): the candidate nearest the "
-                                                    "locus' position in the neighbouring frames, so one-frame events such as cosmic rays are skipped", "select"),
-    ("7 Position", "integer pixel of the maximum", "Gaussian fit to the unfiltered pixels (refine: gaussian), centroid, or none", "refine"),
-]
-
-
 # ----------------------------------------------------------------------------- cached computations
 @st.cache_data(show_spinner=False, max_entries=4)
 def _truth(run: str, stamp: float) -> pd.DataFrame:
@@ -77,7 +58,10 @@ def _truth(run: str, stamp: float) -> pd.DataFrame:
 
 @st.cache_resource(show_spinner="Loading the cell…", max_entries=4)
 def _inputs(sdir: str, cid: int, name: str, calib: str | None, dilate_px: int) -> dict:
-    """The crops of one colour of one cell as the localizer sees them (calibration-corrected if asked)."""
+    """The crops of one colour of one cell as the localizer sees them (calibration-corrected if asked). "nucleus" = the MS2 spot: the nuclear
+    channel inside the nucleus shrunk by ms2.ERODE_PX (its bright edge would give candidates)."""
+    if name == "nucleus":
+        return {**ms2_inputs(load_cell(sdir, cid), ERODE_PX, calib), "shift": (0.0, 0.0)}
     return channel_inputs(load_cell(sdir, cid), name, dilate_px, calib)
 
 
@@ -96,7 +80,10 @@ def _analyse(sdir: str, cid: int, name: str, params: str, calib: str | None, dil
                      "snr": f["snr"] if f else np.nan, "fit_ok": f["fit_ok"] if f else None, "sigma_fit_px": f["sigma_fit_px"] if f else np.nan,
                      "intensity": f["intensity"] if f else np.nan})
     cands = [None if c is None else c["peaks"] for c in a["candidates"]]
-    return pd.DataFrame(rows), cands, a.get("D_px2")
+    df = pd.DataFrame(rows)
+    _, pos, inten = trace_from_analysis(a, ci["stack"], ci["centre"], spot_params(json.loads(params)))
+    df["trace_y"], df["trace_x"], df["trace_intensity"] = pos[:, 0], pos[:, 1], inten      # every frame, interpolated where nothing was found
+    return df, cands, a.get("D_px2")
 
 
 def _frame_steps(sdir: str, cid: int, name: str, params: dict, calib: str | None, dilate_px: int, i: int, thr: float):
@@ -104,35 +91,26 @@ def _frame_steps(sdir: str, cid: int, name: str, params: dict, calib: str | None
     (the image the candidates are taken from), area (above the threshold), thr, noise, noise_smooth, candidates."""
     ci = _inputs(sdir, cid, name, calib, dilate_px)
     img, reg = ci["stack"][i], ci["region"][i]
-    if params.get("method") == "dog_viterbi":
-        c = DV.dog_candidates(img, reg, steps=True, **params)
-        if c is None:
-            return None, reg
-        dog = c["pre"]["sub"]
-        steps = {"raw": c["img"], "med": c["pre"]["med"], "bg": c["pre"]["bg"], "sub": dog, "smooth": dog, "area": (dog > c["thr"]) & reg,
-                 "thr": c["thr"], "noise": c["pre"]["noise_smooth"], "noise_smooth": c["pre"]["noise_smooth"], "candidates": c["peaks"]}
-        return {"found": len(c["peaks"]) > 0, "steps": steps}, reg
-    return SP.find_spot(img, reg, thr, steps=True, **params), reg
+    c = DV.dog_candidates(img, reg, steps=True, **params)
+    if c is None:
+        return None, reg
+    dog = c["pre"]["sub"]
+    steps = {"raw": c["img"], "med": c["pre"]["med"], "bg": c["pre"]["bg"], "sub": dog, "smooth": dog, "area": (dog > c["thr"]) & reg,
+             "thr": c["thr"], "noise": c["pre"]["noise_smooth"], "noise_smooth": c["pre"]["noise_smooth"], "candidates": c["peaks"]}
+    return {"found": len(c["peaks"]) > 0, "steps": steps}, reg
 
 
 # ----------------------------------------------------------------------------- parts
 def _part_method(cfg: dict) -> dict:
     st.markdown("### 1 · The method and where it comes from")
     la = cfg.get("locus_analysis") or {}
-    method = la.get("method", "brightest" if "method" not in la and "median_px" not in la else "median_peaks")
+    method = la.get("method", "brightest" if "median_px" not in la else "median_peaks")
     p = {**SP.DEFAULTS, "dilate_px": 2, **la}
-    st.markdown(f"This run located the loci with **{METHOD_LABEL.get(method, method)}**. Two published pipelines are implemented; both are "
-                "scored against the simulation's truth in part 4 and can be tried on any cell in part 2.")
-    with st.expander("median_peaks: the detection steps of Bennabi et al. 2025 (Mesp2 poles in gastruloids), rescaled to spots",
-                     expanded=method == "median_peaks"):
-        st.markdown(f"[Bennabi et al. 2025, *Science Advances* 11, eadv7790]({PAPER_URL}) ([their code]({CODE_URL}), "
-                    "`modules/raw_live_analysis.py`) find Mesp2 expression *poles* in live gastruloid movies. Their objects are hundreds of "
-                    "pixels across; a locus here is about 2 pixels across, so every size had to be rescaled, and two steps were added.")
-        lines = ["| step | Bennabi et al. 2025 (Mesp2 poles) | here (one locus per colour) | this run |", "|---|---|---|---|"]
-        lines += [f"| **{s}** | {a} | {b} | " + (f"`{k}: {p.get(k)}`" if method == "median_peaks" else "—") + " |" for s, a, b, k in STEPS]
-        st.markdown("\n".join(lines))
+    st.markdown(f"This run located the loci with **{METHOD_LABEL.get(method, method)}**."
+                + (" That method (steps adapted from Bennabi et al. 2025, who detect Mesp2 poles, not spots) has been removed; part 2 shows "
+                   "the current method on this run's cells." if method == "median_peaks" else ""))
     with st.expander("dog_viterbi: the MS2 spot pipeline of Chen, Levo, Zoller & Gregor 2025 (transcription sites in fly embryos)",
-                     expanded=method == "dog_viterbi"):
+                     expanded=True):
         st.markdown(f"[Chen et al. 2025, *Nat. Struct. Mol. Biol.*]({CHEN_URL}) (methods from the [arXiv version]({CHEN_ARXIV}), section III.2; no "
                     "code was published, so this follows the text) find faint MS2 transcription spots, one labelled allele per nucleus, on the "
                     "background of free MCP-GFP in the nucleus: the same situation as a locus (or the MS2 spot) in one of our cells. Their 220 nm "
@@ -145,20 +123,8 @@ def _part_method(cfg: dict) -> dict:
                    "the path skipped ~30% of frames holding the right spot; a cost per frame without a spot) and estimating the diffusion "
                    "potential per cell rather than pooled over all spots of the movie. Details: src/simlive/stage6_analysis/dog_viterbi.py "
                    "and docs/SPOT_FINDING.md.")
-    with st.expander("Why the sizes change, and what was measured"):
-        st.markdown(
-            "- **Median filter.** Theirs (7 px) is tiny next to a pole, so it only removes pixel noise. A 3 × 3 median already halves a spot "
-            "of σ ≈ 0.8 px; a 7 × 7 median removes it completely. That is why a *wider* median is used here as the **background** under a spot.\n"
-            "- **What the median removes:** hot pixels and single-pixel noise. It cannot remove a **cosmic ray**, which is as wide as the PSF; "
-            "in a max projection of a z-stack every plane's cosmic rays end up in the picture. The **track** choice skips them because they "
-            "last one frame. In a finely sampled z-stack an axial median over 3 planes also removes them (3D settings).\n"
-            "- **Otsu** splits a two-peaked histogram (expressing vs non-expressing tissue). A cell holds thousands of background pixels and a "
-            "handful of spot pixels, so Otsu splits the background noise and rejects nothing: it finds every locus but also picks hot pixels "
-            "and cosmic rays (see part 4).\n"
-            "- **Gaussian fit.** The paper's integer pixel positions are fine at their scale but would cost ±65 nm here.\n"
-            "- Defaults were chosen by comparing variants against the simulation's truth (part 4; `scripts/compare_localizers.py`) on a "
-            "library run with probes, MS2 and all image errors, a toy run and a 3D run. One seed each: re-check on more seeds and, above "
-            "all, on real movies before trusting the numbers.")
+    st.caption("Settings were checked by comparing variants against the simulation's truth (part 4; scripts/compare_localizers.py) on library, "
+               "toy and 3D runs. One seed each: re-check on more seeds and, above all, on real movies before trusting the numbers.")
     return {**p, "method": method}
 
 
@@ -166,7 +132,7 @@ def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
     keys = list(SP.DEFAULTS) + ["dilate_px"]
 
     def run_settings():
-        return {**{k: p[k] for k in keys}, "method": p["method"] if p["method"] in ("median_peaks", "dog_viterbi") else "dog_viterbi"}
+        return {**{k: p[k] for k in keys}, "method": "dog_viterbi"}
 
     if st.session_state.get("spt_params_run") != st.session_state.get("_run_path"):     # new run: start from its own settings
         st.session_state["spt_params"] = run_settings()
@@ -175,8 +141,6 @@ def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
     with st.expander("⚙ Settings of the spot finder (start from this run's; change and press Apply)", expanded=False):
         with st.form("spt_form"):
             new = dict(cur)
-            new["method"] = st.radio("Method", ["dog_viterbi", "median_peaks"], ["dog_viterbi", "median_peaks"].index(cur["method"]),
-                                     format_func=METHOD_LABEL.get, horizontal=True)
             st.markdown("**dog_viterbi (Chen et al. 2025)**")
             d1, d2, d3, d4 = st.columns(4)
             ds = list(cur["dog_sigma_px"])
@@ -192,25 +156,12 @@ def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
             new["intensity_outer_px"] = [d4.slider("Background ellipse (px)", 9, 31, int(cur["intensity_outer_px"][0]), 2)] * 2 + [int(cur["intensity_outer_px"][2])]
             new["intensity_background"] = d4.radio("Background of the ring", ["median", "mean"], ["median", "mean"].index(cur["intensity_background"]),
                                                    horizontal=True, help="mean = Chen et al.; median = robust to a cosmic ray or another spot in the ring")
-            st.markdown("**median_peaks (Bennabi et al. 2025 steps) and shared settings**")
             c1, c2, c3, c4 = st.columns(4)
-            new["median_px"] = c1.select_slider("Median filter (px)", [1, 3, 5, 7], int(cur["median_px"]), help="1 = off. The paper uses 7 for objects hundreds of px wide.")
-            new["background"] = c2.radio("Background", ["local", "cell"], ["local", "cell"].index(cur["background"]), horizontal=True,
-                                         help="local: wider median subtracted; cell: one value per cell and frame")
-            new["background_px"] = c3.slider("Background window (px)", 5, 21, int(cur["background_px"]), 2)
-            new["smooth_sigma_px"] = c4.slider("Gaussian σ (px)", 0.0, 3.0, float(cur["smooth_sigma_px"]), 0.25)
-            new["threshold"] = c1.radio("Threshold", ["noise", "otsu"], ["noise", "otsu"].index(cur["threshold"] if cur["threshold"] in ("noise", "otsu") else "noise"),
-                                        horizontal=True, help="noise: min_snr × robust noise; otsu: the paper's")
-            new["threshold_on"] = c2.radio("Threshold applied to", ["filtered", "smoothed"], ["filtered", "smoothed"].index(cur["threshold_on"]), horizontal=True)
-            new["threshold_scope"] = c3.radio("One threshold per", ["movie", "frame"], ["movie", "frame"].index(cur["threshold_scope"]), horizontal=True)
-            new["min_snr"] = c4.slider("min_snr", 2.0, 10.0, float(cur["min_snr"]), 0.5)
-            new["min_area_px"] = c1.slider("Smallest area (px)", 1, 15, int(cur["min_area_px"]))
-            new["min_sep_px"] = c2.slider("Min distance between maxima (px)", 1, 15, int(cur["min_sep_px"]))
-            new["select"] = c3.radio("Choice", ["track", "viterbi", "brightest"], ["track", "viterbi", "brightest"].index(cur["select"]), horizontal=True,
-                                     help="track: nearest the neighbouring frames' position (ours); viterbi: Chen et al.'s most likely path; brightest")
-            new["refine"] = c4.radio("Position", ["gaussian", "centroid", "none"], ["gaussian", "centroid", "none"].index(cur["refine"]), horizontal=True)
-            new["dilate_px"] = c1.slider("Grow the cell mask by (px)", 0, 8, int(cur["dilate_px"]))
-            new["track_gate_px"] = c2.slider("Track gate (px)", 2.0, 20.0, float(cur["track_gate_px"]), 1.0, help="choice = track: max distance from the neighbours' median position")
+            new["median_px"] = c1.select_slider("Median filter (px)", [1, 3, 5], int(cur["median_px"]), help="1 = off")
+            new["min_sep_px"] = c2.slider("Min distance between candidates (px)", 1, 15, int(cur["min_sep_px"]))
+            new["refine"] = c3.radio("Position", ["gaussian", "centroid", "none"], ["gaussian", "centroid", "none"].index(cur["refine"]), horizontal=True,
+                                     help="centroid = as in the paper")
+            new["dilate_px"] = c4.slider("Grow the cell mask by (px)", 0, 8, int(cur["dilate_px"]))
             if st.form_submit_button("Apply", type="primary"):
                 st.session_state["spt_params"] = new
                 cur = new
@@ -220,6 +171,12 @@ def _settings(p: dict, has_cal: bool) -> tuple[dict, bool]:
     use_cal = st.checkbox("Apply the run's calibration (dark, flat-field, hot pixels, chromatic shift)", has_cal, key="spt_cal",
                           disabled=not has_cal, help="Only for runs made with 'Simulate and apply a calibration'.")
     return cur, use_cal and has_cal
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def _ms2_truth(run: str, stamp: float) -> pd.DataFrame | None:
+    t = ms2_truth(Path(run))
+    return None if t is None else t.assign(locus_id=-1)
 
 
 def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
@@ -236,9 +193,17 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
     cid = c1.selectbox("Cell (true identity)", summ.cell_id.tolist(), key="spt_cell")
     first = sdir / "cells" / f"cell_{int(summ.cell_id.iloc[0]):04d}"
     chans = sorted(q.stem for q in first.glob("locus*.tif"))
-    name = c2.radio("Colour", chans, format_func=lambda c: CH_SHORT.get(c, c), horizontal=True, key="spt_ch")
+    mt = _ms2_truth(str(run), (run / "stage1_chromatin").stat().st_mtime) if (run / "stage1_chromatin" / "transcription.csv").exists() else None
+    if mt is not None:
+        chans.append("nucleus")
+        truth = mt if truth is None else pd.concat([truth, mt], ignore_index=True)
+    name = c2.radio("Spot", chans, format_func=lambda c: CH_SHORT.get(c, c), horizontal=True, key="spt_ch",
+                    help="The two locus colours, and (runs with the transcription model) the MS2 spot at the promoter, in the nuclear channel")
     df, cands, D = _analyse(str(sdir), int(cid), name, json.dumps(params, sort_keys=True), calib, dil)
-    lid = int(name[5:])
+    lid = -1 if name == "nucleus" else int(name[5:])
+    if name == "nucleus":
+        st.info("MS2 spot: one spot per nucleus while the promoter is ON, nothing while it is OFF. 'Found' below counts ON frames; the trace "
+                "plot underneath shows the intensity measured at the tracked position in every frame against the true MS2 signal.")
     if truth is not None:
         tr = truth[(truth.cell_id == cid) & (truth.locus_id == lid)].set_index("t")
         df["y_true"] = tr.reindex(df.t).y_um.to_numpy() / px_um - df.crop_y0
@@ -285,6 +250,8 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
         return
     _steps_figure(res, region, row, cands[i], params)
     _time_figure(df, i, cands, px_um)
+    if name == "nucleus" and "photons_frame" in df:
+        _ms2_trace_figure(df, i)
 
 
 def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, params: dict):
@@ -330,7 +297,7 @@ def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, p
             ax.imshow(im[zy0:zy1, zx0:zx1], cmap="gray", vmin=a, vmax=b, extent=ext, interpolation="nearest")
             ax.set_title(title, fontsize=13)
             ax.axis("off")
-        thr_img = sm if params.get("threshold_on") == "smoothed" else sub
+        thr_img = sm
         axes[1, 2].contour(np.arange(zx0, zx1), np.arange(zy0, zy1), thr_img[zy0:zy1, zx0:zx1], levels=[s["thr"]], colors="#22d3ee", linewidths=1.2)
         axp = axes[1, 3]
         if "y_true" in row and np.isfinite(row.y_true):
@@ -411,6 +378,48 @@ def _time_figure(df: pd.DataFrame, i: int, cands: list, px_um: float):
                "(line), each scaled to its maximum. Orange line = the frame shown above.")
 
 
+def _ms2_trace_figure(df: pd.DataFrame, i: int):
+    """The cell's transcription trace as Chen et al. measure it (intensity at the tracked position in every frame) against the truth."""
+    fig, ax = plt.subplots(figsize=(17, 3.6))
+    on = (df.photons > 0).to_numpy()
+    for t0, t1 in _runs(df.t.to_numpy(), on):
+        ax.axvspan(t0 - 0.5, t1 + 0.5, color="#fde68a", alpha=0.5, lw=0)
+    ax.plot(df.t, df.trace_intensity, color="#0f766e", lw=1.5, label="measured intensity (tracked position, interpolated when no spot)")
+    near = df.found & (df.err_nm <= 1000 * FAR_UM)
+    ax.plot(df.t[near], df.trace_intensity[near], "o", color="#0f766e", ms=4, label="spot found within 0.5 um of the truth")
+    wrong = df.found & ~near
+    ax.plot(df.t[wrong], df.trace_intensity[wrong], "x", color="#b91c1c", ms=6, label="detection elsewhere")
+    ax2 = ax.twinx()
+    ax2.plot(df.t, df.photons_frame, color="#64748b", lw=1.2, ls="--")
+    ax2.set_ylabel("true MS2 photons (dashed)", color="#64748b")
+    ax2.grid(False)
+    ax.axvline(df.t.iloc[i], color="orange", lw=1.2)
+    ax.set_xlabel("frame")
+    ax.set_title("MS2 trace of this cell (yellow = promoter truly ON)")
+    ax.legend(loc="upper left", fontsize=9)
+    fig.tight_layout()
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)
+    r = np.corrcoef(df.trace_intensity, df.photons_frame)[0, 1] if df.photons_frame.std() > 0 else np.nan
+    st.caption(f"Correlation of the measured trace with the true MS2 signal over all frames: r = {r:.2f}. If the true spot is fainter than the "
+               "texture of the nucleus itself, the path follows a texture feature instead and the trace stays flat through the bursts.")
+
+
+def _runs(t: np.ndarray, flag: np.ndarray) -> list:
+    """(first, last) frame of every run of True in flag."""
+    out, start, prev = [], None, None
+    for tt, f in zip(t, flag):
+        if f and start is None:
+            start = tt
+        if not f and start is not None:
+            out.append((start, prev))
+            start = None
+        prev = tt
+    if start is not None:
+        out.append((start, prev))
+    return out
+
+
 def _part_scores(run: Path):
     st.markdown("### 3 · This run's result")
     sj = run / "stage6_analysis" / "scores.json"
@@ -429,6 +438,22 @@ def _part_scores(run: Path):
                          "intensity r (locus 0 / 1)": " / ".join(f"{s[k]:.2f}" for k in ("intensity_r_locus0", "intensity_r_locus1") if k in s) or None})
     if rows:
         st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
+    mrows = []
+    for k, lab in (("ms2", "2D"), ("ms2_calibrated", "2D, calibrated")):
+        m = sc.get(k)
+        if m:
+            mrows.append({"MS2 spot": lab, "ON frames found (within 0.5 um)": m.get("found_on"), "ON frames with any detection": m.get("detected_on"),
+                          "OFF frames with a detection": m.get("false_on_off"),
+                          "median error (nm)": 1000 * m["median_error_um"] if m.get("median_error_um") is not None else None,
+                          "trace r": m.get("intensity_r"), "ON called from trace: sensitivity": m.get("call_sensitivity"),
+                          "specificity": m.get("call_specificity")})
+    if mrows:
+        st.dataframe(pd.DataFrame(mrows).round(3), hide_index=True, width="stretch")
+        st.caption("MS2 spot (Chen et al. 2025 pipeline on the nuclear channel): 'found' = ON frames whose detection is within 0.5 um of the true "
+                   "spot; 'trace r' = correlation of the intensity measured at the tracked position (every frame) with the true MS2 photons; "
+                   "ON/OFF called from the trace alone with a threshold of 3 x its robust noise.")
+    elif (run / "stage1_chromatin" / "transcription.csv").exists():
+        st.info("This run has MS2 spots but no MS2 analysis yet: scripts/compare_localizers.py --run <run> --ms2-only")
         st.caption(f"'Wrong object' = share of detections more than {FAR_UM} µm from the truth (the finder picked a hot pixel, cosmic ray or noise "
                    "peak). 'rms of good ones' leaves those out. Runs made before this tab existed lack some columns.")
     ef = run / "stage6_analysis" / "truth" / "localization_errors.csv"
@@ -498,7 +523,7 @@ def _part_compare(run: Path):
 
 
 def render(st_, run_path: Path, R: dict):
-    style.intro(st, "How stage 6 finds each locus in each cell: the steps (Chen et al. 2025 by default, or Bennabi et al. 2025), every intermediate image for "
+    style.intro(st, "How stage 6 finds each locus in each cell: the steps (Chen et al. 2025), every intermediate image for "
                     "any cell and frame, the error of every frame against the simulation's truth, and a comparison of methods.",
                 "Part 2: pick a cell, a colour and a frame (or jump to a problem frame), and change the settings to see what each step "
                 "does. Part 4: press Compare methods to score every variant on this whole run.")

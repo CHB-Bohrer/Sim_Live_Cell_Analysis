@@ -18,30 +18,17 @@ from simlive.stage6_analysis.localize import localize_loci, photons_in_frame, sc
 from simlive.stage6_analysis.localize3d import localize_loci_3d, score_localization_3d
 
 # key -> (label, settings that differ from spots.DEFAULTS). Every variant starts from the defaults (not from the run's own locus_analysis block,
-# except dilate_px), so the table means the same thing for every run. "default" = the configs' default (dog_viterbi, Chen et al. 2025, with a
-# Gaussian fit and a median shell background); "bennabi" = median_peaks, and the "..." variants change one thing of it.
+# except dilate_px), so the table means the same thing for every run. "default" = dog_viterbi (Chen et al. 2025) with a Gaussian fit and a
+# median shell background; the "..." variants change one thing of it.
 VARIANTS = {
     "original": ("Original placeholder: brightest pixel after smoothing + 5x5 centroid", {"method": "brightest"}),
     "default": ("Default: Chen et al. 2025 (median 3x3, difference of Gaussians at 3 x noise, Viterbi path with a diffusion potential) "
                 "+ Gaussian fit, median shell background for the intensity", {"method": "dog_viterbi"}),
     "chen_literal": ("Chen et al. 2025 as described: spot centroid, mean shell background",
                      {"method": "dog_viterbi", "refine": "centroid", "intensity_background": "mean"}),
-    "paper_literal": ("As close to Bennabi 2025 as the scale allows: median 3x3, one background per cell, Otsu movie threshold on the "
-                      "filtered image, area, smoothing, local maxima, brightest, integer pixel",
-                      {"method": "median_peaks", "background": "cell", "threshold": "otsu", "threshold_on": "filtered", "select": "brightest",
-                       "refine": "none"}),
-    "bennabi": ("Bennabi 2025 steps + local background, noise threshold on the smoothed image, track choice, Gaussian fit (median_peaks)",
-                {"method": "median_peaks"}),
-    "no_median": ("... without the median filter (k = 1)", {"method": "median_peaks", "median_px": 1}),
-    "median5": ("... median 5x5", {"method": "median_peaks", "median_px": 5}),
-    "cell_background": ("... one background value per cell instead of the local background", {"method": "median_peaks", "background": "cell"}),
-    "otsu": ("... the paper's Otsu threshold instead of the noise threshold", {"method": "median_peaks", "threshold": "otsu"}),
-    "on_filtered": ("... threshold on the median-filtered image (the paper's order)", {"method": "median_peaks", "threshold_on": "filtered"}),
-    "brightest_choice": ("... brightest candidate instead of the track choice", {"method": "median_peaks", "select": "brightest"}),
-    "viterbi_choice": ("... Chen et al.'s Viterbi path instead of the track choice", {"method": "median_peaks", "select": "viterbi"}),
-    "per_frame": ("... each frame's own threshold instead of one per movie", {"method": "median_peaks", "threshold_scope": "frame"}),
-    "integer": ("... integer peak position, no sub-pixel step (as the paper)", {"method": "median_peaks", "refine": "none"}),
-    "centroid": ("... centroid instead of the Gaussian fit", {"method": "median_peaks", "refine": "centroid"}),
+    "no_median": ("... without the median filter", {"method": "dog_viterbi", "median_px": 1}),
+    "dog_snr5": ("... candidate threshold 5 x noise instead of 3 (fewer candidates)", {"method": "dog_viterbi", "dog_snr": 5.0}),
+    "integer": ("... integer pixel position, no sub-pixel step", {"method": "dog_viterbi", "refine": "none"}),
 }
 VARIANTS_3D = {
     "original": ("Original placeholder (3D): brightest voxel + centroid", {"method": "brightest"}),
@@ -49,9 +36,7 @@ VARIANTS_3D = {
                 {"method": "dog_viterbi"}),
     "chen_literal": ("Chen et al. 2025 in 3D as described: spot centroid, mean shell background",
                      {"method": "dog_viterbi", "refine": "centroid", "intensity_background": "mean"}),
-    "bennabi": ("median_peaks in 3D (axial median: auto = only when the planes are closer than the axial PSF sigma)", {"method": "median_peaks"}),
-    "zmed3": ("... axial median over 3 planes always", {"method": "median_peaks", "median_z": 3}),
-    "brightest_choice": ("... brightest candidate instead of the track choice", {"method": "median_peaks", "select": "brightest"}),
+    "zmed3": ("... axial median over 3 planes always", {"method": "dog_viterbi", "median_z": 3}),
 }
 SCORE_COLS = ["detection_rate", "n_false_on_dark", "median_error_um", "p95_error_um", "rms_error_um", "frac_far", "rms_error_near_um",
               "intensity_r_locus0", "intensity_r_locus1"]

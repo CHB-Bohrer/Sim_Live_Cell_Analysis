@@ -10,7 +10,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import tifffile
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, binary_erosion
 
 
 @dataclass
@@ -34,11 +34,12 @@ class CellData:
         return sorted(k for k in self.channels if k.startswith("locus"))
 
     def analysis_mask(self, dilate_px: int = 2) -> np.ndarray:
-        """This cell's pixels grown by dilate_px (to include the PSF halo of loci near the nuclear edge)."""
-        if dilate_px <= 0:
+        """This cell's pixels grown by dilate_px (to include the PSF halo of loci near the nuclear edge); negative = shrunk by that much."""
+        if dilate_px == 0:
             return self.mask.copy()
-        st = np.ones((1, 2 * dilate_px + 1, 2 * dilate_px + 1), bool)
-        return binary_dilation(self.mask, structure=st)
+        k = abs(int(dilate_px))
+        st = np.ones((1, 2 * k + 1, 2 * k + 1), bool)
+        return binary_dilation(self.mask, structure=st) if dilate_px > 0 else binary_erosion(self.mask, structure=st)
 
 
 def list_cells(source_dir: str | Path) -> pd.DataFrame:

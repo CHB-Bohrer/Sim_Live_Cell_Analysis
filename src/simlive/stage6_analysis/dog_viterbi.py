@@ -92,17 +92,32 @@ def _link_cost(a: np.ndarray, b: np.ndarray, D: float, g: int, ndim: int) -> np.
     return d2 / (4 * D * g) + 0.5 * ndim * np.log(4 * np.pi * D * g)
 
 
-def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: float) -> list:
-    """Lowest-cost path through the candidates (at most one per frame; frames may be skipped). Returns the index chosen per frame or None."""
+def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: float, reacquire: float | None = None) -> list:
+    """Lowest-cost path through the candidates (at most one per frame; frames may be skipped). Gaps of up to `max_gap` frames are bridged by
+    the diffusion link; after a longer gap the path may pick the spot up again anywhere, at `reacquire` (-log of a uniform position over the
+    cell, i.e. log of its size) plus the per-frame miss cost, so one path can hold several bursts separated by long OFF periods.
+    reacquire=None: no re-acquisition (one connected stretch). Returns the index chosen per frame or None."""
     n = len(rel)
     ndim = next((r.shape[1] for r in rel if len(r)), 2)
     best = [np.full(len(r), np.inf) for r in rel]
     back = [[None] * len(r) for r in rel]
+    run_min, run_arg = np.inf, None             # min over s <= t - max_gap - 1 of (best end cost at s - miss_cost * s)
     for t in range(n):
+        s_new = t - max_gap - 1
+        if reacquire is not None and s_new >= 0 and len(rel[s_new]) and np.isfinite(best[s_new]).any():
+            j0 = int(np.argmin(best[s_new]))
+            v = best[s_new][j0] - miss_cost * s_new
+            if v < run_min:
+                run_min, run_arg = v, (s_new, j0)
         if not len(rel[t]):
             continue
-        cost = miss_cost * t - reward[t]                                   # start here (skipping the frames before)
-        best[t] = cost.copy()
+        best[t] = miss_cost * t - reward[t]                                 # start here (skipping the frames before)
+        if run_arg is not None:                                             # pick the spot up again after a long gap
+            c = run_min + miss_cost * (t - 1) + reacquire - reward[t]
+            better = c < best[t]
+            best[t] = np.where(better, c, best[t])
+            for j in np.nonzero(better)[0]:
+                back[t][j] = run_arg
         for g in range(1, max_gap + 1):
             s = t - g
             if s < 0:
@@ -130,12 +145,13 @@ def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: fl
     return choice
 
 
-def estimate_D(rel: list, choice: list, D_min: float = 0.25) -> float:
-    """Diffusion potential from the path's own steps: D = median(|d|^2 / g) / (2 median chi2_ndim), robust to a few wrong links."""
+def estimate_D(rel: list, choice: list, D_min: float = 0.25, max_gap: int = 5) -> float:
+    """Diffusion potential from the path's own steps: D = median(|d|^2 / g) / (2 median chi2_ndim), robust to a few wrong links. Only links
+    over gaps of at most `max_gap` frames count (re-acquisitions after long gaps say nothing about the motion)."""
     pts = [(t, rel[t][j]) for t, j in enumerate(choice) if j is not None]
-    if len(pts) < 3:
+    steps = [((b - a) ** 2).sum() / (tb - ta) for (ta, a), (tb, b) in zip(pts[:-1], pts[1:]) if tb - ta <= max_gap]
+    if len(steps) < 2:
         return max(1.0, D_min)
-    steps = [((b - a) ** 2).sum() / (tb - ta) for (ta, a), (tb, b) in zip(pts[:-1], pts[1:])]
     ndim = len(pts[0][1])
     return max(float(np.median(steps)) / (2 * MEDIAN_CHI2[ndim]), D_min)
 
@@ -165,14 +181,15 @@ def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap
     false_per_frame = max(float(np.mean(counts)) - 1.0, 0.1) if counts else 1.0
     clutter = np.log(max(float(search_volume), 1.0) / false_per_frame) if search_volume else 0.0
     reward = [np.log(np.maximum(np.asarray(s, float), 1.0001)) + clutter for s in snr]
+    reacq = float(np.log(max(float(search_volume), 1.0))) if search_volume else None
     if viterbi_D_px2:
-        return _viterbi_once(rel, reward, float(viterbi_D_px2), int(viterbi_max_gap), float(viterbi_miss_cost)), float(viterbi_D_px2)
+        return _viterbi_once(rel, reward, float(viterbi_D_px2), int(viterbi_max_gap), float(viterbi_miss_cost), reacq), float(viterbi_D_px2)
     brightest = [0 if len(r) else None for r in rel]
-    D = estimate_D(rel, brightest)
+    D = estimate_D(rel, brightest, max_gap=int(viterbi_max_gap))
     choice = brightest
     for _ in range(max(int(viterbi_iterations), 1)):
-        choice = _viterbi_once(rel, reward, D, int(viterbi_max_gap), float(viterbi_miss_cost))
-        D_new = estimate_D(rel, choice)
+        choice = _viterbi_once(rel, reward, D, int(viterbi_max_gap), float(viterbi_miss_cost), reacq)
+        D_new = estimate_D(rel, choice, max_gap=int(viterbi_max_gap))
         if abs(D_new - D) < 0.02 * D:
             D = D_new
             break

@@ -30,6 +30,7 @@ from simlive.stage5_linking.isolate import isolate_cells
 from simlive.stage6_analysis.localize import localize_loci, locus_distances, photons_in_frame, score_localization
 from simlive.stage6_analysis.fiducials import (correct_with_beads, correct_with_plane_positions, score_variants, track_fiducials)
 from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances_3d, score_localization_3d
+from simlive.stage6_analysis.ms2 import ms2_trace, ms2_truth, score_ms2
 from simlive.stage4_segtrack.trackers import make_tracker
 from simlive.stage7_validation.identity import identity_summary, match_ids
 from simlive.stage7_validation.tracking_metrics import evaluate, gt_table, write_ctc
@@ -222,6 +223,14 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
                 errc, scc = score_localization(posc, truth, px_um)
                 errc.to_csv(out6 / "localization_errors_cal.csv", index=False)
                 scores["truth_calibrated"] = scc
+        if (run / "stage1_chromatin" / "transcription.csv").exists():   # the MS2 spot in the nuclear channel: Chen et al. 2025 trace per cell
+            progress("Stage 6: finding the MS2 spot and its intensity trace in every cell")
+            ms2_t = ms2_truth(run) if src == "truth" else None
+            for tag, cdir in (("", None),) + ((("_cal", str(cal_dir)),) if apply_cal else ()):
+                tr = map_cells(ms2_trace, out5, n_workers=iso.get("n_workers"), calib=cdir, **{k: v for k, v in ana.items() if k != "dilate_px"})
+                tr.to_csv(out6 / f"ms2_traces{tag}.csv", index=False)
+                if ms2_t is not None and len(tr):
+                    scores["ms2" + ("_calibrated" if tag else "")] = score_ms2(tr, ms2_t, px_um)[1]
         if zinfo is not None:   # z-stacks: locate the loci in 3D from the full stacks (the 2D result above uses the projections)
             progress(f"Stage 6: locating loci in 3D in {len(summ)} cells")
             stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(int(cfg["loci"]["n_loci"]))}
