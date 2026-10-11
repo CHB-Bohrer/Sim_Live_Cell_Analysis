@@ -63,6 +63,7 @@ def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, **kw) ->
         return pd.DataFrame(columns=COLUMNS)
     ci = ms2_inputs(cell, erode_px, calib)
     p = spot_params(kw)
+    kw.pop("method", None)                      # the MS2 spot is always found with dog_viterbi
     a = analyse_channel(ci["stack"], ci["region"], ci["centre"], "dog_viterbi", **kw)
     det, pos, inten = trace_from_analysis(a, ci["stack"], ci["centre"], p)
     fr = ci["frames"]
