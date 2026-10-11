@@ -45,8 +45,13 @@ def _detect_one_3d(vol: np.ndarray, region2d: np.ndarray, sigma_xy: float, sigma
 
 
 def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, smooth_sigma_px: float = 1.0, smooth_sigma_z: float = 0.8,
-                     min_snr: float = 5.0, dilate_px: int = 2, **_) -> pd.DataFrame:
-    """Locate every locus in every frame of one isolated cell from the full z-stacks. `stacks`: {channel: path of (T, Z, Y, X) TIFF}."""
+                     min_snr: float = 5.0, dilate_px: int = 2, calib: str | None = None, **_) -> pd.DataFrame:
+    """Locate every locus in every frame of one isolated cell from the full z-stacks. `stacks`: {channel: path of (T, Z, Y, X) TIFF}.
+    With `calib` (folder of a saved Calibration) the crops are dark/flat/hot-pixel corrected and the measured chromatic shift (lateral and
+    axial) of the colour is subtracted from the detected position."""
+    from simlive.stage6_analysis.localize import _load_calibration
+
+    cal = _load_calibration(calib) if calib else None
     chans = cell.locus_channels[:n_loci]
     if not chans:
         return pd.DataFrame()
@@ -61,10 +66,16 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, smooth_sig
         pad = float(np.percentile(np.asarray(st[0, len(z) // 2]), 1))
         for i, r in enumerate(fr.itertuples()):
             vol = _crop3d(np.asarray(st[int(r.t)]), int(r.crop_y0), int(r.crop_x0), S, pad)
+            if cal is not None:
+                vol = cal.correct(vol, name, int(r.crop_y0), int(r.crop_x0)).astype(float)
             d = _detect_one_3d(vol, reg[i], smooth_sigma_px, smooth_sigma_z, min_snr)
             if d is None:
                 continue
-            rows.append((cell.cell_id, r.t, k, r.crop_y0 + d[1], r.crop_x0 + d[2], z[0] + d[0] * step, d[3]))
+            y, x, zz = r.crop_y0 + d[1], r.crop_x0 + d[2], z[0] + d[0] * step
+            if cal is not None:
+                sy, sx = cal.shift_px(name)
+                y, x, zz = y - sy, x - sx, zz - cal.shift_z_um(name)
+            rows.append((cell.cell_id, r.t, k, y, x, zz, d[3]))
     return pd.DataFrame(rows, columns=["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr"])
 
 

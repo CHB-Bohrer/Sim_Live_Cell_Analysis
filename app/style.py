@@ -129,9 +129,11 @@ def intro(st, what: str, how: str) -> None:
 
 
 GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked and scored. About 20 s."),
-         ("🔬 New single-cell loci run (sidebar)", "Adds two coloured loci per nucleus (and optional probes / MS2). About 2 min."),
+         ("🔬 New single-cell loci run (sidebar)", "Adds two coloured loci per nucleus (optional probes, MS2, 3D z-stacks and a calibration). 2 to 10 min."),
          ("🎞 Movie · 📊 Metrics · 🧭 Trajectories", "How well the tracker did, frame by frame, with the errors marked."),
          ("🔬 Cells · 📈 Scans", "Single-cell movies with their loci; sweeps over many seeds and settings."),
+         ("🖼 Images", "Every recorded image next to the ground truth behind it, in 2D or as z-slices and side views; the image built up one error at a time."),
+         ("🎯 Calibration", "Simulated dark frames, flat-field slide and bead slide: what the instrument is, estimated vs true, and how much correcting for it helps."),
          ("⚡ Transcription · 🧪 Probes", "Build and explore the models behind the MS2 spot and the locus brightness."),
          ("🗂 Library · 🧬 Chromatin", "The saved polymer simulations: progress, choosing them, and looking inside one.")]
 
@@ -162,6 +164,14 @@ GLOSSARY = {
     "Flat-field": "How even the illumination is across the field of view.",
     "Library": "A collection of saved polymer (chromosome) simulations; each cell in a movie gets its own.",
     "Polymer unit": "The length unit of the polymer simulation until it is calibrated to nanometres and seconds (still a placeholder).",
+    "z-stack": "One 3D picture made of several planes recorded at different heights, one after the other.",
+    "Maximum projection": "A 2D picture made by keeping the brightest value along z at every position (what segmentation and tracking use in 3D runs).",
+    "Axial": "Along z, the direction of the microscope's optical axis (up and down); lateral means in the image plane.",
+    "Dark frame": "A picture taken with the shutter closed: shows only the camera's own offset, noise, hot pixels and cosmic rays.",
+    "Flat field": "A picture of a uniformly glowing slide: shows the unevenness of the illumination and of the pixels' gains.",
+    "Bead slide": "A slide of tiny fluorescent beads (smaller than the blur) used to measure the PSF, the colour offsets and the drift.",
+    "Photon transfer curve": "Noise variance plotted against signal; its slope is the camera gain (counts per electron).",
+    "DSNU / PRNU": "Fixed pixel-to-pixel differences: in the dark offset (DSNU) and in the gain (PRNU).",
     "Kymograph": "A picture with time along one axis and position along a line on the other.",
 }
 

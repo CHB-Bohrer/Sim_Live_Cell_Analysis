@@ -33,9 +33,23 @@ def _detect_one(img: np.ndarray, region: np.ndarray, sigma: float, min_snr: floa
     return (w * yy[y0:y1, x0:x1]).sum() / w.sum(), (w * xx[y0:y1, x0:x1]).sum() / w.sum(), work[iy, ix] / noise
 
 
+_CAL = {}
+
+
+def _load_calibration(path):
+    if path not in _CAL:
+        from simlive.stage3_microscopy.calibration.model import Calibration
+
+        _CAL[path] = Calibration.load(path)
+    return _CAL[path]
+
+
 def localize_loci(cell, n_loci: int = 2, smooth_sigma_px: float = 1.0, min_snr: float = 5.0, dilate_px: int = 2,
-                  px_um: float = 0.13, **_) -> pd.DataFrame:
-    """Locate every locus (one colour channel each) in every frame of one isolated cell. One row per detection."""
+                  px_um: float = 0.13, calib: str | None = None, **_) -> pd.DataFrame:
+    """Locate every locus (one colour channel each) in every frame of one isolated cell. One row per detection.
+    With `calib` (folder of a saved Calibration) every crop is first dark-subtracted, flat-fielded and hot-pixel-corrected, and the measured
+    chromatic shift of the colour is subtracted from the detected position."""
+    cal = _load_calibration(calib) if calib else None
     chans = cell.locus_channels[:n_loci]
     if not chans:
         return pd.DataFrame()
@@ -48,9 +62,15 @@ def localize_loci(cell, n_loci: int = 2, smooth_sigma_px: float = 1.0, min_snr: 
     for k, name in enumerate(chans):
         stack = cell.channels[name]
         for i, r in enumerate(fr.itertuples()):
-            d = _detect_one(stack[i].astype(float), reg[i], smooth_sigma_px, min_snr)
+            img = stack[i].astype(float)
+            if cal is not None:
+                img = cal.correct(img, name, int(r.crop_y0), int(r.crop_x0)).astype(float)
+            d = _detect_one(img, reg[i], smooth_sigma_px, min_snr)
             if d is None:
                 continue
+            if cal is not None:
+                sy, sx = cal.shift_px(name)
+                d = (d[0] - sy, d[1] - sx, d[2])
             c, s = np.cos(theta[i]), np.sin(theta[i])
             dy, dx = d[0] - S // 2, d[1] - S // 2                 # from the crop centre = nucleus centroid
             rows.append((cell.cell_id, r.t, k, d[0], d[1], r.crop_y0 + d[0], r.crop_x0 + d[1],

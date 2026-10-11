@@ -148,3 +148,9 @@ imaging_errors:
   row_noise: {enabled: true, adu: 0.6}
   dsnu: {enabled: true, adu: 1.0}
   adc: {enabled: true, bit_depth: 16, full_well_e: 30000.0}
+
+# Calibration of the imaging instrument: simulated dark frames, a flat-field slide and a bead slide are acquired with the same instrument as the movie,
+# the instrument is estimated from them blindly (stage3_microscopy/calibration), and compared with the truth. All acquisition settings are PLACEHOLDERS.
+calibration:
+  simulate: true            # acquire and fit (about 15 s at 130 nm pixels, 40 um field; longer for larger fields and z-stacks)
+  apply: true               # also locate the loci with the calibration applied (dark/flat/hot-pixel correction, chromatic shift removed): a second set of scores

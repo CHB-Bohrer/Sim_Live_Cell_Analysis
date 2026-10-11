@@ -41,7 +41,7 @@ flowchart TD
         LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>many saved polymer simulations of a<br/>chromatin region (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
         S1["<b>Loci in each cell</b> (stage 1)<br/>Give every cell its own saved simulation<br/>and read two loci from it.<br/>NOW: still a simple toy model.<br/>NEXT: use the library (after calibration)."]:::standin
         CAL["<b>Calibration</b><br/>Make the simulated motion match<br/>your measured MSD, in nm and seconds"]:::planned
-        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images with 22<br/>switchable image-error sources (drift, chromatic shift,<br/>blur, defocus, haze, flicker, cross-talk, camera noise...).<br/>Nucleus in one colour, each locus in its own."]:::built
+        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images (2D or 3D z-stacks) with 23<br/>switchable image-error sources (drift, chromatic shift,<br/>blur, defocus, haze, flicker, cross-talk, camera noise...).<br/>Nucleus in one colour, each locus in its own."]:::built
         TRUTH[("<b>ANSWER KEY</b><br/>true cell outlines and ID numbers<br/>true position of every locus")]:::built
         MOVIE[("<b>THE MOVIE</b><br/>nucleus images +<br/>one image per locus colour")]:::built
     end

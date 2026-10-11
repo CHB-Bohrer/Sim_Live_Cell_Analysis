@@ -115,3 +115,11 @@ cosmic rays, pixel-gain pattern, read noise, row noise, offset pattern and digit
 values are placeholders), or with the sidebar's **Image errors** controls; `imaging_errors.enabled: false` gives the simple original model. Every source is
 explained in [docs/IMAGE_ERRORS.md](docs/IMAGE_ERRORS.md) and in the dashboard's **🖼 Images** tab, which shows each recorded frame next to the ground truth that produced it
 (true masks, true locus positions, drift/focus/light level of that frame), builds an image up one error at a time, and measures how much each error matters.
+
+
+### 3D z-stacks and calibration
+Tick **Record 3D z-stacks** in the sidebar's loci form (or use `configs\loci_3d.yaml`): every frame becomes a stack of planes, nuclei are 3D ellipsoids, the loci have a height, and
+the microscope blurs along z too. The loci are located in 3D and the 🖼 Images tab shows slices, projections and x-z / y-z side views next to the ground truth.
+**Calibration**: the simulation also takes dark frames, a flat-field slide and a bead slide with the same instrument, estimates the instrument from them (gain, noise, hot pixels, illumination,
+PSF, colour offsets, drift) and compares each estimate with the true value; the movie is then analysed again with the calibration applied. See the 🎯 Calibration tab,
+`scripts\run.cmd python scripts\run_calibration.py --run <run folder>` and [docs/CALIBRATION_AND_3D.md](docs/CALIBRATION_AND_3D.md).

@@ -32,16 +32,25 @@ The sample slowly slides relative to the camera (thermal drift, a stage that set
 |---|---|---|---|
 | `drift_px_per_frame` | `0.15` | px | step size of the slow random-walk drift, per frame |
 | `jitter_px` | `0.05` | px | frame-to-frame vibration (does not accumulate) |
+| `drift_z_um_per_frame` | `0.03` | um | z-stacks only: step size of the slow axial drift, per frame |
+| `jitter_z_um` | `0.02` | um | z-stacks only: frame-to-frame axial vibration |
 
 ### Chromatic shift between colour channels  (`chromatic_shift`)
 
-Different wavelengths focus at slightly different places (lateral chromatic aberration, imperfect filter-cube alignment), so each locus colour is imaged shifted relative to the nucleus channel.
+Different wavelengths focus at slightly different places (lateral and axial chromatic aberration, imperfect filter-cube alignment), so each locus colour is imaged shifted relative to the nucleus channel.
 
-**Effect:** A constant offset per colour. It does not average away, and it biases the measured distance between two loci of different colours unless it is calibrated (e.g. with beads).
+**Effect:** A constant offset per colour. It does not average away, and it biases the measured distance between two loci of different colours unless it is calibrated (e.g. with beads). In z-stacks the axial offset is usually larger than the lateral one.
 
 | parameter | default | unit | meaning |
 |---|---|---|---|
 | `shift_px` | `{'locus0': [0.25, -0.15], 'locus1': [-0.3, 0.2]}` | px (y, x) | offset of each locus channel relative to the nuclear channel |
+| `shift_z_um` | `{'locus0': 0.15, 'locus1': -0.2}` | um | z-stacks only: axial offset of each locus channel |
+
+### Time skew within a z-stack  (`slice_skew`)
+
+The slices of a stack are recorded one after the other, so the last slice is recorded a fraction of a second after the first while the loci keep moving.
+
+**Effect:** Within one stack a locus is at a slightly different place in each slice; it blurs the 3D spot along the direction of motion. Only in z-stacks (acquisition.z_stack.slice_time_s sets the time per slice).
 
 
 ## Optics
@@ -54,9 +63,9 @@ A point of light is imaged as a small blob, not a point: sigma = 0.21 x waveleng
 
 ### Focus drift (defocus)  (`defocus`)
 
-The focal plane wanders a little from frame to frame (autofocus residual, thermal drift). Out of focus the PSF widens.
+The focal plane wanders a little from frame to frame (autofocus residual, thermal drift). Out of focus the PSF widens. In a z-stack the same error shifts the whole stack up or down instead.
 
-**Effect:** Spots get wider and dimmer in the same frames; the nuclear edge softens. Spot brightness fluctuates for a reason unrelated to biology.
+**Effect:** 2D: spots get wider and dimmer in the same frames; the nuclear edge softens. 3D: every object appears displaced along z by the focus error. Either way, spot brightness fluctuates for a reason unrelated to biology.
 
 | parameter | default | unit | meaning |
 |---|---|---|---|

@@ -240,6 +240,22 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed", help="Multiplies how fast the cells move (0.4 keeps tracking easy).")
         l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot", help="Brightness of each locus spot. A placeholder until measured.")
         l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div", help="Chance per frame that a cell divides into two.")
+        l_fov = st.slider("Field of view (µm, square)", 30, 120, 80, 5, key="l_fov",
+                          help="Side length of the imaged area. A smaller field is much cheaper for z-stacks (50 µm is a good start).")
+        st.markdown("**3D z-stacks**")
+        st.caption("Instead of one picture per frame, record a stack of planes at different heights. Nuclei become 3D ellipsoids, loci get a "
+                   "height, and the microscope blurs along z as well. Segmentation and tracking use the maximum projection; the loci are located in 3D.")
+        l_3d = st.checkbox("Record 3D z-stacks", False, key="l_3d",
+                           help="Needs lots of disk space: frames × planes × pixels² × 3 colours × 2 bytes (the page warns before a very large run).")
+        l_nz = st.slider("Planes per stack", 5, 31, 15, 2, key="l_nz", help="Number of planes in each stack (used only for z-stacks).")
+        l_dz = st.number_input("Plane spacing (µm)", 0.2, 2.0, 0.8, 0.1, key="l_dz",
+                               help="Distance between planes. The axial blur is about 0.4 µm (sigma) for widefield: spacing much larger than that undersamples z.")
+        l_conf = st.checkbox("Confocal instead of widefield", False, key="l_conf",
+                             help="A confocal / spinning-disk microscope has a narrower axial PSF and a narrower lateral PSF than widefield.")
+        st.markdown("**Calibration**")
+        l_cal = st.checkbox("Simulate and apply a calibration", True, key="l_cal",
+                            help="Acquire dark frames, a flat-field slide and a bead slide of the same instrument, estimate the instrument from them, "
+                                 "and analyse the loci a second time with the calibration applied. See the 🎯 Calibration tab.")
         l_src = st.radio("Where do the locus movements come from?", ["toy", "library"], key="l_src",
                          format_func={"toy": "Invented stand-in motion (fast, no library needed)",
                                       "library": "Saved chromatin library, with my choice from the 🗂 Library tab"}.get,
@@ -295,14 +311,26 @@ if go:
 if go_loci:
     common = [f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
               f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
-              f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", *l_ie]
+              f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", f"geometry.fov_um=[{l_fov}, {l_fov}]", *l_ie,
+              f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}"]
+    if l_conf:
+        common.append("optics.modality=confocal")
+    est_gb = 0.0
+    if l_3d:
+        px_um = load_config(REPO_ROOT / "configs" / "loci_demo.yaml")["optics"]["pixel_size_nm"] / 1000.0
+        est_gb = l_frames * l_nz * (l_fov / px_um) ** 2 * 2 * 3 / 1e9
+        common += [f"acquisition.z_stack={{enabled: true, n_slices: {l_nz}, step_um: {l_dz}, center_um: null, slice_time_s: 0.15, projection: max}}",
+                   "geometry.z={nucleus_semi_axis_ratio: 1.0, z_center_um: 7.0, z_spread_um: 0.5, z_walk_um_per_frame: 0.05}"]
+        st.info(f"3D run: about {est_gb:.1f} GB of images will be written ({l_frames} frames × {l_nz} planes × 3 colours).")
     if l_probes:      # the checkboxes used to be ignored: nothing was passed on
         import probe_tab  # noqa: E402
         common += probe_tab.overrides_for_movie()
     if l_tx:
         import transcription_tab  # noqa: E402
         common += transcription_tab.overrides_for_movie()
-    if l_src == "library":
+    if est_gb > 12:
+        st.error("That z-stack run would need more than 12 GB; reduce the frames, planes or field of view.")
+    elif l_src == "library":
         import library_tab  # noqa: E402
         picked = library_tab.overrides_for_movie(l_cells)
         if not picked:
@@ -395,8 +423,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_img, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🖼 Images", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_img, tab_cal, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🖼 Images", "🎯 Calibration", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -639,8 +667,16 @@ def images_frag():
     images_tab.render(st, run_path, R)
 
 
+@st.fragment
+def calibration_frag():
+    import calibration_tab  # noqa: E402  (app/calibration_tab.py)
+    calibration_tab.render(st, run_path, R)
+
+
 with tab_img:
     images_frag()
+with tab_cal:
+    calibration_frag()
 
 import chromatin_tab  # noqa: E402  (app/chromatin_tab.py)
 import library_tab  # noqa: E402  (app/library_tab.py)

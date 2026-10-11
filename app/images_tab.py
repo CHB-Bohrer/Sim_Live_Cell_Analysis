@@ -44,16 +44,46 @@ def _variant(im, enabled: tuple):
 
 
 @st.cache_data(show_spinner=False, max_entries=96)
-def _render(path: str, stamp: float, t: int, channel: str, enabled: tuple, bbox: tuple):
+def _render(path: str, stamp: float, t: int, channel: str, enabled: tuple, bbox: tuple, zsel: int = -1):
+    """One 2D image of a frame with exactly the sources in `enabled` on. In a z-stack: slice `zsel`, or the projection if zsel < 0."""
+    im = _imager(path, stamp)
+    f = im.frame(t, _variant(im, enabled), [channel])["images"][channel]
+    if f.ndim == 3:
+        f = f[zsel] if zsel >= 0 else im.project(f, im.projection)
+    y0, y1, x0, x1 = bbox
+    return f[y0:y1, x0:x1].copy()
+
+
+@st.cache_data(show_spinner=False, max_entries=24)
+def _render_vol(path: str, stamp: float, t: int, channel: str, enabled: tuple, bbox: tuple):
+    """The whole z-stack (z, y, x) of one channel in a frame, cropped laterally."""
     im = _imager(path, stamp)
     f = im.frame(t, _variant(im, enabled), [channel])["images"][channel]
     y0, y1, x0, x1 = bbox
-    return f[y0:y1, x0:x1].copy()
+    return f[:, y0:y1, x0:x1].copy()
 
 
 @st.cache_data(show_spinner=False)
 def _read_page(path: str, stamp: float, name: str, t: int):
     return tifffile.imread(Path(path) / "stage3_microscopy" / f"{name}.tif", key=int(t))
+
+
+def _recorded(run: Path, stamp: float, im, ch: str, t: int, zsel: int):
+    """The saved camera image of a channel: one slice of the z-stack, or the 2D image (projection) the tracker saw."""
+    if im.is3d and zsel >= 0:
+        return _read_page(str(run), stamp, f"{ch}_zstack", t * im.nz + zsel)
+    return _read_page(str(run), stamp, ch, t)
+
+
+def _labels_at(run: Path, im, t: int, zsel: int):
+    if im.is3d and zsel >= 0:
+        return _read_page(str(run), 0.0, "labels_3d", t * im.nz + zsel)
+    return _read_page(str(run), 0.0, "labels", t)
+
+
+@st.cache_data(show_spinner=False, max_entries=12)
+def _read_stack(path: str, stamp: float, name: str, t: int, nz: int):
+    return tifffile.imread(Path(path) / "stage3_microscopy" / f"{name}.tif", key=range(int(t) * nz, (int(t) + 1) * nz))
 
 
 def _csv(run: Path, *parts) -> pd.DataFrame | None:
@@ -92,6 +122,13 @@ def _centroid(img: np.ndarray, y: float, x: float, half: int = 4):
     return y0 + (w * yy).sum() / w.sum(), x0 + (w * xx).sum() / w.sum()
 
 
+def _zcentroid(vol: np.ndarray, y: int, x: int) -> float:
+    """Centre of a spot along z (in slice units) from the z-profile through its brightest pixel (background removed)."""
+    p = vol[:, max(y - 1, 0):y + 2, max(x - 1, 0):x + 2].mean(axis=(1, 2))
+    p = np.clip(p - np.median(p), 0, None)
+    return float((p * np.arange(len(p))).sum() / p.sum()) if p.sum() > 0 else float("nan")
+
+
 def _thompson_nm(sigma_nm: float, a_nm: float, n_photons: float, bg_sd_e: float) -> float:
     """Best-case localization precision (Thompson et al. 2002, with background): sqrt((s^2 + a^2/12)/N + 8 pi s^4 b^2 / (a^2 N^2))."""
     n = max(n_photons, 1e-9)
@@ -111,7 +148,10 @@ def _ground_truth_numbers(im, run: Path, t: int, cell: int | None, truth_img, tx
     it = _csv(run, "stage3_microscopy", "imaging_truth.csv")
     r = it[it.t == t].iloc[0]
     items = [("Stage drift this frame", f"{np.hypot(r.drift_y_px, r.drift_x_px) * px_nm:.0f} nm", f"({r.drift_y_px:+.2f}, {r.drift_x_px:+.2f}) px in (y, x); everything in the frame moved by this"),
-             ("Focus error", f"{r.defocus_um * 1000:+.0f} nm", "distance of the focal plane from the sample plane in this frame")]
+             ("Focus error", f"{r.defocus_um * 1000:+.0f} nm",
+              "z-stack: every object appears displaced along z by this much" if im.is3d else "distance of the focal plane from the sample plane in this frame")]
+    if im.is3d and "drift_z_um" in r:
+        items.insert(1, ("Axial drift this frame", f"{r.drift_z_um * 1000:+.0f} nm", "the sample slid along z by this much since the first frame"))
     for c in im.channels:
         items.append((f"Blur σ, {CH_SHORT[c]}", f"{r[f'sigma_px_{c}'] * px_nm:.0f} nm",
                       "total Gaussian blur this frame (diffraction, defocus, locus motion in quadrature)"))
@@ -128,8 +168,12 @@ def _ground_truth_numbers(im, run: Path, t: int, cell: int | None, truth_img, tx
             continue
         q = q.iloc[0]
         row = {"locus": f"locus {k}", "true x (µm)": round(q.x_um, 3), "true y (µm)": round(q.y_um, 3)}
+        if "z_um" in q:
+            row["true z (µm)"] = round(q.z_um, 3)
         if "x_drawn_um" in q:
-            row["drawn offset from truth (nm)"] = round(np.hypot(q.x_drawn_um - q.x_um, q.y_drawn_um - q.y_um) * 1000, 0)
+            row["drawn offset from truth, lateral (nm)"] = round(np.hypot(q.x_drawn_um - q.x_um, q.y_drawn_um - q.y_um) * 1000, 0)
+        if "z_drawn_um" in q:
+            row["drawn offset from truth, axial (nm)"] = round((q.z_drawn_um - q.z_um) * 1000, 0)
         if occ is not None:
             o = occ[(occ.cell_id == cell) & (occ.t == t) & (occ.locus_id == k)]
             if len(o):
@@ -159,6 +203,15 @@ def _part_view(R, run: Path, im, cfg):
     hi = c[2].slider("Brightness ceiling (percentile)", 95.0, 100.0, 99.8, 0.1, key="img_hi",
                      help="Pixels above this percentile of the frame are shown as white. Lower it to see dim structure.")
     lg = c[3].checkbox("Log scale", False, key="img_log", help="Compress bright values so dim and bright objects are both visible.")
+    zsel = -1
+    if im.is3d:
+        cz = st.columns([3, 2, 3])
+        proj = cz[1].checkbox("Show the projection", False, key="img_proj",
+                              help=f"Show the {im.projection}-intensity projection along z (the 2D image segmentation and tracking used) instead of one slice.")
+        zsel = -1 if proj else int(cz[0].slider("z slice", 0, im.nz - 1, im.nz // 2, key="img_z",
+                                                help="Each frame is a stack of planes; this chooses which plane to look at."))
+        cz[2].caption(f"Stack of {im.nz} planes, {im.zstep:g} µm apart, z = {im.zk[0]:.1f} to {im.zk[-1]:.1f} µm above the coverslip."
+                      + ("" if proj else f" Showing plane {zsel + 1} at z = {im.zk[zsel]:.2f} µm."))
     cells_now = R["cells"][R["cells"].t == t]
     c = st.columns([2, 2, 3])
     mode = c[0].radio("View", ["field", "cell", "locus"], horizontal=True, key="img_mode",
@@ -196,17 +249,18 @@ def _part_view(R, run: Path, im, cfg):
     if not chans:
         st.info("Choose at least one channel.")
         return
-    lab = _read_page(str(run), 0.0, "labels", t)
+    lab = _labels_at(run, im, t, zsel)
     rows = 1 + int(ideal) + int(diff)
     fig, axes = plt.subplots(rows, len(chans), figsize=(5.6 * len(chans), 5.4 * rows), squeeze=False)
     stamp = (run / "stage7_validation" / "metrics.json").stat().st_mtime
     for j, ch in enumerate(chans):
-        rec = _read_page(str(run), stamp, ch, t)[y0:y1, x0:x1].astype(float)
-        lo_, hi_ = _limits(_read_page(str(run), stamp, ch, t).astype(float), hi)
+        rec_full = _recorded(run, stamp, im, ch, t, zsel).astype(float)
+        rec = rec_full[y0:y1, x0:x1]
+        lo_, hi_ = _limits(rec_full, hi)
         shown = [("Recorded: " + CH_SHORT[ch], rec)]
         idl = None
         if ideal or diff:
-            idl = _render(str(run), stamp, t, ch, (), bbox).astype(float)
+            idl = _render(str(run), stamp, t, ch, (), bbox, zsel).astype(float)
         if ideal:
             shown.append(("Error-free: " + CH_SHORT[ch], idl))
         if diff:
@@ -223,7 +277,7 @@ def _part_view(R, run: Path, im, cfg):
             ax.set_title(title, fontsize=13)
             ax.set_xticks([]); ax.set_yticks([])
             if not title.startswith("Recorded −"):
-                _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now)
+                _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now, zsel)
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)
@@ -234,8 +288,8 @@ def _part_view(R, run: Path, im, cfg):
         st.caption(f"Zoomed region: x {x0}–{x1} px, y {y0}–{y1} px ({(x1 - x0) * im.px_um:.1f} × {(y1 - y0) * im.px_um:.1f} µm).")
     # does the re-rendered frame equal the saved TIFF?
     ch0 = chans[0]
-    full = _render(str(run), stamp, t, ch0, tuple(im.E.enabled_ids()), (0, im.shape[0], 0, im.shape[1]))
-    saved = _read_page(str(run), stamp, ch0, t)
+    full = _render(str(run), stamp, t, ch0, tuple(im.E.enabled_ids()), (0, im.shape[0], 0, im.shape[1]), zsel)
+    saved = _recorded(run, stamp, im, ch0, t, zsel)
     ok = np.array_equal(np.rint(full).clip(0, 65535).astype(np.uint16), saved.astype(np.uint16))
     (st.success if ok else st.warning)(
         "The rebuilt image with all this run's error sources on is identical to the saved image (so the build-up below is exactly "
@@ -243,10 +297,12 @@ def _part_view(R, run: Path, im, cfg):
         "The rebuilt image differs from the saved one (the run was made with other code or settings), so the build-up below is "
         "indicative only.")
     _ground_truth_numbers(im, run, t, cell, truth_img, tx, occ, cfg)
-    return t, ch0, cell, lk
+    if im.is3d:
+        _side_views(run, stamp, im, t, chans, cell, lk, cells_now, truth_img, hi, ideal)
+    return t, ch0, cell, lk, zsel
 
 
-def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now):
+def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now, zsel=-1):
     y0, y1, x0, x1 = bbox
     if "masks" in show_over and lab.any():
         sub = lab[y0:y1, x0:x1]
@@ -265,10 +321,15 @@ def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now
         for q in tt.itertuples():
             if ch.startswith("locus") and q.locus_id != int(ch[5:]):
                 continue
+            dz = (q.z_um - im.zk[zsel]) if (im.is3d and zsel >= 0 and hasattr(q, "z_um")) else 0.0
+            near = abs(dz) <= im.zstep / 2 + 1e-9                    # in a z-slice, only loci within half a step are "in this plane"
+            alpha = 1.0 if near else 0.4
             if x0 <= q.x_um / im.px_um < x1 and y0 <= q.y_um / im.px_um < y1:
-                ax.plot(q.x_um / im.px_um, q.y_um / im.px_um, "o", mfc="none", mec="cyan", ms=15, mew=1.6)
+                ax.plot(q.x_um / im.px_um, q.y_um / im.px_um, "o", mfc="none", mec="cyan", ms=15, mew=1.6, alpha=alpha, ls="-" if near else "--")
+                if not near:
+                    ax.annotate(f"z {dz:+.1f} µm", (q.x_um / im.px_um, q.y_um / im.px_um), color="cyan", fontsize=8, xytext=(8, 8), textcoords="offset points")
             if hasattr(q, "x_drawn_um") and ch.startswith("locus"):
-                ax.plot(q.x_drawn_um / im.px_um, q.y_drawn_um / im.px_um, "x", color="red", ms=9, mew=1.6)
+                ax.plot(q.x_drawn_um / im.px_um, q.y_drawn_um / im.px_um, "x", color="red", ms=9, mew=1.6, alpha=alpha)
     if "ms2" in show_over and ch == "nucleus" and tx is not None:
         on = tx[(tx.t == t) & (tx.ms2_loops > 0.5)]
         for q in tt[tt.locus_id == 0].itertuples():
@@ -277,13 +338,63 @@ def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now
     ax.set_xlim(x0 - .5, x1 - .5); ax.set_ylim(y1 - .5, y0 - .5)
 
 
+def _side_views(run, stamp, im, t, chans, cell, lk, cells_now, truth_img, hi, ideal):
+    """x-z and y-z cuts through the chosen locus (or the cell centre): the axial truth next to the recorded stack."""
+    st.markdown("**Side views: x–z and y–z cuts through the chosen locus (or the cell's centre)**")
+    st.caption("Horizontal = position along the cut, vertical = z (the planes of the stack). Cyan ○ = the true position, red × = where the spot is "
+               "really drawn (true position + chromatic shift + focus error). Blur along z is the axial point spread function.")
+    if cell is None:
+        st.info("Choose a cell above to see its side views.")
+        return
+    row = cells_now[cells_now.cell_id == cell]
+    if row.empty:
+        return
+    yc, xc = row.iloc[0].y_um / im.px_um, row.iloc[0].x_um / im.px_um
+    zt, zd = float(row.iloc[0].get("z_um", im.zcenter)), None
+    xd = yd = None
+    if truth_img is not None:
+        q = truth_img[(truth_img.cell_id == cell) & (truth_img.t == t) & (truth_img.locus_id == lk)]
+        if len(q) and any(c.startswith("locus") for c in chans):
+            q = q.iloc[0]
+            yc, xc, zt = q.y_um / im.px_um, q.x_um / im.px_um, float(q.get("z_um", zt))
+            yd, xd, zd = q.get("y_drawn_um", q.y_um) / im.px_um, q.get("x_drawn_um", q.x_um) / im.px_um, q.get("z_drawn_um", zt)
+    w = 26
+    iy, ix = int(round(yc)), int(round(xc))
+    y0, y1, x0, x1 = max(iy - w, 0), min(iy + w + 1, im.shape[0]), max(ix - w, 0), min(ix + w + 1, im.shape[1])
+    bbox = (y0, y1, x0, x1)
+    zext = (im.zk[-1] + im.zstep / 2, im.zk[0] - im.zstep / 2)
+    per = 1 + int(ideal)                                               # recorded (+ error-free) for each of the two cuts
+    fig, axes = plt.subplots(len(chans), 2 * per, figsize=(4.2 * 2 * per, 3.5 * len(chans)), squeeze=False)
+    for j, ch in enumerate(chans):
+        rec = _read_stack(str(run), stamp, f"{ch}_zstack", t, im.nz)[:, y0:y1, x0:x1].astype(float)
+        vols = [("Recorded", rec)]
+        if ideal:
+            vols.append(("Error-free", _render_vol(str(run), stamp, t, ch, (), bbox).astype(float)))
+        lo, hh = float(np.percentile(rec, 1)), float(np.percentile(rec, hi))
+        for k, axname in enumerate(("x–z", "y–z")):
+            for i, (name, vol) in enumerate(vols):
+                cut = vol[:, iy - y0 - 1:iy - y0 + 2, :].mean(axis=1) if k == 0 else vol[:, :, ix - x0 - 1:ix - x0 + 2].mean(axis=2)
+                ax = axes[j, k * per + i]
+                u0, u1 = ((x0, x1) if k == 0 else (y0, y1))
+                ax.imshow(cut, cmap="gray", vmin=lo, vmax=hh, aspect="auto", extent=(u0 * im.px_um, u1 * im.px_um, zext[0], zext[1]))
+                ax.set_title(f"{name}: {CH_SHORT[ch]}, {axname}", fontsize=11)
+                if ch == "nucleus" or "loci" in st.session_state.get("img_over", ["loci"]):
+                    ax.plot((xc if k == 0 else yc) * im.px_um, zt, "o", mfc="none", mec="cyan", ms=14, mew=1.5)
+                    if zd is not None and ch.startswith("locus"):
+                        ax.plot(((xd if k == 0 else yd)) * im.px_um, zd, "x", color="red", ms=9, mew=1.5)
+                ax.set_xlabel("µm"); ax.set_ylabel("z (µm)")
+    fig.tight_layout()
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)
+
+
 # ----------------------------------------------------------------------------- part 2
 def _part_buildup(R, run: Path, im, ctx):
     st.markdown("### 2. How this image was built, one error at a time")
     st.caption("Start from the ground truth drawn with perfect optics and no noise, then add the run's error sources in the physical order "
                "in which light is degraded. Every panel adds one source to the previous panel; the last panel is the recorded image. "
                "Each panel uses the same grey scale, so brightness changes are real.")
-    t, ch0, cell, lk = ctx
+    t, ch0, cell, lk, _ = ctx
     if im.channels[-1].startswith("locus"):                      # the loci show the errors best: start there
         st.session_state.setdefault("bu_ch", next(c for c in im.channels if c.startswith("locus")))
         st.session_state.setdefault("bu_mode", "locus")
@@ -311,6 +422,13 @@ def _part_buildup(R, run: Path, im, ctx):
     bbox = _crop_box(mode, im.shape, im.px_um, cell_row, spot)
     y0, y1, x0, x1 = bbox
     stamp = (run / "stage7_validation" / "metrics.json").stat().st_mtime
+    zsel = -1
+    if im.is3d:
+        zref = float(cell_row.get("z_um", im.zcenter))
+        if ti is not None and len(q):
+            zref = float(q.iloc[0].get("z_um", zref))
+        k0 = int(np.argmin(np.abs(im.zk - zref)))
+        zsel = int(st.slider("z slice", 0, im.nz - 1, k0, key="bu_z", help="The plane to build up. It starts at the plane nearest the object's true height."))
     if not st.button("▶ Build the image up", type="primary", key="bu_go") and "bu_done" not in st.session_state:
         st.caption("Press the button: it renders about 20 versions of this frame (a few seconds).")
         return
@@ -320,7 +438,7 @@ def _part_buildup(R, run: Path, im, ctx):
     for i, s in enumerate(order):
         stages.append((ERR.SOURCES[s]["title"], tuple(order[: i + 1])))
     with st.spinner("Rendering the stages…"):
-        imgs = [_render(str(run), stamp, t, ch, en, bbox).astype(float) for _, en in stages]
+        imgs = [_render(str(run), stamp, t, ch, en, bbox, zsel).astype(float) for _, en in stages]
     lo, hi = _limits(imgs[-1], 99.9)
     import textwrap
     ncol = 5
@@ -370,7 +488,8 @@ def _part_budget(R, run: Path, im, ctx):
     if "bu_ch" not in st.session_state:
         st.caption("Choose a channel and region in part 2 first.")
         return
-    t, _, cell, _ = ctx
+    t, _, cell, _, _ = ctx
+    zsel = int(st.session_state.get("bu_z", -1)) if im.is3d else -1
     ch, mode = st.session_state["bu_ch"], st.session_state.get("bu_mode", "cell")
     if not st.button("▶ Measure every source", key="eb_go"):
         return
@@ -389,7 +508,8 @@ def _part_budget(R, run: Path, im, ctx):
     mode = mode if ch.startswith("locus") or mode == "cell" else "cell"
     bbox = _crop_box(mode, im.shape, im.px_um, cell_row, (spot[0], spot[1]) if spot else None)
     stamp = (run / "stage7_validation" / "metrics.json").stat().st_mtime
-    base = _render(str(run), stamp, t, ch, (), bbox).astype(float)
+    base = _render(str(run), stamp, t, ch, (), bbox, zsel).astype(float)
+    vol0 = _render_vol(str(run), stamp, t, ch, (), bbox).astype(float) if (im.is3d and ch.startswith("locus")) else None
     peak = max(float(base.max() - np.median(base)), 1e-9)
     py, px = np.unravel_index(np.argmax(base), base.shape)
     cy0, cx0 = _centroid(base, py, px)
@@ -397,13 +517,16 @@ def _part_budget(R, run: Path, im, ctx):
     prog = st.progress(0.0, text="Measuring…")
     srcs = [s for s in ERR.ORDER if im.E.on(s)]
     for i, s in enumerate(srcs):
-        img = _render(str(run), stamp, t, ch, (s,), bbox).astype(float)
+        img = _render(str(run), stamp, t, ch, (s,), bbox, zsel).astype(float)
         rms = float(np.sqrt(np.mean((img - base) ** 2)))
         row = {"source": ERR.SOURCES[s]["title"], "group": ERR.SOURCES[s]["group"], "RMS change (ADU)": round(rms, 2),
                "% of the brightest signal": round(100 * rms / peak, 2)}
         if ch.startswith("locus"):
             cy, cx = _centroid(img, py, px)
             row["spot centre moves by (nm)"] = round(float(np.hypot(cy - cy0, cx - cx0) * im.px_um * 1000), 1) if np.isfinite(cy) else None
+            if vol0 is not None:
+                v1 = _render_vol(str(run), stamp, t, ch, (s,), bbox).astype(float)
+                row["spot centre moves along z by (nm)"] = round(float((_zcentroid(v1, py, px) - _zcentroid(vol0, py, px)) * im.zstep * 1000), 1)
         rows.append(row)
         prog.progress((i + 1) / len(srcs), text=f"Measured {ERR.SOURCES[s]['title']}")
     prog.empty()
@@ -446,6 +569,18 @@ def _part_reference(im, cfg):
         a, b = np.array(im.channel_shift_px("locus0")), np.array(im.channel_shift_px("locus1"))
         items.append(("Locus 0 ↔ locus 1 misregistration", f"{np.hypot(*(a - b)) * px_nm:.0f} nm",
                       "constant offset added to every measured distance between the two colours (uncorrected)"))
+    if im.is3d:
+        zs = [("z-stack", f"{im.nz} planes × {im.zstep:g} µm", f"covers z = {im.zk[0]:.1f} to {im.zk[-1]:.1f} µm; a stack takes about {im.nz * im.slice_time_s:.1f} s")]
+        for c in im.channels:
+            wl = opt["wavelength_nm"] if c == "nucleus" else lc["wavelengths_nm"][int(c[5:])]
+            from simlive.stage3_microscopy.render import axial_sigma_um
+            sz = axial_sigma_um({**opt}, wl)
+            zs.append((f"Axial PSF, {CH_SHORT[c]}", f"σ {sz * 1000:.0f} nm · FWHM {2.355 * sz * 1000:.0f} nm",
+                       f"{str(opt.get('modality', 'widefield'))} imaging; FWHM / plane spacing = {2.355 * sz / im.zstep:.1f} planes across the spot"))
+        if E.on("chromatic_shift") and len([c for c in im.channels if c.startswith('locus')]) >= 2:
+            zs.append(("Locus 0 ↔ locus 1 axial misregistration", f"{abs(im.channel_shift_z_um('locus0') - im.channel_shift_z_um('locus1')) * 1000:.0f} nm",
+                       "constant axial offset between the two colours (uncorrected)"))
+        items += zs
     style.stat_grid(st, items)
     st.caption("Hover a box for the explanation.")
     for g in ERR.GROUPS:

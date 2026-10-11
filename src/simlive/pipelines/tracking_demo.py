@@ -21,6 +21,7 @@ from simlive.stage1_chromatin.library_loci import simulate_library_loci
 from simlive.stage1_chromatin.probes import simulate_probe_occupancy
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
 from simlive.stage1_chromatin.transcription import ms2_spots, simulate_transcription, traces_from_truth
+from simlive.stage3_microscopy.calibration.run import run_calibration
 from simlive.stage3_microscopy.render import Imager, cells_in_image, entropy_for, truth_in_image
 from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
@@ -136,7 +137,9 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     write_provenance(s7, cfg, seed)
     (s7 / "metrics.json").write_text(json.dumps(metrics, indent=2, default=str))
     if cfg.get("loci"):
-        _isolate_and_analyze(cfg, run, progress)
+        # calibration runs here, after the tracker: torch is already loaded, so numpy's LAPACK calls cannot break its import
+        cal_dir = _run_calibration(cfg, run, progress) if (cfg.get("calibration") or {}).get("simulate") else None
+        _isolate_and_analyze(cfg, run, progress, cal_dir)
     progress("Done")
     return run
 
@@ -146,7 +149,19 @@ ID_SOURCES = {"truth": ("stage3_microscopy", "labels.tif"),
               "tracked_auto_masks": ("stage4_segtrack", "tracked_auto_masks.tif")}
 
 
-def _isolate_and_analyze(cfg: dict, run: Path, progress) -> None:
+def _run_calibration(cfg: dict, run: Path, progress) -> Path:
+    """Simulate dark / flat-field / bead acquisitions of this run's instrument, estimate the instrument from them, save the calibration."""
+    progress("Calibration: simulating dark, flat-field and bead acquisitions of this instrument and estimating it from them")
+    t0 = time.time()
+    cal, table = run_calibration(cfg, entropy_for(int(cfg["seed"])), progress=progress)
+    d = run / "stage3_microscopy" / "calibration"
+    cal.save(d)
+    table.to_csv(d / "comparison.csv", index=False)
+    progress(f"Calibration: done in {time.time() - t0:.0f}s ({len(table)} quantities compared with the truth)")
+    return d
+
+
+def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = None) -> None:
     """Stage 5 (isolate each cell) + stage 6 (placeholder per-cell locus analysis), for each identity source."""
     iso = cfg.get("isolation", {})
     sources = iso.get("sources", ["truth", "tracked_auto_masks"])
@@ -179,6 +194,18 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress) -> None:
             err, sc = score_localization(pos, truth, px_um)
             err.to_csv(out6 / "localization_errors.csv", index=False)
             scores[src] = sc
+        apply_cal = cal_dir is not None and (cfg.get("calibration") or {}).get("apply", True)
+        if apply_cal:           # the same analysis on dark/flat/hot-pixel-corrected crops with the chromatic shift removed
+            progress("Stage 6: locating loci again with the calibration applied")
+            posc = map_cells(localize_loci, out5, n_workers=iso.get("n_workers"), px_um=px_um, n_loci=cfg["loci"]["n_loci"],
+                             calib=str(cal_dir), **ana)
+            posc.to_csv(out6 / "loci_positions_cal.csv", index=False)
+            (locus_distances(posc, px_um) if len(posc) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
+                out6 / "locus_distances_cal.csv", index=False)
+            if src == "truth":
+                errc, scc = score_localization(posc, truth, px_um)
+                errc.to_csv(out6 / "localization_errors_cal.csv", index=False)
+                scores["truth_calibrated"] = scc
         if zinfo is not None:   # z-stacks: locate the loci in 3D from the full stacks (the 2D result above uses the projections)
             progress(f"Stage 6: locating loci in 3D in {len(summ)} cells")
             stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(int(cfg["loci"]["n_loci"]))}
@@ -191,6 +218,16 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress) -> None:
                 err3, sc3 = score_localization_3d(pos3, truth, px_um)
                 err3.to_csv(out6 / "localization_errors_3d.csv", index=False)
                 scores["truth_3d"] = sc3
+            if apply_cal:
+                pos3c = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
+                                  n_loci=cfg["loci"]["n_loci"], calib=str(cal_dir), **ana)
+                pos3c.to_csv(out6 / "loci_positions_3d_cal.csv", index=False)
+                (locus_distances_3d(pos3c, px_um) if len(pos3c) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
+                    out6 / "locus_distances_3d_cal.csv", index=False)
+                if src == "truth" and "z_um" in truth.columns:
+                    err3c, sc3c = score_localization_3d(pos3c, truth, px_um)
+                    err3c.to_csv(out6 / "localization_errors_3d_cal.csv", index=False)
+                    scores["truth_3d_calibrated"] = sc3c
         scores.setdefault(src, {})["peak_worker_memory_mb"] = summ.attrs.get("peak_worker_mb")
     try:  # peak working set of this (main) process over the whole run, incl. segmentation/tracking input arrays
         import psutil
