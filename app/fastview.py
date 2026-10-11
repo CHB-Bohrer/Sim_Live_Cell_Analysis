@@ -171,11 +171,18 @@ def cell_composite(nuc: np.ndarray, loci: list, nuc_w: float = 0.35) -> np.ndarr
 
 def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: list, pos, truth, px_um: float,
                        target_w: int = 430):
-    """Frames for one cell: [loci on nucleus (+ detected / true markers)] | [nucleus with mask outline]."""
+    """Frames for one cell: [loci on nucleus (+ detected / true markers)] | [the two (or three) locus colours alone, no nucleus, no markers].
+    The right panel uses one brightness scale per colour for the WHOLE movie, so the spots' brightness and shape changes through time are real."""
     n, S = mask.shape[0], mask.shape[1]
     nuc = channels["nucleus"]
     nlo, nhi = float(np.percentile(nuc, 1)), float(np.percentile(nuc, 99.5))
     scale = target_w / S
+    chs = [np.asarray(channels[c], float) for c in loc_names[:3]]
+    def _lim(c):      # black level a little above the typical background so the camera noise is not the loudest thing in the picture
+        med = float(np.median(c))
+        sd = 1.4826 * float(np.median(np.abs(c - med)))
+        return med + 1.5 * sd, float(max(np.percentile(c, 99.95), med + 4 * sd + 1))
+    lims = [_lim(c) for c in chs]                                                                       # one scale per colour, whole movie
     out, labels = [], []
     for i in range(n):
         t = int(frames_df.t.iloc[i])
@@ -191,9 +198,12 @@ def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: l
             for q in truth[truth.t == t].itertuples():
                 x, y = q.x_um / px_um - fr.crop_x0, q.y_um / px_um - fr.crop_y0
                 d.ellipse([x - 8, y - 8, x + 8, y + 8], outline=(0, 255, 255), width=1)
-        b = outline(gray_to_rgb(nuc[i], nlo, nhi), mask[i], (255, 230, 0))
+        ov = np.zeros((S, S, 3))
+        for k, c in enumerate(chs):
+            ov[..., k] = np.clip((c[i] - lims[k][0]) / (lims[k][1] - lims[k][0]), 0, 1)
+        names = " + ".join(f"{c} ({['red', 'green', 'blue'][k]})" for k, c in enumerate(loc_names[:3]))
         out.append(hstack([titled(a, "Loci on nucleus  (+ found, o true)" if truth is not None else "Loci on nucleus  (+ found)", scale),
-                           titled(Image.fromarray(b.astype(np.uint8)), "Nucleus + this cell's mask", scale)]))
+                           titled(Image.fromarray((ov * 255).astype(np.uint8)).resize((S * 3, S * 3), Image.BICUBIC), "Colour overlay: " + names, scale / 3)]))
         labels.append(f"frame {t}  ({i + 1}/{n} of this cell)")
     return out, labels
 
