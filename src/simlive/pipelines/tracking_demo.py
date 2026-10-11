@@ -272,6 +272,10 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
                 tab.to_csv(out6 / "fiducial_corrections.csv", index=False)
                 scores["fiducial_corrections"] = tab.to_dict("records")
         scores.setdefault(src, {})["peak_worker_memory_mb"] = summ.attrs.get("peak_worker_mb")
+    progress("Stage 6: photobleaching correction (background removed first; added as intensity_corr)")
+    from simlive.stage6_analysis.bleach import bleach_correct_run
+
+    scores["bleaching"] = bleach_correct_run(run, tuple(sources))
     try:  # peak working set of this (main) process over the whole run, incl. segmentation/tracking input arrays
         import psutil
         scores["pipeline_main_process_peak_mb"] = round(psutil.Process().memory_info().peak_wset / 2**20, 1)

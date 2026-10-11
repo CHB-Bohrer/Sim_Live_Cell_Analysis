@@ -102,9 +102,57 @@ h3 {{ margin-top: 2rem; }}
 """
 
 
+PYPLOT_DPI = 110      # st.pyplot's own default is 200 dpi: a 17-inch figure became a 3400 px PNG (rasterised + compressed on every rerun)
+
+
+def fast_pyplot(st) -> None:
+    """Replace st.pyplot by a version that saves at PYPLOT_DPI with light PNG compression and shows the bytes with st.image. Same call
+    signature as st.pyplot(fig, width=...). The page is ~1250 px wide, so 110 dpi (1870 px for the widest figures) loses nothing visible
+    while rendering ~3x fewer pixels; measured page reruns got ~2x faster."""
+    import io
+
+    if getattr(st.pyplot, "_fast", False):
+        return
+
+    def pyplot(fig=None, clear_figure=None, width="content", **kw):
+        import matplotlib.pyplot as plt
+
+        fig = fig or plt.gcf()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=kw.pop("dpi", PYPLOT_DPI), bbox_inches="tight", pil_kwargs={"compress_level": 1}, **kw)
+        st.image(buf.getvalue(), width=width if width in ("stretch", "content") or isinstance(width, int) else "content")
+        if clear_figure:
+            fig.clf()
+
+    pyplot._fast = True
+    st.pyplot = pyplot
+
+
+def cached_figure(st, key: tuple, draw, width="stretch", keep: int = 30) -> None:
+    """Show a matplotlib figure that depends only on `key` (e.g. run path + file time + settings): drawn once per session, then re-shown as
+    PNG bytes. `draw()` returns the figure. Keeps the last `keep` figures per browser session."""
+    import io
+
+    import matplotlib.pyplot as plt
+
+    cache = st.session_state.setdefault("_fig_cache", {})
+    png = cache.pop(key, None)
+    if png is None:
+        fig = draw()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=PYPLOT_DPI, bbox_inches="tight", pil_kwargs={"compress_level": 1})
+        plt.close(fig)
+        png = buf.getvalue()
+    cache[key] = png                                  # most recently used last
+    while len(cache) > keep:
+        cache.pop(next(iter(cache)))
+    st.image(png, width=width)
+
+
 def apply(st) -> None:
     """Inject the page CSS and set matplotlib defaults (call once, right after st.set_page_config)."""
     st.markdown(CSS, unsafe_allow_html=True)
+    fast_pyplot(st)
     mpl.rcParams.update({
         "figure.facecolor": "white", "axes.facecolor": "white", "savefig.facecolor": "white",
         "axes.edgecolor": PALETTE["line"], "axes.labelcolor": PALETTE["ink"], "text.color": PALETTE["ink"],

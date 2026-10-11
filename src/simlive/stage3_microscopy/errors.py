@@ -183,6 +183,35 @@ ORDER = ["stage_drift", "chromatic_shift", "slice_skew", "piezo", "psf_blur", "d
          "background", "autofluorescence", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
          "read_noise", "row_noise", "dsnu", "adc"]
 assert set(ORDER) == set(SOURCES)
+
+# one line per source, for overviews (the full explanation is SOURCES[id]["what"] / ["effect"])
+BRIEF = {
+    "stage_drift": "The whole sample slowly slides and shakes, so everything moves together between frames.",
+    "chromatic_shift": "Each colour is imaged slightly offset, which biases distances between differently coloured loci.",
+    "slice_skew": "Planes of a z-stack are taken one after another, so a moving locus is smeared in z.",
+    "piezo": "The focus motor puts each plane slightly off its intended height.",
+    "psf_blur": "Diffraction turns every point of light into a blob ~0.2 um wide.",
+    "defocus": "The focus wanders, so spots get wider and dimmer (or shift in z in a stack).",
+    "exposure_motion": "A locus moves while the shutter is open, smearing its spot.",
+    "haze": "Out-of-focus light adds a broad glow around bright objects (widefield).",
+    "bleaching": "Fluorophores are destroyed by the light, so every channel dims over the movie.",
+    "flat_field": "Illumination is uneven: the edges of the field are dimmer than the centre.",
+    "flicker": "The lamp or laser power changes a little from frame to frame.",
+    "background": "Stray light adds a constant level (and its noise) to every pixel.",
+    "autofluorescence": "Cells and medium glow faintly and unevenly on their own.",
+    "crosstalk": "Light from one colour leaks into another, e.g. a faint copy of the nucleus in the locus channels.",
+    "qe": "The camera detects only a fraction of the photons that reach it.",
+    "shot_noise": "Photon counts fluctuate randomly (Poisson), the main noise for faint spots.",
+    "dark_current": "Heat creates a few extra electrons in every pixel.",
+    "hot_pixels": "A few pixels always read too high, looking like tiny fixed spots.",
+    "cosmic_rays": "Rare particle hits make bright PSF-sized blobs in single frames.",
+    "prnu": "Each pixel has a slightly different gain (fixed speckle pattern).",
+    "read_noise": "Reading each pixel adds electronic noise, the floor in dark regions.",
+    "row_noise": "Each camera row gets a random offset per frame (faint stripes).",
+    "dsnu": "Each pixel has its own small fixed offset.",
+    "adc": "Values are rounded to whole numbers and clip at saturation.",
+}
+assert set(BRIEF) == set(SOURCES)
 # Random-stream numbers. Frozen: a source keeps its number when others are inserted into ORDER, so images made before a new source existed are
 # still reproduced bit for bit. New sources get the next free number.
 INDEX = {s: i + 1 for i, s in enumerate([x for x in ORDER if x != "piezo"])}

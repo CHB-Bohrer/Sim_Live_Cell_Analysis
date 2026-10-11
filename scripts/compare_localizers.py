@@ -8,12 +8,14 @@ area, Gaussian smoothing, local maxima) and one-change-at-a-time versions of it;
 <run>/stage6_analysis/method_comparison.csv, shown in the dashboard's 🔎 Spot finding tab. One run is one seed: compare over several runs.
 """
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
 
 from simlive.io.runs import DATA_ROOT
 from simlive.stage6_analysis.compare import compare
+from simlive.stage6_analysis.bleach import bleach_correct_run
 from simlive.stage6_analysis.ms2 import analyse_run_ms2
 
 
@@ -28,6 +30,11 @@ def main() -> None:
     a = ap.parse_args()
     run = Path(a.run) if Path(a.run).exists() else DATA_ROOT / "runs" / a.run
     analyse_run_ms2(run, a.workers)                     # MS2 spot traces, if the run has the transcription model
+    sj = run / "stage6_analysis" / "scores.json"         # photobleaching correction of the saved intensities (background removed first)
+    scores = json.loads(sj.read_text()) if sj.exists() else {}
+    scores["bleaching"] = bleach_correct_run(run)
+    sj.write_text(json.dumps(scores, indent=2, default=str))
+    print("bleaching:", {k: (round(v["tau_est_s"]) if isinstance(v, dict) and "tau_est_s" in v else v) for k, v in scores["bleaching"].items()})
     if a.ms2_only:
         return
     tab = compare(run, a.variants.split(",") if a.variants else None, a.workers, not a.no_cal, not a.no_3d)

@@ -162,3 +162,41 @@ def test_viterbi_keeps_a_faint_spot_among_noise_candidates_instead_of_skipping_f
     choice, _ = DV.viterbi_track(peaks, snr, np.full((n, 2), 20.0), search_volume=40 * 40)
     right = sum(c is not None and np.hypot(*(peaks[t][c] - truth[t])) < 1.5 for t, c in enumerate(choice))
     assert right >= n - 1, right                 # without the clutter term: 37 of 40
+
+
+def test_viterbi_picks_the_spot_up_again_after_an_off_period_longer_than_the_gap_limit():
+    """MS2-like: the spot is ON, OFF for 20 frames (> viterbi_max_gap = 5), then ON again elsewhere in the cell; both bursts must be kept."""
+    rng = np.random.default_rng(12)
+    peaks, snr, truth = [], [], {}
+    for t in range(40):
+        on = t < 10 or t >= 30
+        p, s = [], []
+        if on:
+            truth[t] = np.array([12.0, 12.0]) if t < 10 else np.array([28.0, 26.0])
+            p.append(truth[t] + rng.normal(0, 0.3, 2)); s.append(12.0)
+        p += list(rng.uniform(0, 40, (2, 2))); s += [3.2, 3.1]
+        o = np.argsort(s)[::-1]
+        peaks.append(np.array(p)[o]); snr.append(np.array(s)[o])
+    choice, _ = DV.viterbi_track(peaks, snr, np.full((40, 2), 20.0), search_volume=40 * 40)
+    for t, x in truth.items():
+        assert choice[t] is not None and np.hypot(*(peaks[t][choice[t]] - x)) < 1.5, t
+
+
+def test_bleaching_is_measured_after_removing_the_background_and_the_naive_estimate_is_biased(tmp_path):
+    import tifffile
+
+    from simlive.stage6_analysis.bleach import correct, fit_exponential, nuclear_bleach
+
+    T, dt, tau = 30, 10.0, 600.0
+    yy, xx = np.indices((60, 60))
+    nuc = np.hypot(yy - 30, xx - 30) < 12
+    b = np.exp(-np.arange(T) * dt / tau)
+    imgs = np.stack([100.0 + 50.0 + 300.0 * b[t] * nuc for t in range(T)]).astype(np.float32)     # offset 100 + background 50 + bleaching signal
+    tifffile.imwrite(tmp_path / "n.tif", imgs, photometric="minisblack")
+    tifffile.imwrite(tmp_path / "l.tif", np.repeat(nuc[None], T, 0).astype(np.uint16), photometric="minisblack")
+    d = nuclear_bleach(tmp_path / "n.tif", tmp_path / "l.tif", dt)
+    assert abs(d.attrs["tau_s"] - tau) < 0.01 * tau
+    assert d.attrs["tau_naive_s"] > 1.3 * tau                       # background left in: bleaching looks much weaker
+    assert fit_exponential(np.arange(T) * dt, 5 * b)[1] == pytest.approx(tau, rel=1e-6)
+    spots = pd.DataFrame({"t": np.arange(T), "intensity": 80.0 * b})
+    assert np.allclose(correct(spots, b), 80.0)

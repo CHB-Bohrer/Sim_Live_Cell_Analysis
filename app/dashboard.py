@@ -77,6 +77,27 @@ def load_run(path: str, stamp: float):
     return out
 
 
+@st.cache_resource(show_spinner=False, max_entries=4)
+def movie_state(path: str, stamp: float, variant: str) -> dict:
+    """Per-run lookups for drawing movie frames (incl. the grey scale over the whole movie), computed once per run and variant."""
+    from fastview import prepare_movie_state
+
+    return prepare_movie_state(load_run(path, stamp), variant)
+
+
+@st.cache_resource(show_spinner=False, max_entries=8)
+def tracked_paths(path: str, stamp: float, variant: str) -> dict:
+    """Centroid path (x, y in um) of every tracked label, computed once per run and variant (was recomputed on every visit: ~1.6 s)."""
+    R_ = load_run(path, stamp)
+    px = R_["cfg"]["optics"]["pixel_size_nm"] / 1000.0
+    trk, paths = R_["v"][variant]["trk"], {}
+    for t in range(len(trk)):
+        ids = [i for i in np.unique(trk[t]) if i > 0]
+        for i, (cy, cx) in zip(ids, ndi.center_of_mass(trk[t] > 0, trk[t], ids)):
+            paths.setdefault(i, []).append((cx * px, cy * px))
+    return {p: np.array(v) for p, v in paths.items()}
+
+
 def draw_labels(ax, lab, rgb_lut, texts=True, alpha=0.5):
     h, w = lab.shape
     rgba = np.zeros((h, w, 4))
@@ -104,49 +125,6 @@ def error_frames(R, variant) -> list[int]:
     return sorted(set(V["events"].t) | set(m[m.pred_id == 0].t))
 
 
-def movie_figure(R, variant, t, show_image=False):
-    V = R["v"][variant]
-    img, gt, trk, m = R["img"][t], R["gt"][t], V["trk"][t], V["matches"]
-    mt = m[m.t == t]
-    px = R["cfg"]["optics"]["pixel_size_nm"] / 1000.0
-    n = 3 if show_image else 2
-    fig, axes = plt.subplots(1, n, figsize=(7.5 * n, 7.6))
-    axes = np.atleast_1d(axes)
-    titles = (["Image (what the tracker sees)"] if show_image else []) + [
-        "TRUE cells (ground truth IDs)", "TRACKED cells (tracker's IDs)"]
-    for ax, title in zip(axes, titles):
-        ax.imshow(img, cmap="gray", vmin=np.percentile(R["img"], 1), vmax=np.percentile(R["img"], 99.8))
-        ax.set_title(title, fontsize=15); ax.axis("off")
-    ax_gt, ax_tr = axes[-2], axes[-1]
-    gmax = int(R["gt"].max())
-    draw_labels(ax_gt, gt, lut(gmax, {i: color_for(i) for i in range(1, gmax + 1)}))
-    lost = mt[mt.pred_id == 0].gt_id.to_numpy()
-    outline(ax_gt, np.isin(gt, lost) & (gt > 0), (1.0, 0.9, 0.0))  # yellow: tracker's masks missed this cell
-    pmax = int(max(trk.max(), 1))
-    dom = V["dominant"]
-    cols = {p: (color_for(dom[p]) if p in dom else np.array([0.55, 0.55, 0.55])) for p in range(1, pmax + 1)}
-    draw_labels(ax_tr, trk, lut(pmax, cols))
-    cur = dict(zip(mt.pred_id, mt.gt_id))
-    nogt = [p for p in np.unique(trk) if p > 0 and p not in cur]
-    outline(ax_tr, np.isin(trk, nogt) & (trk > 0), (0.8, 0.2, 1.0))  # purple: mask with no true cell
-    # identity switches happening at THIS frame: big red circle + label on both panels
-    ev = V["events"]
-    ev_t = ev[ev.t == t]
-    for r in ev_t.itertuples():
-        row = R["cells"][(R["cells"].cell_id == r.gt_id) & (R["cells"].t == t)]
-        if row.empty:
-            continue
-        cx, cy, rad = row.x_um.iloc[0] / px, row.y_um.iloc[0] / px, row.bound_radius_um.iloc[0] / px
-        for ax in (ax_gt, ax_tr):
-            ax.add_patch(plt.Circle((cx, cy), rad * 1.7, fill=False, ec="red", lw=3.5))
-        ax_tr.annotate(f"track {r.old_pred_id} → {r.new_pred_id}" + (" (called a division)" if V["parent_of"].get(r.new_pred_id, 0) > 0
-                                                                   else ""), (cx, cy - rad * 1.7), color="white",
-                       fontsize=11, weight="bold", ha="center", va="bottom",
-                       bbox=dict(boxstyle="round,pad=0.25", fc="red", ec="none"))
-    fig.tight_layout()
-    return fig, len(lost), ev_t, len(nogt)
-
-
 def trajectory_figure(R, variant):
     cfg = R["cfg"]
     px = cfg["optics"]["pixel_size_nm"] / 1000.0
@@ -155,14 +133,8 @@ def trajectory_figure(R, variant):
     c = R["cells"]
     for cid, g in c.groupby("cell_id"):
         ax.plot(g.x_um, g.y_um, "-", color=color_for(cid), lw=2.2, alpha=0.9)
-    trk = V["trk"]
-    paths = {}
-    for t in range(len(trk)):
-        ids = [i for i in np.unique(trk[t]) if i > 0]
-        for i, (cy, cx) in zip(ids, ndi.center_of_mass(trk[t] > 0, trk[t], ids)):
-            paths.setdefault(i, []).append((cx * px, cy * px))
+    paths = tracked_paths(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime, variant)
     for p, pts in paths.items():
-        pts = np.array(pts)
         col = color_for(V["dominant"][p]) if p in V["dominant"] else (0.5, 0.5, 0.5)
         ax.plot(pts[:, 0], pts[:, 1], "--", color="k", lw=0.9, alpha=0.8)
     ev = V["events"]
@@ -425,6 +397,14 @@ def run_summary() -> None:
     with st.expander("What was simulated in this run", expanded=True):
         st.caption("A summary of the selected run's settings. Hover a box for details.")
         style.stat_grid(st, items)
+    with st.expander("Image errors at a glance: what each one does"):
+        from simlive.stage3_microscopy import errors as ERR
+
+        on = {k: v.get("on") for k, v in json.loads(s3.read_text())["sources"].items()} if s3.exists() else {}
+        st.markdown("| | error | what it does |\n|---|---|---|\n" + "\n".join(
+            f"| {'✅' if on.get(sid) else '·'} | **{ERR.SOURCES[sid]['title']}** | {ERR.BRIEF[sid]} |" for sid in ERR.ORDER))
+        st.caption("✅ = on in this run. Values are placeholders until measured on your microscope. The 🖼 Images tab shows each one on the "
+                   "picture, how much each changes it, and the full explanation.")
 
 
 run_summary()
@@ -440,8 +420,12 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_spots, tab_img, tab_cal, tab_stage, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🔎 Spot finding", "🖼 Images", "🎯 Calibration", "📍 Stage & fiducials", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+# Only the open page is computed. st.tabs ran the code of all 14 tabs on every rerun (~20 s with warm caches, ~40 s cold), and a full
+# rerun jumped back to the first tab; the page choice lives in session state, so it also survives reruns.
+PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
+if st.session_state.get("page") not in PAGES.values():
+    st.session_state["page"] = PAGES["movie"]
+page = st.segmented_control("Page", list(PAGES.values()), key="page", label_visibility="collapsed") or PAGES["movie"]
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -472,9 +456,17 @@ def movie_tab():
     st.caption(f"{len(errs)} of {T} frames contain an error: "
                + (", ".join(map(str, errs[:40])) + (" …" if len(errs) > 40 else "") if errs else "none"))
 
-    fig, n_lost, ev_t, n_nogt = movie_figure(R, variant, t, show_image=show_img)
-    st.pyplot(fig, width="stretch")
-    plt.close(fig)
+    # drawn with numpy/PIL like the in-browser player (~50 ms) instead of a matplotlib figure (~2.5 s per frame change)
+    from fastview import movie_frame  # noqa: E402
+
+    stt = movie_state(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime, variant)
+    st.image(movie_frame(R, variant, t, stt, show_image=show_img, target_w=900 if not show_img else 640), width="stretch")
+    mt = R["v"][variant]["matches"]
+    mt = mt[mt.t == t]
+    n_lost = int((mt.pred_id == 0).sum())
+    ev_t = R["v"][variant]["events"][R["v"][variant]["events"].t == t]
+    trk_t = R["v"][variant]["trk"][t]
+    n_nogt = len([p for p in np.unique(trk_t) if p > 0 and p not in set(mt.pred_id)])
 
     if len(ev_t) or n_lost or n_nogt:
         st.error(f"**Errors in frame {t}:** {len(ev_t)} identity switch(es), {n_lost} true cell(s) missed by the masks, "
@@ -547,7 +539,7 @@ def traj_tab():
     st.pyplot(fig)
     plt.close(fig)
 
-with tab_cfg:
+if page == PAGES["cfg"]:
     style.intro(st, "The exact, fully resolved settings this run was made with (every default filled in), plus where its files are.",
                 "Copy it to a new file under configs/ to repeat or modify the run from a terminal. The same config and seed always give the same run.")
     SECTION_HELP = {"acquisition": "frame count, frame interval and exposure time", "geometry": "field of view, nuclear size and shape",
@@ -654,27 +646,27 @@ def movie_player():
             show_player(frames, labels, fps=8, key="movie")
 
 
-with tab_movie:
+if page == PAGES["movie"]:
     style.intro(st, "The simulated movie with the true cells on the left and the tracker's result on the right. Matching colours mean a cell "
                     "was followed correctly; red circles mark identity switches.",
                 "Press Play (smooth, in your browser) or drag the frame slider. 'Next error' jumps to the next frame where something went wrong. "
                 "Switch between tracking on automatic masks (realistic) and on ground-truth masks (linking error only).")
     movie_player()
     movie_tab()
-with tab_metrics:
+if page == PAGES["metrics"]:
     style.intro(st, "Every tracking score for this run, plus a per-cell table of identity switches.",
                 "Compare the two columns: the gap between automatic and ground-truth masks is the error caused by segmentation. "
                 "Open 'What do these numbers mean?' for definitions. Single runs are not evidence: use 📈 Scans for several seeds.")
     metrics_tab()
-with tab_traj:
+if page == PAGES["traj"]:
     style.intro(st, "The true path of every cell (coloured) against the paths the tracker built (black dashed). Red crosses mark identity switches.",
                 "Look for places where a dashed line jumps between coloured paths: that is a swap. Choose which tracker result to compare.")
     traj_tab()
-with tab_scan:
+if page == PAGES["scan"]:
     style.intro(st, "Results of parameter sweeps (many seeds per setting) saved by scripts/sweep.py, so conclusions rest on more than one run.",
                 "Choose a scan, a metric, the x axis and which masks to score. Expect large seed-to-seed spread in ID switches; compare conditions over at least 5 seeds.")
     scan_tab()
-with tab_cells:
+if page == PAGES["cells"]:
     cells_frag()
 
 
@@ -696,11 +688,11 @@ def spots_frag():
     spots_tab.render(st, run_path, R)
 
 
-with tab_spots:
+if page == PAGES["spots"]:
     spots_frag()
-with tab_img:
+if page == PAGES["img"]:
     images_frag()
-with tab_cal:
+if page == PAGES["cal"]:
     calibration_frag()
 
 
@@ -710,7 +702,7 @@ def stage_frag():
     stage_tab.render(st, run_path, R)
 
 
-with tab_stage:
+if page == PAGES["stage"]:
     stage_frag()
 
 import chromatin_tab  # noqa: E402  (app/chromatin_tab.py)
@@ -722,13 +714,13 @@ def chrom_frag():
     chromatin_tab.render(st)
 
 
-with tab_tx:
+if page == PAGES["tx"]:
     import transcription_tab  # noqa: E402  (app/transcription_tab.py)
     transcription_tab.render(run_path)
-with tab_probe:
+if page == PAGES["probe"]:
     import probe_tab  # noqa: E402  (app/probe_tab.py)
     probe_tab.render(run_path)
-with tab_lib:
+if page == PAGES["lib"]:
     library_tab.render()
-with tab_chrom:
+if page == PAGES["chrom"]:
     chrom_frag()

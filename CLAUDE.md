@@ -108,8 +108,8 @@ branch, not main": that was a misreading of the user's intent.)
   functions.
 - Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
   on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
-  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Cells, Spot finding, Images, Calibration, Stage & fiducials, Transcription, Probes,
-  Library, Chromatin, Config.
+  user's server once). Pages (navigation bar, only the open one runs): Movie, Metrics, Trajectories, Scans, Cells, Spot finding, Images, Calibration, Stage & fiducials,
+  Transcription, Probes, Library, Chromatin, Config.
 
 ## Status (update this section every session)
 Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
@@ -183,7 +183,16 @@ density and frame-interval scans.
   `st.cache_resource` (cache_data copied the whole movie on every interaction); (3) playback is an in-browser JS
   player (`app/player.py`) fed by pre-rendered JPEG frames from `app/fastview.py` (numpy/PIL, ~44 ms/frame; matplotlib
   was far too slow), gated behind a "Prepare player" toggle and cached; expanders stay open while their toggle is on.
-  Do not draw per-frame matplotlib figures for animation. Full-app reruns (e.g. sidebar selectbox) reset the active tab.
+  Do not draw per-frame matplotlib figures for animation.
+- Dashboard speed-up (2026-10-11, measured with Streamlit AppTest + a stack-sampling profiler, scripts kept out of the repo): (1) `st.tabs`
+  ran ALL 14 tabs' code on every full rerun (42 s cold / 20 s warm); now a `st.segmented_control` ("page", in session state) renders only
+  the open page (8.5 s / 3.1 s) and no longer jumps back to the first tab; (2) `style.fast_pyplot` replaces st.pyplot (whose default is
+  200 dpi: a 17-inch figure was a 3400 px PNG) with 110 dpi + light PNG compression; (3) the Movie page draws frames with
+  `fastview.movie_frame` (PIL) instead of matplotlib, with the movie-wide grey scale cached (`movie_state`; it was recomputed over the
+  whole movie per frame): 3.5 -> 0.2 s; (4) tracked-cell paths cached (`tracked_paths`): Trajectories 2.6 -> 0.3 s; (5)
+  `style.cached_figure(st, key, draw)` keeps static figures (run histograms, comparison bars, bleaching curves) as PNG bytes per session.
+  Per page warm now 0.1-2.4 s (Spot finding and Transcription are the slowest). AppTest note: cProfile only sees the main thread;
+  AppTest runs the page in another thread, so sample `sys._current_frames()` instead.
 - The stand-in loci (`toy_loci.py`) are INVENTED, not from polychrom or data: confinement 0.1 x nuclear radius, relaxation
   time 120 s, 600 photons/locus/frame are guesses. Never present their statistics as physical results.
 - Gotchas: tifffile treats stacks of exactly 3-4 frames as RGB, so always write with `photometric="minisblack"`;
@@ -240,7 +249,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 105 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 103 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -297,43 +306,37 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - Not done: real (measured) values for any placeholder; 3D transcription spots in thick tissue; z-dependent chromatic focal shift beyond a constant offset; cell isolation in 3D (stage 5 stays 2D on projections);
   3D tracking; calibration of the quantum efficiency and of the nuclear brightness; lens distortion / field-dependent chromatic shift (shifts are constant over the field).
 
-## Spot finding (stage 6; built 2026-10-11; full description + numbers in docs/SPOT_FINDING.md)
-- DEFAULT method = `dog_viterbi` (`stage6_analysis/dog_viterbi.py`), after Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol., doi 10.1038/s41594-025-01615-4;
-  the user asked for it after Bennabi turned out not to localize spots; methods from arXiv 2304.08770v3 section III.2; no code published): per-cell crops -> median 3x3
-  -> difference of Gaussians (1, 3 px) with a LOW threshold (3 x noise, up to 5 candidates) -> one Viterbi path per cell and colour through the candidates (link =
-  -log diffusion propagator, gaps up to 5 frames at 2 nats each, reward = log SNR + log(region area / false candidates per frame), D re-estimated from the path) ->
-  Gaussian fit -> ellipsoid intensity (mean in (7,7,5) px minus the shell to (19,19,7); shell MEDIAN by default, paper = mean). The clutter term in the reward is
-  essential: without it the path skipped 547 of 1914 frames that held the right candidate. Every method now outputs `intensity`; scores add
-  `intensity_r_locusK` (Pearson r with the photons drawn in that frame, `photons_frame` = photons x bleach, `localize.photons_in_frame`).
-  Measured (calibrated): library run found 98.0% (median_peaks 90.7%, original 82.2%), 0 wrong picks, median 26 nm, p95 98 nm (higher than median_peaks' 74 nm
-  because the extra detections are faint spots); toy seed 12: 99.5% / 0.05% / 22 / 55 nm; 3D run in 3D: 100% / 0% / 84 / 177 nm (original 4.7% wrong, p95 320).
-  `select: viterbi` (Chen's path on median_peaks candidates) did not help (few candidates above its threshold). Variants: `default`, `chen_literal`, `bennabi`, ...
-  in compare.py. Open: one path per cell (an OFF period > 5 frames ends it: fine for loci, needs re-acquisition for MS2 spots); D per cell, not pooled.
-- The user first asked to localize spots the way Bennabi et al. 2025 did (Sci. Adv. 11, eadv7790; code github.com/gregorlab/SizeProject2024,
-  `modules/raw_live_analysis.py`, read 2026-10-11). That paper finds Mesp2 expression POLES (hundreds of px), not diffraction-limited spots: rank median 7x7 ->
-  one threshold per movie (median of per-frame Otsu, or th=70) -> area (fill holes, remove < 5000 px, erode) -> Gaussian sigma 20 -> peak_local_max(min_distance
-  100). `spots.py` implements those steps rescaled to spots (median 3x3, Gaussian 1 px, min area 3 px, min distance 4 px) and ADDS: local background (9x9 median
-  subtracted), threshold on the smoothed image (`threshold_on: smoothed`; the paper's order = `filtered`), candidate choice `select: track` (nearest the locus'
-  median position in +-3 frames, gate 8 px; skips one-frame cosmic rays), Gaussian-fit refinement = method `median_peaks` (`brightest` = the old placeholder);
-  the sidebar loci form has method / choice / min_snr controls. The numbers below are for median_peaks against the original.
-- Measured (4 runs, 1 seed each; `scripts/compare_localizers.py --run <run>` re-runs stage 6 only on saved crops and writes
-  `stage6_analysis/method_comparison.csv` + `comparison/<variant>.csv`): library run (probes+MS2, all errors) calibrated: found 82.2% -> 90.7%, wrong-object picks
-  0.13% -> 0.06%, median 27 -> 25 nm; uncalibrated wrong picks 9.8% -> 0.06%, p95 4.7 um -> 96 nm. 3D run: 2D-on-projection wrong picks 4.7% -> 0% (cosmic rays
-  of all 17 planes end up in the max projection), 3D p95 320 -> 183 nm. The paper's literal pipeline (cell background, Otsu, brightest, integer pixel) finds 100%
-  but picks the wrong object 15% of the time (Otsu rejects nothing for a single spot); one background per cell drops detection to 56% (nuclear cross-talk ghost in
-  locus 0's channel); integer positions cost ~35 nm.
-- Scores (`score_localization[_3d]`) now: detection over loci WITH light (`photons` > 0, new column of `loci_truth_image.csv` from `Imager.locus_photons()`),
-  `n_false_on_dark`, `frac_far` (> 0.5 um = wrong object), `rms_error_near_um`. Old runs lack `photons`: `compare.truth_with_photons` rebuilds it.
-- Logic errors fixed in this review: u/v measured from the rounded crop centre (<= 0.5 px); `min_sep_px` silently ignored; loci without light counted as misses;
-  single-cell player drew OTHER cells' true loci and put markers half a pixel off (PIL pixel-corner convention); 5x5 centroid pixel-locking (now Gaussian fit).
-- Dashboard 🔎 Spot finding tab (`app/spots_tab.py`): (1) step tables of both papers vs here vs this run, (2) every intermediate image for any cell / colour / frame
-  with editable settings incl. the method (form + Apply), intensity ellipses, problem-frame jump list, per-frame error, every candidate's distance to the truth with
-  the chosen one, intensity vs true photons, (3) run scores + error histogram, (4) "Compare methods" button (shells out to the script) + table and bar charts.
-  Uses `localize.analyse_channel` / `channel_inputs`, so it runs exactly the pipeline's code.
-- Open: `median_z: auto` keeps the axial median off at 0.8 um planes (it helped with bright spots: 0.3% -> 0% wrong; would hurt dim spots); dim spots (100-200
-  photons) found 71%; all numbers are 1 seed each with placeholder brightness; sweep.py still reports tracking metrics only (locus metrics not in sweeps yet).
-- Gotcha: scripts that call `map_cells` with workers need `if __name__ == "__main__":` (Windows spawn re-imports the script). CLAUDE.md had one stray cp1252 byte
-  (fixed); keep it UTF-8.
+## Spot finding (stage 6; 2026-10-11; full description + numbers in docs/SPOT_FINDING.md)
+- ONE method now: `dog_viterbi` (`stage6_analysis/dog_viterbi.py`; `brightest` = the old placeholder kept for comparison), after Chen, Levo, Zoller & Gregor
+  2025 (Nat. Struct. Mol. Biol., doi 10.1038/s41594-025-01615-4; methods from arXiv 2304.08770v3 section III.2; no code published). It tracks the promoter
+  (locus 0) and the enhancer (locus 1), each in its own colour: per-cell crops -> median 3x3 -> difference of Gaussians (1, 3 px) with a LOW threshold (3 x noise,
+  up to 5 candidates) -> one Viterbi path per cell and colour (link = -log diffusion propagator; gaps up to 5 frames at 2 nats each; after LONGER gaps the path may
+  pick the spot up again anywhere at log(cell area) + the miss cost; reward = log SNR + log(area / false candidates per frame); D re-estimated from the path) ->
+  Gaussian fit -> ellipse intensity (mean in (7,7,5) px minus the ring to (19,19,7); ring MEDIAN by default, paper = mean). The clutter term in the reward is
+  essential (without it the path skipped 547 of 1914 frames with the right candidate). Calibrated: library run found 98.0% (original 82.2%), 0 wrong picks,
+  median 26 nm; toy seed 12 99.5% / 22 nm; 3D run in 3D 100% / 0% / 84 nm (original 4.7% wrong).
+- The user asked for Bennabi et al. 2025 (Sci. Adv.) first; that paper finds Mesp2 poles, not spots; the rescaled `median_peaks` method built from it was REMOVED at
+  the user's request (it worked, 90.7% found, but was not Bennabi's method). History + numbers in docs/SPOT_FINDING.md; code before commit 0142350.
+- MS2 spot (`stage6_analysis/ms2.py`): trace = ellipse intensity in the nuclear channel in EVERY frame (interpolated positions without a detection), as Chen et
+  al. Position `ms2_position: promoter` (default) = the promoter tracked in its own colour, or `own` = dog_viterbi on the nuclear channel (nucleus eroded 3 px).
+  Measured (seed 12, calibrated; MS2 photons per loop per s 100 / 300 / 1000): own track located 0% / 0% / 74% of ON frames, trace r 0.07 / 0.07 / 0.37;
+  at the promoter 99.5-100% located, trace r 0.01 / 0.31 / 0.82. At the PLACEHOLDER MS2 brightness (100) transcription is NOT measurable at all (one Pol II
+  ~240 photons on a ~300 photons/px nucleus; DoG SNR ~2): the user must set MS2 / nuclear brightness from data. Runs: loci_demo_seed12_cfcf39 (1x),
+  _026a82 (3x), _fc340a (10x). Scores `ms2`, `ms2_calibrated` in scores.json; traces stage6_analysis/<src>/ms2_traces[_cal].csv.
+- Photobleaching correction (`stage6_analysis/bleach.py`): b(t) from BACKGROUND-SUBTRACTED signal (nuclei minus the empty area > 8 px away; loci: median of the
+  ring-subtracted spot intensities over cells), exponential fit; `intensity_corr` = background-subtracted intensity / b(t) in loci_positions*.csv and
+  ms2_traces*.csv; stage6_analysis/bleach.csv (+ true and naive curves), scores["bleaching"]. Measured: nucleus tau 18.4k s vs true 20k (naive, background left in:
+  27.9k s, misses ~30% of the decay); locus0 6001 vs 6000 s; spot late/early ratio 0.86-0.89 raw -> 1.00-1.03 corrected (truth 0.97-1.03).
+- scripts/compare_localizers.py --run <run> also computes MS2 traces and the bleaching correction (`--ms2-only` = just those; for older runs). Variants in
+  compare.py: original, default, chen_literal, no_median, dog_snr5, integer (+3D: zmed3); tables are merged, so delete method_comparison.csv after renaming variants.
+- Scores (`score_localization[_3d]`): detection over loci WITH light (`photons` in loci_truth_image.csv), `n_false_on_dark`, `frac_far` (> 0.5 um), `rms_error_near_um`,
+  `intensity_r_locusK` (vs `photons_frame` = photons x bleach).
+- Logic errors fixed 2026-10-11: u/v from the rounded crop centre; `min_sep_px` ignored; loci without light counted as misses; single-cell player drew other cells'
+  true loci and put markers half a pixel off; centroid pixel-locking; Spot finding per-cell stats counted MS2 OFF frames as wrong picks.
+- Dashboard 🔎 Spot finding page: method table, every intermediate image for any cell / spot (locus 0, locus 1, MS2) / frame with editable settings, per-frame
+  errors, every candidate's distance to the truth, intensity vs true photons, MS2 trace (promoter vs own track vs truth), run scores, 3b photobleaching (true /
+  estimated / naive curves, raw vs corrected), method comparison. Run summary has "Image errors at a glance" (errors.BRIEF: one line per source).
+- Gotchas: scripts that call `map_cells` with workers need `if __name__ == "__main__":` (Windows spawn). Keep CLAUDE.md UTF-8 (one stray cp1252 byte was fixed).
 
 ## Dashboard walk-through findings (2026-10-09)
 - Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,

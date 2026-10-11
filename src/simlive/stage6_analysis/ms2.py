@@ -56,16 +56,32 @@ def trace_from_analysis(a: dict, stack: np.ndarray, centre: np.ndarray, p: dict)
     return det, pos, inten
 
 
-def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, **kw) -> pd.DataFrame:
+MS2_POSITIONS = ("promoter", "own")
+
+
+def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, ms2_position: str = "promoter", **kw) -> pd.DataFrame:
     """The MS2 spot of one isolated cell in every frame: whether a spot was detected, where (crop and lab pixels), its SNR and the ellipsoid
-    intensity at that position (interpolated position where nothing was detected). Keywords: the locus_analysis settings."""
+    intensity in the nuclear channel at that position (interpolated where nothing was detected). Keywords: the locus_analysis settings.
+    ms2_position: "promoter" (default) = measure at the promoter (locus 0), tracked in its own colour with dog_viterbi (the MS2 spot sits on
+    the promoter; the measured chromatic shift is removed when calibrated); "own" = find the MS2 spot itself in the nuclear channel with
+    dog_viterbi, as Chen et al. do when no other label marks the gene."""
     if "nucleus" not in cell.channels:
         return pd.DataFrame(columns=COLUMNS)
     ci = ms2_inputs(cell, erode_px, calib)
     p = spot_params(kw)
     kw.pop("method", None)                      # the MS2 spot is always found with dog_viterbi
-    a = analyse_channel(ci["stack"], ci["region"], ci["centre"], "dog_viterbi", **kw)
-    det, pos, inten = trace_from_analysis(a, ci["stack"], ci["centre"], p)
+    if ms2_position == "promoter" and "locus0" in cell.channels:
+        from simlive.stage6_analysis.localize import channel_inputs
+
+        lc = channel_inputs(cell, "locus0", 2, calib)
+        a = analyse_channel(lc["stack"], lc["region"], lc["centre"], "dog_viterbi", **kw)
+        det, pos, _ = trace_from_analysis(a, lc["stack"], lc["centre"], p)
+        pos = pos - np.asarray(lc["shift"], float)                            # locus-0 colour -> nuclear channel coordinates
+        inten = np.array([DV.ellipsoid_intensity(ci["stack"][i], pos[i], p["intensity_inner_px"], p["intensity_outer_px"],
+                                                 p["intensity_background"])[0] for i in range(len(pos))])
+    else:
+        a = analyse_channel(ci["stack"], ci["region"], ci["centre"], "dog_viterbi", **kw)
+        det, pos, inten = trace_from_analysis(a, ci["stack"], ci["centre"], p)
     fr = ci["frames"]
     snr = [f["snr"] if f is not None else np.nan for f in a["fits"]]
     return pd.DataFrame({"cell_id": cell.cell_id, "t": fr.t.astype(int).to_numpy(), "detected": det, "crop_y_px": pos[:, 0],

@@ -1,19 +1,19 @@
-# Spot finding (stage 6): methods, sources, measured performance
+# Spot finding (stage 6): method, sources, measured performance
 
-Stage 6 finds one locus per colour in every frame of every isolated cell. It is still a placeholder for the user's own analysis, but it is
-now a defensible one: two published pipelines are implemented, every step can be inspected in the dashboard (🔎 Spot finding tab), and every
-choice below was scored against the simulation's ground truth.
+Stage 6 finds the promoter (locus 0) and the enhancer (locus 1), one spot per colour, in every frame of every isolated cell, and measures the
+MS2 transcription signal at the promoter. It is still a placeholder for the user's own analysis, but a defensible one: it follows a published
+pipeline, every step can be inspected in the dashboard (🔎 Spot finding tab), and every choice below was scored against the simulation's truth.
 
 | `locus_analysis.method` | source | code |
 |---|---|---|
 | `dog_viterbi` (**default**) | Chen, Levo, Zoller & Gregor 2025, *Nat. Struct. Mol. Biol.* (MS2 transcription spots) | `stage6_analysis/dog_viterbi.py` |
-| `median_peaks` | Bennabi et al. 2025, *Sci. Adv.* (Mesp2 poles), rescaled to spots | `stage6_analysis/spots.py` |
 | `brightest` | the original placeholder | `localize.py` |
 
-Code around them: `localize.py` (2D, per cell), `localize3d.py` (z-stacks), `compare.py` + `scripts/compare_localizers.py` (method comparison).
-Every method also reports Chen et al.'s ellipsoid **intensity** of each detection, scored against the photons the simulation drew.
+Code around them: `localize.py` (2D, per cell), `localize3d.py` (z-stacks), `ms2.py` (MS2 trace), `bleach.py` (photobleaching correction),
+`compare.py` + `scripts/compare_localizers.py` (method comparison; also computes MS2 traces and the bleaching correction for older runs).
+Every detection also gets Chen et al.'s ellipse **intensity**, scored against the photons the simulation drew.
 
-# Part A: `dog_viterbi`, after Chen et al. 2025 (default)
+# The method: `dog_viterbi`, after Chen et al. 2025
 
 ## Source
 
@@ -43,6 +43,9 @@ false one. **Without it the path skipped 547 of 1914 frames that held the right 
 cheaper than keeping a faint spot); with it, 1 of 1914 (`tests/test_spots.py::test_viterbi_keeps_a_faint_spot...`). D starts from the
 brightest-candidate path and is re-estimated from the chosen path's own steps (median of |d|^2 / g, robust) up to 3 times, per cell and
 colour (the paper pools all spots of a movie; `viterbi_D_px2` fixes it). Estimated D here: 1.4-2.3 px^2 per frame (0.13 um, 10 s frames).
+After a gap longer than `viterbi_max_gap` frames the path may pick the spot up again anywhere in the cell, at the cost of an unconstrained
+position (log of the cell area) plus the per-frame miss cost; so one path can hold several bursts separated by long OFF periods (before this,
+a gap longer than 5 frames ended the track: fine for loci, which are always there, fatal for MS2 spots).
 
 ## Measured: dog_viterbi (default) against the alternatives
 
@@ -83,102 +86,57 @@ moderately in 2D (r ~0.8 in the probe runs: shot noise of ~300-photon spots, fla
 3D runs the probe model is off, every spot has the same 600 photons apart from slow bleaching, so r is low (0.2-0.6) whatever the method; the
 measured intensity there mostly varies with the spot's height between the 0.8 um planes.
 
-Open for dog_viterbi: one path per cell, so an OFF period longer than `viterbi_max_gap` frames ends the track (fine for loci, which are
-always there; for MS2 spots, add re-acquisition after long gaps); D per cell rather than pooled; DoG widths and `dog_snr` set by reasoning,
-not tuned; the paper's two-photon PSF and our widefield PSF differ in axial shape.
+Open: D per cell rather than pooled; DoG widths and `dog_snr` set by reasoning, not tuned; the paper's two-photon PSF and our widefield
+PSF differ in axial shape. (The `median_peaks` rows are the removed second method; see History.)
 
-# Part B: `median_peaks`, after Bennabi et al. 2025
+# The MS2 spot (`ms2.py`)
 
-## Source
+The MS2 spot is drawn at the promoter, in the nuclear channel (same colour as the NLS-GFP). Its trace is the ellipse intensity (spot minus
+ring, removing the nuclear MCP/NLS-GFP background) in EVERY frame at a tracked position, as in Chen et al.; positions in frames without a
+detection are interpolated in time. Two ways to get the position (`ms2_trace(..., ms2_position=)`):
 
-Bennabi et al., "Size-dependent temporal decoupling of morphogenesis and transcriptional programs in pseudoembryos", *Science Advances* 11,
-eadv7790 (2025), [PMC12372888](https://pmc.ncbi.nlm.nih.gov/articles/PMC12372888). Image-analysis code:
-[github.com/gregorlab/SizeProject2024](https://github.com/gregorlab/SizeProject2024), `modules/raw_live_analysis.py`
-(functions `get_filtered_fluo_movie_mesp`, `compute_movie_threshold`, `get_fluorescent_area`, `compute_multipol_analysis_per_df`), driver
-`exe/multipolarity_analysis/live_movie_multipolarity_analysis.py` (`k=7, th=70`). Read from the code on 2026-10-11, not from memory.
+- `promoter` (default): the promoter (locus 0), tracked in its own colour with dog_viterbi (the measured chromatic shift removed when
+  calibrated). In the user's experiment the promoter is labelled, so this is available and reliable whether the gene is ON or OFF.
+- `own`: dog_viterbi on the nuclear channel itself (nucleus eroded by 3 px so its bright edge gives no candidates), as Chen et al. do with no
+  other label on the gene.
 
-Important: the paper does **not** localize diffraction-limited spots. It finds Mesp2 expression *poles* (regions hundreds of pixels
-across) in live gastruloid movies and counts them. Its steps are general (filter, threshold, area, smooth, local maxima), but every size
-had to be rescaled, and two steps had to be added for single spots.
+Measured, seed-12 toy movie (probes + MS2, all errors, calibrated) at three MS2 brightnesses (photons per loop per second; placeholder 100):
 
-## The steps
+| MS2 brightness | own track: ON frames located (<= 0.5 um) / trace r | at the promoter: located / trace r |
+|---|---|---|
+| 1x (100) | 0% / 0.07 | 99.5% / 0.01 |
+| 3x (300) | 0% / 0.07 | 100% / 0.31 |
+| 10x (1000) | 74% / 0.37 | 100% / 0.82 |
 
-| step | Bennabi et al. 2025 (Mesp2 poles) | here (one locus per colour, ~0.8 px PSF sigma at 130 nm/px) | config key |
-|---|---|---|---|
-| 1 median filter | `skimage.filters.rank.median`, 7 x 7 square | `scipy.ndimage.median_filter`, 3 x 3 (z-stacks: (median_z, 3, 3)) | `median_px`, `median_z` |
-| 2 region | frame x brightfield gastruloid mask | the cell's own nuclear mask from stage 5, dilated 2 px | `dilate_px` |
-| + background | none | a wider (9 x 9) median of the filtered image, subtracted | `background`, `background_px` |
-| 3 threshold | ONE per movie: median over frames of per-frame Otsu (or fixed `th=70`) | ONE per movie (cell x colour): median over frames of per-frame min_snr x robust noise; Otsu available | `threshold`, `threshold_scope`, `min_snr` |
-| 4 area | > threshold, holes filled, objects < 5000 px removed, eroded (disk 10, disk 2) | > threshold, holes filled, objects < 3 px removed, no erosion | `threshold_on`, `min_area_px`, `erode_px` |
-| 5 smoothing | Gaussian sigma 20 px | Gaussian sigma 1 px (~PSF: matched filter) | `smooth_sigma_px`, `smooth_sigma_z` |
-| 6 local maxima | `peak_local_max(min_distance=100)`; every maximum is a pole | `peak_local_max(min_distance=4)` inside the area = candidates | `min_sep_px` |
-| + choice | (all poles kept and counted) | `track`: the candidate nearest the locus' median position in the 3 frames on each side (none if > 8 px away); or `brightest` | `select`, `track_window`, `track_gate_px` |
-| 7 position | integer pixel of the maximum | 2D (3D) Gaussian + offset fit to the unfiltered pixels in a 7 x 7 (x 5 planes) window | `refine` |
+At the placeholder brightness the MS2 signal is not measurable even at the exact right place (r = 0.01): one Pol II carries ~240 photons per
+exposure on a nucleus of ~300 photons per pixel, and in ON frames the true spot's DoG signal-to-noise is ~2 (median rank 29 among the
+nucleus' local maxima). The own-track mode then follows a fixed texture feature of the nucleus. The MS2 brightness per loop and the nuclear
+MCP/NLS-GFP brightness are placeholders the user should set from data; the result above says transcription becomes measurable at roughly
+3-10x the current MS2 brightness (or correspondingly less nuclear background).
+Scores in `scores.json` (`ms2`, `ms2_calibrated`): `found_on`, `median_error_um`, `intensity_r`, ON/OFF called from the trace alone
+(`call_sensitivity`, `call_specificity`; threshold 3 x the trace's robust noise).
 
-Why the sizes change: the paper's 7 px median is tiny next to a pole, so it only removes pixel noise. A 3 x 3 median already halves the peak
-of a sigma 0.8 px spot and a 5 x 5 median loses 10-25% of the spots (measured below); a 7 x 7 median erases spots, which is why a wider
-median is a good estimate of the background *under* a spot. The 3 x 3 median removes hot pixels and single-pixel noise. A cosmic ray is as
-wide as the PSF in this camera model and survives any spatial median.
+# Photobleaching correction (`bleach.py`)
 
-Two additions (not in the paper), both measured below:
-- **local background**: the locus channels carry the nucleus' cross-talk ghost (with its texture), autofluorescence and haze. One background
-  value per cell inflates the noise estimate and raises the threshold: locus 0 (the channel with the ghost) lost most detections.
-- **track choice**: a cosmic ray lasts one frame; the locus stays near where it was. In max projections of z-stacks every plane's cosmic rays
-  end up in the 2D image (17 planes: ~17x the rate), and the brightest-candidate rule picked them in ~4.5% of frames.
+A pixel records offset + background + signal x b(t); only the fluorophores bleach. So:
+1. b(t) is measured on background-subtracted signal: nuclear channel = mean inside the nuclei minus the mean of the empty area > 8 px away from
+   them; locus colours = the spots' own ring-subtracted intensities, median over all cells per frame. Then an exponential fit.
+2. The correction divides only the background-subtracted spot intensity by b(t) (`intensity_corr` in loci_positions*.csv and ms2_traces*.csv).
 
-median_peaks thresholds the *smoothed* image (`threshold_on: smoothed`) rather than the median-filtered one as the paper does: the Gaussian is
-then also the detection filter, which has the better signal-to-noise ratio for a spot. `threshold_on: filtered` is the paper's order.
+Measured against the true bleaching (10x-MS2 seed-12 run): nucleus tau 18,400 s estimated vs 20,000 true (b at the end 0.937 vs 0.942); the
+naive estimate on raw brightness (background left in) gives tau 27,900 s and misses ~30% of the decay. Locus 0: tau 6,001 vs 6,000; locus 1:
+7,180 vs 6,000. The spot intensities' late / early ratio goes 0.86-0.89 (bleaching) -> 1.00-1.03 after correction, matching the true photons
+(0.97-1.03). In these movies bleaching is mild (6% nucleus, 18% loci over 20 min); the same code handles stronger bleaching.
+`tests/test_spots.py::test_bleaching_is_measured_after_removing_the_background...` checks it on a synthetic movie with a known tau.
 
-## Measured (stage 6 re-run on saved crops, true cell IDs; `scripts/compare_localizers.py`; 2026-10-11)
+# History: `median_peaks` (removed 2026-10-11)
 
-"found" = detections / loci that had light; "wrong" = detections > 0.5 um from the truth (a hot pixel, cosmic ray or noise peak was picked);
-errors in nm against the drift-corrected truth (the chromatic shift counts as error unless calibrated). One seed per run: differences of a
-few percent in "found" are within run-to-run noise.
-
-Library run (seed 11, 8 cells x 120 frames, probes + MS2 on, all image errors; the hardest: spots 60-570 photons):
-
-| finder | calibrated | found | wrong | median | p95 | rms of correct ones |
-|---|---|---|---|---|---|---|
-| original (brightest pixel + 5x5 centroid) | no | 86.5% | 9.8% | 54 | 4681 | 64 |
-| paper literal (cell background, Otsu, brightest, integer) | no | 100% | 15.1% | 79 | 6519 | 86 |
-| **median_peaks** | no | 89.8% | 0.06% | 48 | 96 | 59 |
-| original | yes | 82.2% | 0.13% | 27 | 76 | 42 |
-| **median_peaks** | yes | 90.7% | 0.06% | 25 | 74 | 41 |
-
-Toy-loci run (seed 12, probes + MS2, all errors): original 96.3% found / 3.8% wrong / p95 104 nm (uncalibrated) and 95.9% / 0.1% / median 25 /
-p95 61 nm (calibrated); median_peaks 97.0% / 0% / p95 83 nm and 97.9% / 0% / median 21 / p95 54 nm.
-Older toy run (seed 1, bright spots): every variant finds 100%; Gaussian fit p95 64 nm vs 72 nm for the centroid; median 44 nm in all (the
-uncorrected chromatic shift, ~0.3 px).
-
-3D run (seed 22, 4 cells x 40 frames, 17 planes 0.8 um apart, all errors, fiducial beads):
-
-| finder | analysis | calibrated | found | wrong | median | p95 |
-|---|---|---|---|---|---|---|
-| original | 2D on max projection | yes | 100% | 4.7% | 40 | 110 |
-| **median_peaks** | 2D on max projection | yes | 99.4% | 0% | 39 | 80 |
-| original | 3D | yes | 99.7% | 4.7% | 101 | 320 |
-| **median_peaks** (axial median off: auto, spacing > axial sigma) | 3D | yes | 99.1% | 0.3% | 84 | 183 |
-| median_peaks + axial median always (`median_z: 3`) | 3D | yes | 99.1% | 0% | 85 | 177 |
-
-What each one-at-a-time change does (library run, calibrated, vs median_peaks 90.7% found / 0.06% wrong / 25 nm):
-no median 89.6% / 0% (but uncalibrated: 4.1% wrong, the hot pixels); 5 x 5 median 86.4% found; **one background per cell 56.0% found**; Otsu
-100% found but 1.4% wrong (rejects nothing); threshold on the filtered image 82.9% found; brightest choice 0.7% wrong; per-frame threshold
-same as one per movie; integer position median 59 nm (the paper's choice costs ~35 nm at this scale); centroid 29 nm and p95 84 nm.
-
-## Where it still fails / open
-
-- Dim spots (library run, calibrated, photons per exposure after bleaching): 100-200 photons found 71% (original 52%), 200-300 photons 91%
-  (original 81%), 300-400 photons 97% (original 95%). By colour: locus 0, the channel with the nucleus' cross-talk ghost, 88% (original 69%);
-  locus 1 94% (original 95%). Lower `min_snr` finds more but `track` then has more noise peaks to choose from; re-check with real brightness.
-- `median_z: auto` turns the axial median on only when the plane spacing is at most the axial PSF sigma. With bright spots it helped even at
-  0.8 um spacing (0% vs 0.3% wrong); with dim spots it would remove the spot. Decide with real brightness and spacing.
-- Background structures as small as a spot (< ~0.5 um) cannot be told from a spot by any of these steps (`tests/test_spots.py` uses a 1.3 um
-  patch for that reason).
-- `track` assumes one locus per colour that moves less than `track_gate_px` (1 um) relative to the nucleus centroid within `track_window`
-  frames. Two copies of a locus (replicated sister chromatids), or a fast-moving locus, would need a real tracker.
-- 3D z error dominates the 3D error (lateral ~40 nm, 3D ~85 nm): coarse planes, focus error and axial drift (both counted as error; the
-  fiducial / piezo corrections in docs/CALIBRATION_AND_3D.md address them).
-- All numbers come from 4 simulated runs, one seed each, with PLACEHOLDER brightness and error sizes. A real annotated movie is the test.
+The user first asked for the approach of Bennabi et al. 2025 (*Sci. Adv.* 11, eadv7790; code github.com/gregorlab/SizeProject2024). That paper
+finds Mesp2 expression poles hundreds of pixels across, not spots, so its steps (median 7x7, Otsu movie threshold, area, Gaussian sigma 20,
+peak_local_max) had to be rescaled and extended; the result (`median_peaks`: median 3x3, local background, threshold on the smoothed image,
+choice consistent with neighbouring frames, Gaussian fit) worked (library run, calibrated: 90.7% found vs 82.2% original) but was not
+Bennabi's method, and the user had it removed. The paper's pipeline taken literally found every spot but picked the wrong object 15% of the
+time (Otsu rejects nothing for a single spot). Code: git history before commit 0142350.
 
 ## Logic errors found and fixed in the stage 5-6 path (2026-10-11 review)
 

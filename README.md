@@ -128,12 +128,15 @@ the microscope blurs along z too. The loci are located in 3D and the 🖼 Images
 PSF, colour offsets, drift) and compares each estimate with the true value; the movie is then analysed again with the calibration applied. See the 🎯 Calibration tab,
 `scripts\run.cmd python scripts\run_calibration.py --run <run folder>` and [docs/CALIBRATION_AND_3D.md](docs/CALIBRATION_AND_3D.md).
 
-### Finding the loci: the 🔎 Spot finding tab
-Stage 6 finds each locus (one per colour) in every frame of every isolated cell. Default (`locus_analysis.method: dog_viterbi`): the MS2 spot pipeline of Chen, Levo, Zoller &
-Gregor 2025 (*Nat. Struct. Mol. Biol.*): median filter, difference of Gaussians with a low threshold (several candidates), then the most likely path through the candidates
-over the whole movie (a Viterbi algorithm with a diffusion potential), a Gaussian fit, and their ellipsoid spot intensity. Alternative (`median_peaks`): the detection steps of
-Bennabi et al. 2025 (*Sci. Adv.*) rescaled from their Mesp2 poles to diffraction-limited spots, plus a local background, a choice of candidate consistent with the
-neighbouring frames, and a Gaussian fit. Settings: the `locus_analysis:` block of the configs, or the
-sidebar's **Spot finding** controls. The **🔎 Spot finding** tab shows every step on any cell and frame (with settings you can change), the error of every frame against the
-truth, and a comparison of methods on the whole run. From a terminal (re-runs only stage 6 on a finished run, ~1-3 min):
+### Finding the loci and the MS2 signal: the 🔎 Spot finding page
+Stage 6 tracks the promoter and the enhancer (one colour each) in every frame of every isolated cell with the spot pipeline of Chen, Levo, Zoller & Gregor 2025
+(*Nat. Struct. Mol. Biol.*): median filter, difference of Gaussians with a low threshold (several candidates), the most likely path through the candidates over the whole
+movie (a Viterbi algorithm with a diffusion potential, which can pick the spot up again after long gaps), a Gaussian fit, and their ellipse spot intensity. The MS2
+transcription signal is read in the nuclear channel at the tracked promoter in every frame (a trace per cell). Spot intensities are corrected for photobleaching, with
+the background removed before the decay is measured. Settings: the `locus_analysis:` block of the configs, or the sidebar's **Spot finding** controls. The page shows
+every step on any cell, spot and frame, the error of every frame against the truth, the MS2 trace, the bleaching correction and a comparison of methods. From a
+terminal (re-runs only stage 6 on a finished run, ~1-3 min; also adds MS2 traces and the bleaching correction to older runs):
 `scripts\run.cmd python scripts\compare_localizers.py --run <run folder or name>`. Method, sources and measured numbers: [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md).
+
+The dashboard now runs only the page you have open (a navigation bar replaces the tabs), which made reruns ~5-10x faster; the run summary has a one-line description
+of every image-error source.
