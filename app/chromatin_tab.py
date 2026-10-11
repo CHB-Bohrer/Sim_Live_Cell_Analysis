@@ -82,7 +82,10 @@ def render(st):
     has_lef = (d / "lef_positions.npy").exists()
     with st.expander("▶ Watch the chromosome move through time (smooth player)",
                      expanded=st.session_state.get("chrom_play", False)):
-        st.caption("Every bead is coloured by genomic position (purple = start of the region, yellow = end) and the chain "
+        st.caption("**The grey circle is NOT the nucleus.** It is the sphere that confines this simulated region of chromosome (a computational box: the "
+                   "chain fills it by construction because the density is fixed). In a movie this territory is scaled by 'nm per polymer unit' and "
+                   "placed inside a nucleus several times larger, so it covers only a small part of it. "
+                   "Every bead is coloured by genomic position (purple = start of the region, yellow = end) and the chain "
                    "slowly rotates so the 3D shape is visible. Two loci you choose are highlighted (A red, B blue) and "
                    "joined by a line with their distance. White lines = loop-extruding factors holding two monomers together. "
                    "Time is in MD blocks (750 steps each) until the calibration step converts it to seconds.")

@@ -30,9 +30,11 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
     options = "".join(f'<option value="{s}">{s} fps</option>' for s in speeds)
     html = f"""
 <div style="font-family:system-ui,sans-serif;color:#444">
+  <div id="ld{key}" style="font-size:13px;margin-bottom:6px;color:#92400e">&#8987; Loading frames&hellip; <span id="ln{key}">0 / {len(frames)}</span>
+    <div style="height:5px;background:#e5e7eb;border-radius:3px;margin-top:3px"><div id="lbar{key}" style="height:5px;width:0%;background:#0f766e;border-radius:3px"></div></div></div>
   <img id="im{key}" style="width:100%;display:block;border-radius:4px;background:#000" />
   <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
-    <button id="pp{key}" style="padding:4px 14px;font-size:14px;cursor:pointer">&#9654; Play</button>
+    <button id="pp{key}" disabled style="padding:4px 14px;font-size:14px;cursor:wait;min-width:150px">&#8987; Loading&hellip;</button>
     <input id="sl{key}" type="range" min="0" max="{len(frames) - 1}" value="0" style="flex:1" />
     <span id="lb{key}" style="min-width:210px;font-size:13px"></span>
     <select id="fp{key}" style="font-size:13px">{options}</select>
@@ -46,21 +48,30 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
         fp = document.getElementById("fp{key}");
   fp.value = "{fps}";
   let i = 0, playing = false, last = 0;
-  F.forEach(u => {{ const p = new Image(); p.src = u; }});          // preload every frame
+  const ld = document.getElementById("ld{key}"), ln = document.getElementById("ln{key}"), lbar = document.getElementById("lbar{key}");
+  let loaded = 0;
+  function ready() {{
+    ld.innerHTML = "&#10003; Ready: press Play (or Space), drag the slider, or use the arrow keys.";
+    ld.style.color = "#166534"; pp.disabled = false; pp.style.cursor = "pointer"; pp.innerHTML = "&#9654; Play";
+  }}
+  F.forEach(u => {{ const p = new Image();                             // preload every frame; Play is enabled when all are ready
+    p.onload = p.onerror = () => {{ loaded++; ln.textContent = loaded + " / " + F.length; lbar.style.width = (100 * loaded / F.length) + "%";
+                                    if (loaded === F.length) ready(); }};
+    p.src = u; }});
   function show(k) {{ i = k; im.src = F[k]; sl.value = k; lb.textContent = L[k]; }}
   function tick() {{          // a timer, not requestAnimationFrame: rAF is paused in hidden / embedded panes
     const ts = performance.now();
     if (playing && ts - last >= 1000 / (parseFloat(fp.value) || {int(fps)})) {{ last = ts; show((i + 1) % F.length); }}
   }}
-  pp.onclick = () => {{ playing = !playing; pp.innerHTML = playing ? "&#10074;&#10074; Pause" : "&#9654; Play"; }};
-  sl.oninput = () => {{ playing = false; pp.innerHTML = "&#9654; Play"; show(parseInt(sl.value)); }};
+  pp.onclick = () => {{ if (pp.disabled) return; playing = !playing; pp.innerHTML = playing ? "&#10074;&#10074; Pause" : "&#9654; Play"; }};
+  sl.oninput = () => {{ playing = false; if (!pp.disabled) pp.innerHTML = "&#9654; Play"; show(parseInt(sl.value)); }};
   document.addEventListener("keydown", e => {{
     if (e.key === "ArrowRight") show(Math.min(i + 1, F.length - 1));
     if (e.key === "ArrowLeft") show(Math.max(i - 1, 0));
-    if (e.key === " ") {{ e.preventDefault(); pp.click(); }}
+    if (e.key === " " && !pp.disabled) {{ e.preventDefault(); pp.click(); }}
   }});
   show(0); setInterval(tick, 20);
 }})();
 </script>"""
-    height = int(column_width_px * h / w) + 70
+    height = int(column_width_px * h / w) + 105
     components.html(html, height=height, scrolling=False)

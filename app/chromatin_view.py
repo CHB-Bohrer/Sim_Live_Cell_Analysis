@@ -48,7 +48,8 @@ def render_frame(pos: np.ndarray, colors: np.ndarray, angle: float, radius: floa
     pil = Image.fromarray(img.astype(np.uint8))
     d = ImageDraw.Draw(pil, "RGBA")
     d.ellipse([size / 2 - 0.46 * size, size / 2 - 0.46 * size, size / 2 + 0.46 * size, size / 2 + 0.46 * size],
-              outline=(120, 120, 120, 90))                       # the confining sphere (nucleus-like boundary)
+              outline=(160, 160, 160, 140), width=2)             # the simulation's confining sphere = the chromatin territory, NOT the nucleus
+    d.text((size / 2 - 150, size - 22), "grey circle = simulation box (this region's territory), not the nucleus", fill=(200, 200, 200, 255), font=FONT)
     if loops is not None and len(loops):
         for a, b in loops:
             d.line([px[a], py[a], px[b], py[b]], fill=(255, 255, 255, 110), width=1)

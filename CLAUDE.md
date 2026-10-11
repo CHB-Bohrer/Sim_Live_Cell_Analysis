@@ -315,3 +315,5 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   (empty plots); with 50 nm/unit and 150 nm contact the smoke distances rarely touch, so coupling looks inert (placeholder scale).
 - Literature checked against PMC full texts, see docs/PLAN_transcription.md: TFF1 ON 16 min (not 6), burst period 66-86 min, 1.5 transcripts/burst;
   Pol II 2.6 kb/min, 3' dwell 116 s (our default 30 s). Defaults not changed: needs the user's choice of gene.
+
+- Players (app/player.py): every in-browser movie now shows 'Loading frames… n / N' with a progress bar and a disabled button, then 'Ready: press Play'. Chromatin player: the grey circle is the simulation's confining sphere (the territory, NOT the nucleus); caption and in-image label say so. The territory is ~1-1.5 um across at 50 nm/unit vs a 12 um nucleus.
