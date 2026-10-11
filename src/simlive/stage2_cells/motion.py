@@ -149,3 +149,35 @@ def _resolve_collisions(pos: np.ndarray, radius: np.ndarray, fov: np.ndarray, rn
                     moved = True
         if not moved:
             break
+
+
+def z_enabled(cfg: dict) -> bool:
+    """True when the movie is recorded as z-stacks (acquisition.z_stack.enabled)."""
+    return bool(((cfg.get("acquisition") or {}).get("z_stack") or {}).get("enabled", False))
+
+
+def add_z(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
+    """Give every nucleus a height: columns `z_um` (centre, micrometres above the coverslip) and `z_semi_um` (half thickness).
+
+    A nucleus is a flattened ellipsoid with half thickness `geometry.z.nucleus_semi_axis_ratio` x its lateral radius (1.0 = spherical).
+    Heights scatter between cells (`z_spread_um`) and random-walk through time (`z_walk_um_per_frame`); a daughter starts at its
+    parent's height. Uses its own random stream, so the lateral simulation (stage 2) is identical with or without z.
+    """
+    g = (cfg.get("geometry") or {}).get("z") or {}
+    ratio, zc = float(g.get("nucleus_semi_axis_ratio", 1.0)), float(g.get("z_center_um", 7.0))
+    spread, walk = float(g.get("z_spread_um", 0.5)), float(g.get("z_walk_um_per_frame", 0.05))
+    out = cells.copy()
+    out["z_semi_um"] = ratio * out.radius_um
+    zs = np.zeros(len(out))
+    last: dict = {}
+    for cid, grp in out.sort_values(["cell_id", "t"]).groupby("cell_id", sort=True):
+        par, t0 = int(grp.parent_id.iloc[0]), int(grp.t.iloc[0])
+        z0 = last[(par, t0 - 1)] + rng.normal(0, 0.3 * spread) if par > 0 and (par, t0 - 1) in last else zc + rng.normal(0, spread)
+        steps = rng.normal(0, walk, len(grp))
+        steps[0] = 0.0
+        z = np.maximum(z0 + np.cumsum(steps), grp.z_semi_um.to_numpy() + 0.2)      # nuclei rest on or above the coverslip
+        for t, zz in zip(grp.t, z):
+            last[(int(cid), int(t))] = zz
+        zs[out.index.get_indexer(grp.index)] = z
+    out["z_um"] = zs
+    return out

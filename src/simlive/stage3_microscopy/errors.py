@@ -31,15 +31,25 @@ SOURCES: dict[str, dict] = {
         effect="Every object in a frame moves together by a fraction of a pixel. The true cell masks move with it, so tracking is still "
                "scored fairly; locus positions are scored against the drift-corrected truth.",
         params={"drift_px_per_frame": (0.15, "px", "step size of the slow random-walk drift, per frame"),
-                "jitter_px": (0.05, "px", "frame-to-frame vibration (does not accumulate)")}),
+                "jitter_px": (0.05, "px", "frame-to-frame vibration (does not accumulate)"),
+                "drift_z_um_per_frame": (0.03, "um", "z-stacks only: step size of the slow axial drift, per frame"),
+                "jitter_z_um": (0.02, "um", "z-stacks only: frame-to-frame axial vibration")}),
     "chromatic_shift": dict(
         group="Sample position", title="Chromatic shift between colour channels", baseline=False,
-        what="Different wavelengths focus at slightly different places (lateral chromatic aberration, imperfect filter-cube alignment), "
-             "so each locus colour is imaged shifted relative to the nucleus channel.",
+        what="Different wavelengths focus at slightly different places (lateral and axial chromatic aberration, imperfect filter-cube "
+             "alignment), so each locus colour is imaged shifted relative to the nucleus channel.",
         effect="A constant offset per colour. It does not average away, and it biases the measured distance between two loci of "
-               "different colours unless it is calibrated (e.g. with beads).",
+               "different colours unless it is calibrated (e.g. with beads). In z-stacks the axial offset is usually larger than the lateral one.",
         params={"shift_px": ({"locus0": [0.25, -0.15], "locus1": [-0.30, 0.20]}, "px (y, x)",
-                             "offset of each locus channel relative to the nuclear channel")}),
+                             "offset of each locus channel relative to the nuclear channel"),
+                "shift_z_um": ({"locus0": 0.15, "locus1": -0.20}, "um", "z-stacks only: axial offset of each locus channel")}),
+    "slice_skew": dict(
+        group="Sample position", title="Time skew within a z-stack", baseline=False,
+        what="The slices of a stack are recorded one after the other, so the last slice is recorded a fraction of a second after the first "
+             "while the loci keep moving.",
+        effect="Within one stack a locus is at a slightly different place in each slice; it blurs the 3D spot along the direction of motion. "
+               "Only in z-stacks (acquisition.z_stack.slice_time_s sets the time per slice).",
+        params={}),
     "psf_blur": dict(
         group="Optics", title="Diffraction blur (PSF)", baseline=True,
         what="A point of light is imaged as a small blob, not a point: sigma = 0.21 x wavelength / NA.",
@@ -47,9 +57,10 @@ SOURCES: dict[str, dict] = {
         params={}),
     "defocus": dict(
         group="Optics", title="Focus drift (defocus)", baseline=False,
-        what="The focal plane wanders a little from frame to frame (autofocus residual, thermal drift). Out of focus the PSF widens.",
-        effect="Spots get wider and dimmer in the same frames; the nuclear edge softens. Spot brightness fluctuates for a reason "
-               "unrelated to biology.",
+        what="The focal plane wanders a little from frame to frame (autofocus residual, thermal drift). Out of focus the PSF widens. "
+             "In a z-stack the same error shifts the whole stack up or down instead.",
+        effect="2D: spots get wider and dimmer in the same frames; the nuclear edge softens. 3D: every object appears displaced along z "
+               "by the focus error. Either way, spot brightness fluctuates for a reason unrelated to biology.",
         params={"rms_um": (0.10, "um", "typical focus error (root mean square)"),
                 "memory": (0.90, "", "how slowly the focus error changes from frame to frame (0 = new each frame, 1 = frozen)"),
                 "immersion_n": (1.33, "", "refractive index of the immersion medium (sets how fast the blur grows with defocus)")}),
@@ -154,7 +165,7 @@ SOURCES: dict[str, dict] = {
 }
 
 # physical order in which a frame is degraded (used for the cumulative build-up in the dashboard)
-ORDER = ["stage_drift", "chromatic_shift", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
+ORDER = ["stage_drift", "chromatic_shift", "slice_skew", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
          "background", "autofluorescence", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
          "read_noise", "row_noise", "dsnu", "adc"]
 assert set(ORDER) == set(SOURCES)
@@ -270,8 +281,11 @@ class Camera:
     """Detection and camera electronics of one channel: photons per pixel in, ADU out. Fixed patterns (pixel gain, offsets, hot pixels,
     read-noise map) are created once from (entropy, channel); per-frame noise comes from per-source streams."""
 
-    def __init__(self, shape, E: ErrorSet, opt: dict, exposure_s: float, entropy: int, channel: int):
+    def __init__(self, shape, E: ErrorSet, opt: dict, exposure_s: float, entropy: int, channel: int, session: int | None = None):
+        """entropy = the instrument (fixed patterns); session = this acquisition (per-frame noise). They are equal for a movie;
+        calibration acquisitions share the instrument but have their own session, so their noise is independent of the movie's."""
         self.shape, self.E, self.opt, self.exposure_s, self.entropy, self.ch = tuple(shape), E, opt, exposure_s, entropy, channel
+        self.session = entropy if session is None else session
         ny, nx = shape
         self.qe = float(opt.get("quantum_efficiency", 0.8)) if E.on("qe") else 1.0
         self.gain = float(opt.get("gain_adu_per_e", 1.0))
@@ -294,17 +308,17 @@ class Camera:
     def __call__(self, photons: np.ndarray, t: int) -> np.ndarray:
         E, ny_nx = self.E, self.shape
         e_mean = np.clip(photons, 0, None).astype(np.float64) * self.qe
-        e = rng_for(self.entropy, t, "shot_noise", self.ch).poisson(e_mean).astype(np.float64) if E.on("shot_noise") else e_mean
+        e = rng_for(self.session, t, "shot_noise", self.ch).poisson(e_mean).astype(np.float64) if E.on("shot_noise") else e_mean
         f = float(E.par("shot_noise", "excess_noise_factor")) if E.on("shot_noise") else 1.0
         if f > 1.0:
-            e += rng_for(self.entropy, t, "shot_noise", self.ch + 100).normal(size=ny_nx) * np.sqrt((f**2 - 1.0) * e)
+            e += rng_for(self.session, t, "shot_noise", self.ch + 100).normal(size=ny_nx) * np.sqrt((f**2 - 1.0) * e)
         if E.on("dark_current"):
             lam = E.par("dark_current", "e_per_s") * self.exposure_s
-            e += rng_for(self.entropy, t, "dark_current", self.ch).poisson(lam, ny_nx)
+            e += rng_for(self.session, t, "dark_current", self.ch).poisson(lam, ny_nx)
         if self.hot is not None:
             e += self.hot
         if E.on("cosmic_rays"):
-            r = rng_for(self.entropy, t, "cosmic_rays", self.ch)
+            r = rng_for(self.session, t, "cosmic_rays", self.ch)
             for _ in range(int(r.poisson(E.par("cosmic_rays", "rate_per_frame")))):
                 cy, cx = r.uniform(0, ny_nx[0]), r.uniform(0, ny_nx[1])
                 y0, x0 = int(cy) - 3, int(cx) - 3
@@ -316,10 +330,10 @@ class Camera:
             e *= self.prnu
         if self.read_e > 0:
             sd = self.read_e * (self.read_map if self.read_map is not None else 1.0)
-            e += rng_for(self.entropy, t, "read_noise", self.ch).normal(size=ny_nx) * sd
+            e += rng_for(self.session, t, "read_noise", self.ch).normal(size=ny_nx) * sd
         adu = e * self.gain + self.offset
         if E.on("row_noise"):
-            adu += rng_for(self.entropy, t, "row_noise", self.ch).normal(0, E.par("row_noise", "adu"), (ny_nx[0], 1))
+            adu += rng_for(self.session, t, "row_noise", self.ch).normal(0, E.par("row_noise", "adu"), (ny_nx[0], 1))
         if self.dsnu is not None:
             adu += self.dsnu
         if E.on("adc"):
@@ -328,3 +342,17 @@ class Camera:
         else:
             adu = adu.clip(0, 65535)
         return adu.astype(np.float32)
+
+
+def broad_blur3d(vol: np.ndarray, sigma_xy_px: float, sigma_z_planes: float) -> np.ndarray:
+    """3D version of `broad_blur` for a (Z, Y, X) stack: large lateral sigma computed on a block-averaged copy, ordinary sigma along z."""
+    from scipy.ndimage import zoom
+
+    k = int(max(1, sigma_xy_px // 6))
+    nz, ny, nx = vol.shape
+    py, px = (-ny) % k, (-nx) % k
+    pad = np.pad(vol, ((0, 0), (0, py), (0, px)))
+    small = pad.reshape(nz, pad.shape[1] // k, k, pad.shape[2] // k, k).sum((2, 4))
+    small = gaussian_filter(small, (sigma_z_planes, sigma_xy_px / k, sigma_xy_px / k), mode="constant")
+    big = zoom(small, (1, k, k), order=1) / (k * k) if k > 1 else small
+    return big[:, :ny, :nx].astype(np.float32)

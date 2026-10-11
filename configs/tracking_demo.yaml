@@ -75,8 +75,9 @@ tracking:
 imaging_errors:
   enabled: true
   # ---- Sample position
-  stage_drift: {enabled: true, drift_px_per_frame: 0.15, jitter_px: 0.05}
-  chromatic_shift: {enabled: true, shift_px: {"locus0": [0.25, -0.15], "locus1": [-0.3, 0.2]}}
+  stage_drift: {enabled: true, drift_px_per_frame: 0.15, jitter_px: 0.05, drift_z_um_per_frame: 0.03, jitter_z_um: 0.02}
+  chromatic_shift: {enabled: true, shift_px: {"locus0": [0.25, -0.15], "locus1": [-0.3, 0.2]}, shift_z_um: {"locus0": 0.15, "locus1": -0.2}}
+  slice_skew: {enabled: true}          # Time skew within a z-stack
   # ---- Optics
   psf_blur: {enabled: true}          # Diffraction blur (PSF)
   defocus: {enabled: true, rms_um: 0.1, memory: 0.9, immersion_n: 1.33}

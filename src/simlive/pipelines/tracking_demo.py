@@ -16,7 +16,7 @@ import pandas as pd
 import tifffile
 
 from simlive.io.runs import run_id_for, stage_dir, write_provenance
-from simlive.stage2_cells.motion import simulate_cells
+from simlive.stage2_cells.motion import add_z, simulate_cells, z_enabled
 from simlive.stage1_chromatin.library_loci import simulate_library_loci
 from simlive.stage1_chromatin.probes import simulate_probe_occupancy
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
@@ -26,6 +26,7 @@ from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
 from simlive.stage6_analysis.localize import localize_loci, locus_distances, score_localization
+from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances_3d, score_localization_3d
 from simlive.stage4_segtrack.trackers import make_tracker
 from simlive.stage7_validation.identity import identity_summary, match_ids
 from simlive.stage7_validation.tracking_metrics import evaluate, gt_table, write_ctc
@@ -38,12 +39,15 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     seed = int(cfg["seed"])
     run = Path(out_root) / run_id_for(cfg)
     s2, s3, s4, s7 = (run / n for n in ("stage2_cells", "stage3_microscopy", "stage4_segtrack", "stage7_validation"))
-    ss = np.random.SeedSequence(seed).spawn(6)  # independent streams: motion, rendering, loci, locus rendering, probes, transcription
+    ss = np.random.SeedSequence(seed).spawn(8)  # independent streams: motion, rendering, loci, (unused), probes, transcription, cell heights (z), calibration
     progress(f"Run folder: {run}")
 
     progress("Stage 2: simulating cell motion and shape")
     stage_dir(run, "stage2_cells")
-    simulate_cells(cfg, np.random.default_rng(ss[0])).to_csv(s2 / "cells.csv", index=False)
+    cells0 = simulate_cells(cfg, np.random.default_rng(ss[0]))
+    if z_enabled(cfg):                                  # z-stacks: give every nucleus a height and a thickness (own random stream)
+        cells0 = add_z(cells0, cfg, np.random.default_rng(ss[6]))
+    cells0.to_csv(s2 / "cells.csv", index=False)
     write_provenance(s2, cfg, seed)
 
     cells = pd.read_csv(s2 / "cells.csv")
@@ -77,16 +81,24 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
              + f" with {len(on)} image-error sources on: {', '.join(on)}")
     mv = imager.render_movie(progress=progress, dtype=np.uint16 if cfg.get("image_dtype") == "uint16" else np.float32)
     for name, arr in mv["images"].items():                                   # one image channel (colour) per locus + the nucleus
+        if imager.is3d:        # full stacks (T, Z, Y, X) for 3D analysis; the 2D projection feeds segmentation, tracking and isolation
+            tifffile.imwrite(s3 / f"{name}_zstack.tif", arr, photometric="minisblack")
+            arr = imager.project(arr, imager.projection).astype(arr.dtype)
         tifffile.imwrite(s3 / f"{name}.tif", arr, photometric="minisblack")
+    if imager.is3d:
+        tifffile.imwrite(s3 / "labels_3d.tif", mv["labels"], photometric="minisblack")
+        mv["labels"] = mv["labels"].max(axis=1)                              # nuclei never overlap laterally, so max over z keeps the IDs
     tifffile.imwrite(s3 / "labels.tif", mv["labels"], photometric="minisblack")
     # ground truth of the imaging itself: what drift / focus / power / blur each frame really had, and the truth in image coordinates
     it = imager.imaging_truth()
     it.to_csv(s3 / "imaging_truth.csv", index=False)
     px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
+    st_truth = imager.static_truth()
     cells_in_image(cells, it, px_um).to_csv(s3 / "cells_image.csv", index=False)
     if truth is not None:
-        truth_in_image(truth, it, px_um, imager.static_truth()["channel_shift_px"]).to_csv(s3 / "loci_truth_image.csv", index=False)
-    (s3 / "imaging_errors.json").write_text(json.dumps(imager.static_truth(), indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+        truth_in_image(truth, it, px_um, st_truth["channel_shift_px"],
+                       (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).to_csv(s3 / "loci_truth_image.csv", index=False)
+    (s3 / "imaging_errors.json").write_text(json.dumps(st_truth, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
     del mv
     write_provenance(s3, cfg, seed)
 
@@ -144,6 +156,8 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress) -> None:
               **{f"locus{k}": s3 / f"locus{k}.tif" for k in range(int(cfg["loci"]["n_loci"]))}}
     ti = s3 / "loci_truth_image.csv"        # truth moved by the stage drift (a localizer cannot know it); chromatic shift stays an error
     truth = pd.read_csv(ti if ti.exists() else run / "stage1_chromatin" / "loci_truth.csv")
+    ej = s3 / "imaging_errors.json"
+    zinfo = json.loads(ej.read_text()).get("z_stack") if ej.exists() else None
     ana = cfg.get("locus_analysis", {})
     scores = {}
     for src in sources:
@@ -165,6 +179,18 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress) -> None:
             err, sc = score_localization(pos, truth, px_um)
             err.to_csv(out6 / "localization_errors.csv", index=False)
             scores[src] = sc
+        if zinfo is not None:   # z-stacks: locate the loci in 3D from the full stacks (the 2D result above uses the projections)
+            progress(f"Stage 6: locating loci in 3D in {len(summ)} cells")
+            stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(int(cfg["loci"]["n_loci"]))}
+            pos3 = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
+                             n_loci=cfg["loci"]["n_loci"], **ana)
+            pos3.to_csv(out6 / "loci_positions_3d.csv", index=False)
+            (locus_distances_3d(pos3, px_um) if len(pos3) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
+                out6 / "locus_distances_3d.csv", index=False)
+            if src == "truth" and "z_um" in truth.columns:
+                err3, sc3 = score_localization_3d(pos3, truth, px_um)
+                err3.to_csv(out6 / "localization_errors_3d.csv", index=False)
+                scores["truth_3d"] = sc3
         scores.setdefault(src, {})["peak_worker_memory_mb"] = summ.attrs.get("peak_worker_mb")
     try:  # peak working set of this (main) process over the whole run, incl. segmentation/tracking input arrays
         import psutil

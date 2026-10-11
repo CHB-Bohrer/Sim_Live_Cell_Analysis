@@ -69,6 +69,7 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
     cell_ids = sorted(cells.cell_id.unique())
     assigned = lib.assign_simulations(lc["library"], cell_ids, rng, replace=bool(lc.get("replace", False)),
                                       pool=lc.get("sim_ids"), pinned=lc.get("pin"))
+    three_d = "z_um" in cells.columns
     rows, traces = [], {}
     for cid, g in cells.sort_values("t").groupby("cell_id"):
         sim = lib.library_dir(lc["library"]) / assigned[int(cid)]
@@ -92,9 +93,12 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
         for i, r in enumerate(g.itertuples()):
             y, x = nucleus_to_lab_um(r, p[i, :, 0], p[i, :, 1])
             for k in range(p.shape[1]):
-                rows.append((r.t, cid, k, p[i, k, 0], p[i, k, 1], p[i, k, 2], y[k], x[k], assigned[int(cid)]))
+                zk = r.z_um + p[i, k, 2] * r.z_semi_um if three_d else np.nan   # z-stacks: polymer z scaled into the (flattened) nucleus
+                rows.append((r.t, cid, k, p[i, k, 0], p[i, k, 1], p[i, k, 2], y[k], x[k], assigned[int(cid)], zk))
         if return_traces and base.shape[1] >= 2:
             traces[int(cid)] = {"dt_block_s": block_s, "looped": bool(looped),
                                 "d_nm": np.linalg.norm(base[:, 0] - base[:, 1], axis=1) * nm_per_unit}
-    df = pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "xn", "yn", "zn", "y_um", "x_um", "sim_id"])
+    df = pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "xn", "yn", "zn", "y_um", "x_um", "sim_id", "z_um"])
+    if not three_d:
+        df = df.drop(columns="z_um")
     return (df, traces) if return_traces else df

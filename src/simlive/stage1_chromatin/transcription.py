@@ -329,17 +329,19 @@ def traces_from_truth(truth: pd.DataFrame, cfg: dict) -> dict:
     for cid, g in truth.groupby("cell_id"):
         a = g[g.locus_id == 0].sort_values("t"); b = g[g.locus_id == 1].sort_values("t")
         out[int(cid)] = {"dt_block_s": dt, "looped": False,
-                         "d_nm": np.hypot(a.y_um.to_numpy() - b.y_um.to_numpy(), a.x_um.to_numpy() - b.x_um.to_numpy()) * 1000.0}
+                         "d_nm": np.sqrt((a.y_um.to_numpy() - b.y_um.to_numpy()) ** 2 + (a.x_um.to_numpy() - b.x_um.to_numpy()) ** 2
+                                         + ((a.z_um.to_numpy() - b.z_um.to_numpy()) ** 2 if "z_um" in a else 0.0)) * 1000.0}
     return out
 
 
 def ms2_spots(tx: pd.DataFrame, truth: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """Where and how bright the MS2 spots are: at the promoter (locus 0), photons = photons_per_loop_s x exposure x MS2 loops."""
     tc = cfg["loci"]["transcription"]
-    prom = truth[truth.locus_id == 0][["t", "cell_id", "y_um", "x_um"]]
+    zc = ["z_um"] if "z_um" in truth.columns else []
+    prom = truth[truth.locus_id == 0][["t", "cell_id", "y_um", "x_um", *zc]]
     m = prom.merge(tx[["t", "cell_id", "ms2_loops"]], on=["t", "cell_id"])
     m["photons"] = float(tc.get("photons_per_loop_s", 100.0)) * float(cfg["acquisition"]["exposure_s"]) * m.ms2_loops
-    return m[["t", "cell_id", "y_um", "x_um", "photons"]]
+    return m[["t", "cell_id", "y_um", "x_um", *zc, "photons"]]
 
 
 def check_sampling(p: TranscriptionParams, frame_interval_s: float, exposure_s: float) -> list[tuple[str, str]]:

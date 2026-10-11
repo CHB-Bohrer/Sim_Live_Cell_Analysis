@@ -9,6 +9,16 @@ drift and, per colour, by chromatic shift) -> optical blur (diffraction, defocus
 -> uneven illumination and flicker -> colour cross-talk -> background (constant, autofluorescence) -> detector (quantum efficiency,
 shot noise, dark current) -> camera electronics (hot pixels, cosmic rays, pixel gain, read noise, row noise, offset pattern, digitisation).
 
+z-stacks (`acquisition.z_stack.enabled`): every frame is a stack of `n_slices` planes `step_um` apart. Nuclei are flattened ellipsoids
+(`geometry.z`), loci have a z position. The point spread function is a 3D Gaussian core (lateral sigma 0.21 lambda / NA, axial sigma from
+the modality: widefield FWHM_z = 2 lambda n / NA^2, confocal 0.88 lambda / (n - sqrt(n^2 - NA^2))) plus the broad out-of-focus haze
+component; a point source's flux per plane peaks at its full photon count when in focus, a nucleus' intensity is its local average over
+the axial PSF. Each slice has its own noise, and the loci move a little between the first and the last slice (slice_skew).
+
+Instrument vs session: the fixed patterns of the camera / illumination (pixel gains, offsets, hot pixels, flat-field, chromatic shifts) come
+from `entropy` (the instrument); drift, focus, flicker and all frame-to-frame noise come from `session` (this acquisition). They are the
+same for a movie; calibration acquisitions (calib_sim.py) share the instrument but have their own session.
+
 `Imager` renders any single frame on its own, with any subset of error sources switched on; the dashboard uses that to show how an
 image is built up and which ground truth produced it. `render_nuclei` / `render_loci` are thin wrappers for one channel.
 """
@@ -21,15 +31,47 @@ from scipy.ndimage import gaussian_filter
 from simlive.stage3_microscopy import errors as ERR
 from simlive.stage3_microscopy.errors import ErrorSet
 
+Z_SLICE_KEY = 4096      # frame index passed to the camera = t * Z_SLICE_KEY + slice, so every slice has its own noise
+
 
 def psf_sigma_px(optics: dict) -> float:
-    """Gaussian approximation to the widefield Airy PSF: sigma ~ 0.21 * lambda / NA."""
-    return 0.21 * optics["wavelength_nm"] / optics["NA"] / optics["pixel_size_nm"]
+    """Gaussian approximation to the lateral PSF: sigma ~ 0.21 * lambda / NA (x 0.8 for a confocal / spinning-disk modality)."""
+    f = 0.8 if str(optics.get("modality", "widefield")).startswith(("confocal", "spinning")) else 1.0
+    return f * 0.21 * optics["wavelength_nm"] / optics["NA"] / optics["pixel_size_nm"]
+
+
+def axial_sigma_um(optics: dict, wavelength_nm: float | None = None) -> float:
+    """Axial Gaussian sigma of the PSF in micrometres (from `optics.axial_fwhm_um` if given, else from the modality)."""
+    if optics.get("axial_fwhm_um"):
+        return float(optics["axial_fwhm_um"]) / 2.355
+    wl, na, n = (wavelength_nm or optics["wavelength_nm"]) / 1000.0, float(optics["NA"]), float(optics.get("immersion_n", 1.33))
+    na = min(na, 0.95 * n)
+    if str(optics.get("modality", "widefield")).startswith(("confocal", "spinning")):
+        fwhm = 0.88 * wl / (n - np.sqrt(n * n - na * na))
+    else:
+        fwhm = 2.0 * wl * n / na**2
+    return float(fwhm / 2.355)
 
 
 def entropy_for(seed: int) -> int:
-    """Imaging entropy of a run (the rendering stream of the pipeline's SeedSequence(seed).spawn(6))."""
-    return int(np.random.SeedSequence(int(seed)).spawn(6)[1].generate_state(1, np.uint64)[0])
+    """Imaging entropy of a run (the rendering stream of the pipeline's SeedSequence(seed).spawn(8))."""
+    return int(np.random.SeedSequence(int(seed)).spawn(8)[1].generate_state(1, np.uint64)[0])
+
+
+def _nucleus_q(dy, dx, r, px_um, harm):
+    """Radial coordinate of every pixel relative to the nuclear boundary (q <= 1 inside) and the position in the nucleus' own frame
+    (units of its radius). dy, dx: pixel offsets from the cell centre; r: a cells.csv row."""
+    from simlive.stage2_cells.motion import boundary_rho
+
+    c, s = np.cos(r.angle_rad), np.sin(r.angle_rad)
+    u, v = dy * s + dx * c, dy * c - dx * s        # rotate into the ellipse frame (u along the long axis)
+    a_ax, b_ax = np.sqrt(r.aspect), 1 / np.sqrt(r.aspect)
+    uu, vv = u / a_ax, v / b_ax
+    amp = np.array([getattr(r, f"amp{int(k)}") for k in harm])
+    phase = np.array([getattr(r, f"phase{int(k)}") for k in harm])
+    r_px = r.radius_um / px_um
+    q = np.hypot(uu, vv) / (r_px * boundary_rho(np.arctan2(vv, uu), amp, phase, harm))
+    return q, uu / r_px, vv / r_px
 
 
 def _nucleus_mask(dy, dx, r, px_um, harm):
@@ -55,7 +97,7 @@ def make_texture(tex: dict, radius_um: float, rng: np.random.Generator) -> np.nd
 
     Fixed to the nucleus (rotates/deforms with it), so it is a feature a tracker can use. Components:
     spatially correlated chromatin-like variation (`contrast`, `correlation_um`) and dark nucleoli where nuclear
-    NLS-GFP is excluded (`n_nucleoli` on average, `nucleolus_depth`).
+    NLS-GFP is excluded (`n_nucleoli` on average, `nucleolus_depth`). In z-stacks the texture is the same at every height.
     """
     g = _TEX_GRID
     cell = 2 * _TEX_EXTENT / g                          # grid spacing in nuclear radii
@@ -78,29 +120,60 @@ def _sample_texture(tex_map: np.ndarray, xn: np.ndarray, yn: np.ndarray) -> np.n
     return map_coordinates(tex_map, [to_grid(yn), to_grid(xn)], order=1, mode="nearest")
 
 
-def _spots_from_arrays(shape, y, x, photons, sig: float) -> np.ndarray:
-    """Expected photons per pixel from point sources at pixel coordinates (y, x): Gaussian PSF integrated over each pixel."""
+def _lateral_kernels(shape, cy: float, cx: float, sig: float):
+    """1D pixel-integrated Gaussian profiles of a point at (cy, cx) and the window they live in: (y0, y1, x0, x1, py, px) or None."""
     from scipy.special import erf
 
     ny, nx = shape
+    half, s2 = int(np.ceil(4 * sig)) + 1, np.sqrt(2) * sig
+    y0, y1 = max(int(round(cy)) - half, 0), min(int(round(cy)) + half + 1, ny)
+    x0, x1 = max(int(round(cx)) - half, 0), min(int(round(cx)) + half + 1, nx)
+    if y1 <= y0 or x1 <= x0:
+        return None
+    ys, xs = np.arange(y0, y1), np.arange(x0, x1)
+    return (y0, y1, x0, x1, 0.5 * (erf((ys + 0.5 - cy) / s2) - erf((ys - 0.5 - cy) / s2)),
+            0.5 * (erf((xs + 0.5 - cx) / s2) - erf((xs - 0.5 - cx) / s2)))
+
+
+def _spots_from_arrays(shape, y, x, photons, sig: float) -> np.ndarray:
+    """Expected photons per pixel from point sources at pixel coordinates (y, x): Gaussian PSF integrated over each pixel."""
     out = np.zeros(shape, np.float32)
     sig = max(float(sig), 0.3)
-    half, s2 = int(np.ceil(4 * sig)) + 1, np.sqrt(2) * sig
     for cy, cx, ph in zip(y, x, photons):
-        y0, y1 = max(int(round(cy)) - half, 0), min(int(round(cy)) + half + 1, ny)
-        x0, x1 = max(int(round(cx)) - half, 0), min(int(round(cx)) + half + 1, nx)
-        if y1 <= y0 or x1 <= x0:
-            continue
-        ys, xs = np.arange(y0, y1), np.arange(x0, x1)
-        py = 0.5 * (erf((ys + 0.5 - cy) / s2) - erf((ys - 0.5 - cy) / s2))
-        px = 0.5 * (erf((xs + 0.5 - cx) / s2) - erf((xs - 0.5 - cx) / s2))
-        out[y0:y1, x0:x1] += ph * np.outer(py, px)
+        k = _lateral_kernels(shape, cy, cx, sig)
+        if k is not None:
+            out[k[0]:k[1], k[2]:k[3]] += ph * np.outer(k[4], k[5])
     return out
 
 
 def _spot_photons(shape, spots: pd.DataFrame, sig: float) -> np.ndarray:
     """Expected photons per pixel from point sources (columns y_px, x_px, photons)."""
     return _spots_from_arrays(shape, spots.y_px.to_numpy(), spots.x_px.to_numpy(), spots.photons.to_numpy(), sig)
+
+
+def _points3d(shape, zk: np.ndarray, Y, X, Z, photons, sig: float, sz: float, fh: float, sig_h: float, sz_h: float) -> np.ndarray:
+    """Expected photons per voxel of a z-stack from point sources. Y, X, Z: (n_slices, n_sources) positions (pixels, pixels, um) so every
+    slice may see a slightly different position (time skew). 3D Gaussian core (weight 1 - fh) + broad haze (weight fh); the flux in the
+    in-focus plane equals the source's photon count, falling as a Gaussian of the axial distance."""
+    nz = len(zk)
+    out = np.zeros((nz, *shape), np.float32)
+    sig, sig_h = max(float(sig), 0.3), max(float(sig_h), 0.3)
+    sz, sz_h = max(float(sz), 1e-3), max(float(sz_h), 1e-3)
+    n = Y.shape[1]
+    for s in range(n):
+        for core, (sl, szz, amp) in enumerate(((sig, sz, (1 - fh)), (sig_h, sz_h, fh))):
+            if amp <= 0:
+                continue
+            cached = None
+            for k in range(nz):
+                w = amp * photons[s] * np.exp(-0.5 * ((zk[k] - Z[k, s]) / szz) ** 2)
+                if w < 1e-6 * max(photons[s], 1e-12):
+                    continue
+                if cached is None or not (k > 0 and Y[k, s] == Y[k - 1, s] and X[k, s] == X[k - 1, s]):
+                    cached = _lateral_kernels(shape, Y[k, s], X[k, s], sl)
+                if cached is not None:
+                    out[k, cached[0]:cached[1], cached[2]:cached[3]] += w * np.outer(cached[4], cached[5])
+    return out
 
 
 class _NucleusModel:
@@ -121,7 +194,10 @@ class _NucleusModel:
         self.spots_by_t = {}
         if spots is not None and len(spots):
             for t, g in spots[spots.photons > 0].groupby("t"):
-                self.spots_by_t[int(t)] = (g.y_um.to_numpy() / self.px_um, g.x_um.to_numpy() / self.px_um, g.photons.to_numpy())
+                self.spots_by_t[int(t)] = dict(
+                    ids=g.cell_id.to_numpy() if "cell_id" in g else np.arange(len(g)),
+                    y=g.y_um.to_numpy() / self.px_um, x=g.x_um.to_numpy() / self.px_um,
+                    z=g.z_um.to_numpy() if "z_um" in g else np.zeros(len(g)), ph=g.photons.to_numpy())
 
     def _bright(self, cid) -> float:
         if cid not in self.brightness:
@@ -158,6 +234,37 @@ class _NucleusModel:
             clean[y0:y1, x0:x1][inside] = val[inside]
         return clean, lab
 
+    def volume(self, t: int, shift, dz: float, zf: np.ndarray, zk: np.ndarray):
+        """3D version of `clean`: (relative intensity on the fine z grid `zf`, label stack on the slice positions `zk`). Each nucleus is a flattened
+        ellipsoid: at lateral position with relative radius q its half thickness is z_semi * sqrt(1 - q^2). Objects are moved by `shift` (px)
+        and `dz` (um)."""
+        ny, nx = self.shape
+        vol = np.zeros((len(zf), ny, nx), np.float32)
+        lab = np.zeros((len(zk), ny, nx), np.uint16)
+        grp = self.by_t.get(int(t))
+        if grp is None:
+            return vol, lab
+        for r in grp.itertuples():
+            cy, cx, zc = r.y_um / self.px_um + shift[0], r.x_um / self.px_um + shift[1], r.z_um + dz
+            half = int(np.ceil(r.bound_radius_um / self.px_um)) + 2
+            y0, y1 = max(int(cy) - half, 0), min(int(cy) + half + 1, ny)
+            x0, x1 = max(int(cx) - half, 0), min(int(cx) + half + 1, nx)
+            if y1 <= y0 or x1 <= x0:
+                continue
+            q, xn, yn = _nucleus_q(self.yy[y0:y1, x0:x1] - cy, self.xx[y0:y1, x0:x1] - cx, r, self.px_um, self.harm)
+            inside = q <= 1.0
+            h = r.z_semi_um * np.sqrt(np.clip(1 - q * q, 0, None))              # half thickness (um) at every pixel
+            val = self._bright(r.cell_id) * np.ones(inside.shape, np.float32)
+            if self.tex_cfg:
+                val = val * _sample_texture(self._texture(r), xn, yn)
+            for i in np.nonzero(np.abs(zf - zc) <= r.z_semi_um)[0]:
+                m = inside & (np.abs(zf[i] - zc) <= h)
+                vol[i, y0:y1, x0:x1][m] = val[m]
+            for k in np.nonzero(np.abs(zk - zc) <= r.z_semi_um)[0]:
+                m = inside & (np.abs(zk[k] - zc) <= h)
+                lab[k, y0:y1, x0:x1][m] = r.cell_id
+        return vol, lab
+
 
 class _LocusModel:
     """One locus colour channel: diffraction-limited point sources at the true locus positions."""
@@ -175,37 +282,59 @@ class _LocusModel:
         self.by_t = {}
         for t, g in truth[truth.locus_id == locus_id].groupby("t"):
             ph = np.array([pps if attached is None else per_probe * attached[(t, c)] for c in g.cell_id])
-            self.by_t[int(t)] = (g.y_um.to_numpy() / self.px_um, g.x_um.to_numpy() / self.px_um, ph)
+            self.by_t[int(t)] = dict(ids=g.cell_id.to_numpy(), y=g.y_um.to_numpy() / self.px_um, x=g.x_um.to_numpy() / self.px_um,
+                                     z=g.z_um.to_numpy() if "z_um" in g else np.zeros(len(g)), ph=ph)
 
 
 class Imager:
-    """Renders frames of every channel from the ground truth. Deterministic: frame t of a given (config, truth, entropy) is always the
-    same, whatever other frames or error sources are rendered."""
+    """Renders frames of every channel from the ground truth. Deterministic: frame t of a given (config, truth, entropy, session) is
+    always the same, whatever other frames or error sources are rendered."""
 
     def __init__(self, cfg: dict, cells: pd.DataFrame | None = None, truth: pd.DataFrame | None = None,
                  spots: pd.DataFrame | None = None, occupancy: pd.DataFrame | None = None, entropy: int = 0,
-                 errors: ErrorSet | None = None):
+                 errors: ErrorSet | None = None, session: int | None = None, n_frames: int | None = None,
+                 channels: list[str] | None = None):
         self.cfg, self.entropy = cfg, int(entropy)
+        self.session = self.entropy if session is None else int(session)
         self.opt, self.acq = cfg["optics"], cfg["acquisition"]
         self.E = errors if errors is not None else ErrorSet(cfg)
         self.px_um = self.opt["pixel_size_nm"] / 1000.0
         self.shape = tuple(int(round(v / self.px_um)) for v in cfg["geometry"]["fov_um"])
-        self.T = int(self.acq["n_frames"])
+        self.T = int(n_frames if n_frames is not None else self.acq["n_frames"])
         self.exposure_s = float(self.acq["exposure_s"])
+        zs = self.acq.get("z_stack") or {}
+        self.nz = int(zs.get("n_slices", 0)) if zs.get("enabled") else 0
+        self.zstep = float(zs.get("step_um", 0.75))
+        self.zcenter = float(zs.get("center_um") or (cfg.get("geometry", {}).get("z") or {}).get("z_center_um", 7.0))
+        self.slice_time_s = float(zs.get("slice_time_s", 0.0))
+        self.projection = str(zs.get("projection", "max"))
+        self.zk = self.zcenter + (np.arange(self.nz) - (self.nz - 1) / 2) * self.zstep if self.nz else np.zeros(0)
         self.nucleus = _NucleusModel(cells, cfg, self.entropy, spots) if cells is not None else None
+        if self.nucleus is not None and self.nz and "z_um" not in cells.columns:
+            raise ValueError("z-stack imaging needs cells with z positions (stage2_cells.motion.add_z)")
         n_loci = int((cfg.get("loci") or {}).get("n_loci", 0)) if truth is not None else 0
         self.loci = [_LocusModel(truth, cfg, k, occupancy) for k in range(n_loci)]
         # channel index is fixed (nucleus 0, locus k -> k + 1) so a channel's noise does not depend on which others are rendered
-        self.channel_index = {"nucleus": 0, **{f"locus{k}": k + 1 for k in range(n_loci)}}
+        n_all = int((cfg.get("loci") or {}).get("n_loci", 0))
+        self.channel_index = {"nucleus": 0, **{f"locus{k}": k + 1 for k in range(max(n_loci, n_all))}}
         self.channels = ([] if self.nucleus is None else ["nucleus"]) + [f"locus{k}" for k in range(n_loci)]
+        if channels is not None:                    # e.g. calibration targets: channels without a ground-truth scene
+            self.channels = list(channels)
         # per-frame states that every channel shares or that do not depend on which sources are switched on
         # unit-size random series, drawn whether or not the source is on and scaled by the parameters at use time, so switching a source
         # on/off or changing its size never changes any other random draw
-        r = ERR.rng_fixed(self.entropy, "stage_drift")
-        self._drift_walk = np.vstack([np.zeros(2), np.cumsum(r.normal(0, 1, (self.T - 1, 2)), axis=0)])
+        r = ERR.rng_fixed(self.session, "stage_drift")
+        self._drift_walk = np.vstack([np.zeros(2), np.cumsum(r.normal(0, 1, (max(self.T - 1, 0), 2)), axis=0)])[: self.T]
         self._drift_jit = r.normal(0, 1, (self.T, 2))
-        self._focus_white = ERR.rng_fixed(self.entropy, "defocus").normal(size=self.T)
-        self._flick_white = {c: ERR.rng_fixed(self.entropy, "flicker", i).normal(size=self.T) for c, i in self.channel_index.items()}
+        rz = ERR.rng_fixed(self.session, "stage_drift", extra=1)          # axial drift: its own stream, the lateral series is unchanged
+        self._driftz_walk = np.concatenate([[0.0], np.cumsum(rz.normal(0, 1, max(self.T - 1, 0)))])[: self.T]
+        self._driftz_jit = rz.normal(0, 1, self.T)
+        self._focus_white = ERR.rng_fixed(self.session, "defocus").normal(size=self.T)
+        self._flick_white = {c: ERR.rng_fixed(self.session, "flicker", i).normal(size=self.T) for c, i in self.channel_index.items()}
+
+    @property
+    def is3d(self) -> bool:
+        return self.nz > 0
 
     # ------------------------------------------------------------------ per-frame ground truth of the imaging conditions
     @staticmethod
@@ -225,7 +354,14 @@ class Imager:
         d = self._drift_walk[int(t)] * E.par("stage_drift", "drift_px_per_frame") + self._drift_jit[int(t)] * E.par("stage_drift", "jitter_px")
         return float(d[0]), float(d[1])
 
+    def drift_z_um(self, t: int, E: ErrorSet | None = None) -> float:
+        E = E or self.E
+        if not self.nz or not E.on("stage_drift"):
+            return 0.0
+        return float(self._driftz_walk[int(t)] * E.par("stage_drift", "drift_z_um_per_frame") + self._driftz_jit[int(t)] * E.par("stage_drift", "jitter_z_um"))
+
     def defocus_um(self, t: int, E: ErrorSet | None = None) -> float:
+        """Focus error (um). 2D: the PSF widens; z-stack: every object appears displaced along z by this amount."""
         E = E or self.E
         if not E.on("defocus"):
             return 0.0
@@ -241,7 +377,20 @@ class Imager:
         s = E.par("chromatic_shift", "shift_px").get(channel, [0.0, 0.0])
         return float(s[0]), float(s[1])
 
+    def channel_shift_z_um(self, channel: str, E: ErrorSet | None = None) -> float:
+        E = E or self.E
+        if not self.nz or channel == "nucleus" or not E.on("chromatic_shift"):
+            return 0.0
+        return float(E.par("chromatic_shift", "shift_z_um").get(channel, 0.0))
+
+    def z_shift_um(self, channel: str, t: int, E: ErrorSet | None = None) -> float:
+        """Total axial displacement of the objects of `channel` in frame t: stage drift + focus error + chromatic shift."""
+        E = E or self.E
+        return self.drift_z_um(t, E) + self.defocus_um(t, E) + self.channel_shift_z_um(channel, E)
+
     def _defocus_sigma_px(self, t: int, E: ErrorSet) -> float:
+        if self.nz:                                                   # in a z-stack focus error is an axial shift, not extra blur
+            return 0.0
         z = self.defocus_um(t, E)
         if z == 0.0:
             return 0.0
@@ -250,15 +399,25 @@ class Imager:
         rho = abs(z) * na / np.sqrt(n * n - na * na)                      # geometric blur-disc radius (um)
         return 0.5 * rho / self.px_um
 
+    def _wavelength(self, channel: str) -> float:
+        return self.opt["wavelength_nm"] if channel == "nucleus" else self.cfg["loci"]["wavelengths_nm"][int(channel[5:])]
+
     def sigma_px(self, channel: str, t: int, E: ErrorSet | None = None) -> float:
-        """Total Gaussian blur of the channel in frame t (pixels): diffraction + defocus (+ locus motion), added in quadrature."""
+        """Total lateral Gaussian blur of the channel in frame t (pixels): diffraction + defocus (+ locus motion), added in quadrature."""
         E = E or self.E
-        wl = self.opt["wavelength_nm"] if channel == "nucleus" else self.cfg["loci"]["wavelengths_nm"][int(channel[5:])]
-        s2 = psf_sigma_px({**self.opt, "wavelength_nm": wl}) ** 2 if E.on("psf_blur") else 0.0
+        s2 = psf_sigma_px({**self.opt, "wavelength_nm": self._wavelength(channel)}) ** 2 if E.on("psf_blur") else 0.0
         s2 += self._defocus_sigma_px(t, E) ** 2
         if channel != "nucleus" and E.on("exposure_motion"):
             s2 += (E.par("exposure_motion", "locus_sigma_nm") / 1000.0 / self.px_um) ** 2
         return float(np.sqrt(s2))
+
+    def sigma_z_um(self, channel: str, E: ErrorSet | None = None) -> float:
+        """Axial Gaussian sigma of the channel (um): axial PSF (+ locus motion), at least a third of the slice spacing so a stack samples it."""
+        E = E or self.E
+        s2 = axial_sigma_um(self.opt, self._wavelength(channel)) ** 2 if E.on("psf_blur") else 0.0
+        if channel != "nucleus" and E.on("exposure_motion"):
+            s2 += (E.par("exposure_motion", "locus_sigma_nm") / 1000.0) ** 2
+        return float(max(np.sqrt(s2), 0.3 * self.zstep))
 
     def flicker(self, channel: str, t: int, E: ErrorSet | None = None) -> float:
         E = E or self.E
@@ -277,7 +436,7 @@ class Imager:
             return 1.0
         return float(np.exp(-self.acq["frame_interval_s"] * t / tau))
 
-    # ------------------------------------------------------------------ fixed fields
+    # ------------------------------------------------------------------ fixed fields (instrument / sample)
     def _flat(self, channel: str, E: ErrorSet) -> np.ndarray | None:
         if not E.on("flat_field"):
             return None
@@ -299,14 +458,34 @@ class Imager:
     def _camera(self, channel: str, E: ErrorSet) -> ERR.Camera:
         key = ("cam", channel)
         if key not in E.cache:
-            E.cache[key] = ERR.Camera(self.shape, E, self.opt, self.exposure_s, self.entropy, self.channel_index[channel])
+            E.cache[key] = ERR.Camera(self.shape, E, self.opt, self.exposure_s, self.entropy, self.channel_index[channel], self.session)
         return E.cache[key]
 
     # ------------------------------------------------------------------ one frame
+    def _points_at(self, model_by_t: dict, t: int, E: ErrorSet):
+        """Source positions (y px, x px, z um, photons) per slice for frame t, with the time skew of a z-stack if that source is on."""
+        d = model_by_t.get(int(t))
+        if d is None:
+            return None
+        n = len(d["ph"])
+        Y, X, Z = (np.tile(d[k], (max(self.nz, 1), 1)) for k in ("y", "x", "z"))
+        if self.nz and E.on("slice_skew") and self.slice_time_s > 0 and (int(t) + 1) in model_by_t:
+            nxt = model_by_t[int(t) + 1]
+            pos = {int(i): j for j, i in enumerate(nxt["ids"])}
+            idx = np.array([pos.get(int(i), -1) for i in d["ids"]])
+            ok = idx >= 0
+            frac = (np.arange(self.nz) * self.slice_time_s / float(self.acq["frame_interval_s"]))[:, None]
+            for arr, key in ((Y, "y"), (X, "x"), (Z, "z")):
+                dv = np.where(ok, nxt[key][np.clip(idx, 0, None)] - d[key], 0.0)
+                arr += frac * dv[None, :]
+        return Y, X, Z, d["ph"]
+
     def signal(self, channel: str, t: int, E: ErrorSet | None = None):
         """Noise-free photons per pixel of one channel in frame t, after optics, bleaching, illumination (no background, no crosstalk).
-        Returns (photons, labels or None)."""
+        Returns (photons, labels or None); 3D arrays (z, y, x) in a z-stack."""
         E = E or self.E
+        if self.nz:
+            return self._signal3d(channel, t, E)
         dy, dx = self.drift_px(t, E)
         cy, cx = self.channel_shift_px(channel, E)
         sig = self.sigma_px(channel, t, E)
@@ -317,10 +496,13 @@ class Imager:
             ph = (gaussian_filter(clean, sig) if sig > 0 else clean) * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach
             s = self.nucleus.spots_by_t.get(int(t))
             if s is not None:
-                ph = ph + bleach * _spots_from_arrays(self.shape, s[0] + dy, s[1] + dx, s[2], sig)
+                ph = ph + bleach * _spots_from_arrays(self.shape, s["y"] + dy, s["x"] + dx, s["ph"], sig)
         else:
-            y, x, p = self.loci[int(channel[5:])].by_t.get(int(t), (np.zeros(0), np.zeros(0), np.zeros(0)))
-            ph = _spots_from_arrays(self.shape, y + dy + cy, x + dx + cx, p * bleach, sig)
+            d = self.loci[int(channel[5:])].by_t.get(int(t)) if int(channel[5:]) < len(self.loci) else None
+            if d is None:
+                ph = np.zeros(self.shape, np.float32)
+            else:
+                ph = _spots_from_arrays(self.shape, d["y"] + dy + cy, d["x"] + dx + cx, d["ph"] * bleach, sig)
         if E.on("haze"):
             f = float(E.par("haze", "fraction"))
             ph = (1 - f) * ph + f * ERR.broad_blur(ph, E.par("haze", "sigma_um") / self.px_um)
@@ -330,8 +512,48 @@ class Imager:
         ph = ph * self.flicker(channel, t, E)
         return ph.astype(np.float32), lab
 
+    def _signal3d(self, channel: str, t: int, E: ErrorSet):
+        dy, dx = self.drift_px(t, E)
+        cy, cx = self.channel_shift_px(channel, E)
+        dz = self.z_shift_um(channel, t, E)
+        sig, sz = self.sigma_px(channel, t, E), self.sigma_z_um(channel, E)
+        fh = float(E.par("haze", "fraction")) if E.on("haze") else 0.0
+        sig_h = float(E.par("haze", "sigma_um")) / self.px_um if E.on("haze") else 1.0
+        sz_h = float(E.par("haze", "sigma_um")) if E.on("haze") else 1.0
+        bleach = self.bleach(channel, t, E)
+        zk, nz = self.zk, self.nz
+        lab = None
+        if channel == "nucleus":
+            m = int(np.ceil(self.zstep / 0.25))
+            dzf = self.zstep / m
+            n_pad = int(np.ceil(4 * sz / dzf))
+            zf = zk[0] - n_pad * dzf + dzf * np.arange((nz - 1) * m + 1 + 2 * n_pad)
+            vol, lab = self.nucleus.volume(t, (dy, dx), dz, zf, zk)
+            core = gaussian_filter(vol, (sz / dzf, sig, sig) if sig > 0 else (sz / dzf, 0, 0))[n_pad:n_pad + (nz - 1) * m + 1:m]
+            ph = (1 - fh) * core
+            if fh > 0:
+                ph = ph + fh * ERR.broad_blur3d(vol[n_pad:n_pad + (nz - 1) * m + 1:m], sig_h, sz_h / self.zstep)
+            ph = ph * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach
+            s = self.nucleus.spots_by_t.get(int(t))
+            if s is not None:
+                P = self._points_at(self.nucleus.spots_by_t, t, E)
+                ph = ph + bleach * _points3d(self.shape, zk, P[0] + dy, P[1] + dx, P[2] + dz, P[3], sig, sz, fh, sig_h, sz_h)
+        else:
+            k = int(channel[5:])
+            P = self._points_at(self.loci[k].by_t, t, E) if k < len(self.loci) else None
+            if P is None:
+                ph = np.zeros((nz, *self.shape), np.float32)
+            else:
+                ph = _points3d(self.shape, zk, P[0] + dy + cy, P[1] + dx + cx, P[2] + dz, P[3] * bleach, sig, sz, fh, sig_h, sz_h)
+        flat = self._flat(channel, E)
+        if flat is not None:
+            ph = ph * flat[None]
+        ph = ph * self.flicker(channel, t, E)
+        return ph.astype(np.float32), lab
+
     def frame(self, t: int, E: ErrorSet | None = None, channels: list[str] | None = None) -> dict:
-        """Render frame t. Returns {"images": {channel: ADU float32}, "labels": uint16 or None, "signals": {channel: photons}}."""
+        """Render frame t. Returns {"images": {channel: ADU float32}, "labels": uint16 or None, "signals": {channel: photons}}.
+        In a z-stack every array has a leading z axis."""
         E = E or self.E
         chans = [c for c in (channels or self.channels) if c in self.channels]
         need = set(chans)
@@ -353,16 +575,21 @@ class Imager:
             if not np.isscalar(af):
                 fl = self._flat(c, E)
                 af = af * (fl if fl is not None else 1.0) * self.flicker(c, t, E)
-            images[c] = self._camera(c, E)(m + bg + af, t)
+            cam = self._camera(c, E)
+            if self.nz:
+                images[c] = np.stack([cam(m[k] + bg + af, int(t) * Z_SLICE_KEY + k) for k in range(self.nz)])
+            else:
+                images[c] = cam(m + bg + af, t)
         return {"images": images, "labels": labels, "signals": sig}
 
     # ------------------------------------------------------------------ whole movie and its ground truth
     def render_movie(self, channels: list[str] | None = None, progress=None, dtype=np.float32) -> dict:
-        """All frames. Returns {"images": {channel: (T, ny, nx) dtype}, "labels": (T, ny, nx) uint16 or None}. dtype=np.uint16 stores
+        """All frames. Returns {"images": {channel: (T, [Z,] ny, nx) dtype}, "labels": (T, [Z,] ny, nx) uint16 or None}. dtype=np.uint16 stores
         the camera counts as 16-bit integers (half the memory)."""
         chans = [c for c in (channels or self.channels) if c in self.channels]
-        out = {c: np.zeros((self.T, *self.shape), dtype) for c in chans}
-        lab = np.zeros((self.T, *self.shape), np.uint16) if "nucleus" in chans else None
+        lead = (self.T, self.nz) if self.nz else (self.T,)
+        out = {c: np.zeros((*lead, *self.shape), dtype) for c in chans}
+        lab = np.zeros((*lead, *self.shape), np.uint16) if "nucleus" in chans else None
         integer = np.issubdtype(np.dtype(dtype), np.integer)
         for t in range(self.T):
             f = self.frame(t, channels=chans)
@@ -374,13 +601,20 @@ class Imager:
                 progress(f"  frame {t + 1}/{self.T}")
         return {"images": out, "labels": lab}
 
+    @staticmethod
+    def project(stack: np.ndarray, mode: str = "max") -> np.ndarray:
+        """Collapse the z axis (axis -3) of a (..., Z, Y, X) stack to 2D: 'max' (maximum-intensity projection) or 'mean'."""
+        return stack.max(axis=-3) if mode == "max" else stack.mean(axis=-3)
+
     def imaging_truth(self) -> pd.DataFrame:
-        """What the imaging conditions really were, per frame: stage drift (px), focus error (um), power factor of every channel."""
+        """What the imaging conditions really were, per frame: stage drift (px, um), focus error (um), power factor of every channel."""
         rows = []
         for t in range(self.T):
             dy, dx = self.drift_px(t)
             row = {"t": t, "drift_y_px": dy, "drift_x_px": dx, "defocus_um": self.defocus_um(t),
                    "defocus_sigma_px": self._defocus_sigma_px(t, self.E)}
+            if self.nz:
+                row["drift_z_um"] = self.drift_z_um(t)
             for c in self.channels:
                 row[f"flicker_{c}"] = self.flicker(c, t)
                 row[f"bleach_{c}"] = self.bleach(c, t)
@@ -389,33 +623,49 @@ class Imager:
         return pd.DataFrame(rows)
 
     def static_truth(self) -> dict:
-        """Constant imaging properties: per-channel shift and blur, pixel size, which sources were on and with what parameters."""
-        return {"pixel_size_um": self.px_um, "exposure_s": self.exposure_s,
-                "channel_shift_px": {c: self.channel_shift_px(c) for c in self.channels},
-                "sources": self.E.summary(), "master_switch": self.E.master}
+        """Constant imaging properties: per-channel shift and blur, pixel size, z-stack geometry, which sources were on and their parameters."""
+        out = {"pixel_size_um": self.px_um, "exposure_s": self.exposure_s,
+               "channel_shift_px": {c: self.channel_shift_px(c) for c in self.channels},
+               "sources": self.E.summary(), "master_switch": self.E.master}
+        if self.nz:
+            out["z_stack"] = {"n_slices": self.nz, "step_um": self.zstep, "z_positions_um": [float(z) for z in self.zk],
+                              "slice_time_s": self.slice_time_s, "projection": self.projection,
+                              "axial_sigma_um": {c: self.sigma_z_um(c) for c in self.channels},
+                              "channel_shift_z_um": {c: self.channel_shift_z_um(c) for c in self.channels}}
+        return out
 
 
 # ---------------------------------------------------------------------- ground truth in image coordinates
-def truth_in_image(truth: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: float, channel_shift_px: dict | None = None) -> pd.DataFrame:
-    """Locus truth moved into image coordinates: + stage drift (y_um, x_um; the drift-corrected truth to score a localizer against)
-    and, if `channel_shift_px` is given, extra columns y_drawn_um / x_drawn_um = where the spot is really drawn (drift + chromatic shift)."""
-    d = imaging_truth.set_index("t")[["drift_y_px", "drift_x_px"]]
+def truth_in_image(truth: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: float, channel_shift_px: dict | None = None,
+                   channel_shift_z_um: dict | None = None) -> pd.DataFrame:
+    """Locus truth moved into image coordinates: + stage drift (y_um, x_um, z_um; the drift-corrected truth to score a localizer against)
+    and, if `channel_shift_px` is given, extra columns y_drawn_um / x_drawn_um (/ z_drawn_um) = where the spot is really drawn (drift +
+    chromatic shift + focus error along z)."""
+    d = imaging_truth.set_index("t")
     out = truth.copy()
-    dy, dx = d.loc[out.t, "drift_y_px"].to_numpy() * px_um, d.loc[out.t, "drift_x_px"].to_numpy() * px_um
-    out["y_um"] = out.y_um + dy
-    out["x_um"] = out.x_um + dx
+    t = out.t.to_numpy()
+    out["y_um"] = out.y_um + d.loc[t, "drift_y_px"].to_numpy() * px_um
+    out["x_um"] = out.x_um + d.loc[t, "drift_x_px"].to_numpy() * px_um
+    three_d = "z_um" in out.columns and "drift_z_um" in d.columns
+    if three_d:
+        out["z_um"] = out.z_um + d.loc[t, "drift_z_um"].to_numpy()
     if channel_shift_px is not None:
         sh = np.array([channel_shift_px.get(f"locus{int(k)}", (0.0, 0.0)) for k in out.locus_id], float) * px_um
         out["y_drawn_um"], out["x_drawn_um"] = out.y_um + sh[:, 0], out.x_um + sh[:, 1]
+        if three_d:
+            shz = np.array([(channel_shift_z_um or {}).get(f"locus{int(k)}", 0.0) for k in out.locus_id], float)
+            out["z_drawn_um"] = out.z_um + shz + d.loc[t, "defocus_um"].to_numpy()
     return out
 
 
 def cells_in_image(cells: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: float) -> pd.DataFrame:
     """cells.csv with positions moved by the stage drift, i.e. where the nuclei really are in the image."""
-    d = imaging_truth.set_index("t")[["drift_y_px", "drift_x_px"]]
+    d = imaging_truth.set_index("t")
     out = cells.copy()
     out["y_um"] = out.y_um + d.loc[out.t, "drift_y_px"].to_numpy() * px_um
     out["x_um"] = out.x_um + d.loc[out.t, "drift_x_px"].to_numpy() * px_um
+    if "z_um" in out.columns and "drift_z_um" in d.columns:
+        out["z_um"] = out.z_um + d.loc[out.t, "drift_z_um"].to_numpy()
     return out
 
 
