@@ -29,14 +29,14 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
     speeds = sorted({2, 5, 10, 20, 40, int(fps)})
     options = "".join(f'<option value="{s}">{s} fps</option>' for s in speeds)
     html = f"""
-<div style="font-family:system-ui,sans-serif;color:#444">
+<div style="font-family:system-ui,sans-serif;color:#444;max-width:{column_width_px}px;margin:0 auto">
   <div id="ld{key}" style="font-size:13px;margin-bottom:6px;color:#92400e">&#8987; Loading frames&hellip; <span id="ln{key}">0 / {len(frames)}</span>
     <div style="height:5px;background:#e5e7eb;border-radius:3px;margin-top:3px"><div id="lbar{key}" style="height:5px;width:0%;background:#0f766e;border-radius:3px"></div></div></div>
   <img id="im{key}" style="width:100%;display:block;border-radius:4px;background:#000" />
-  <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+  <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
     <button id="pp{key}" disabled style="padding:4px 14px;font-size:14px;cursor:wait;min-width:150px">&#8987; Loading&hellip;</button>
-    <input id="sl{key}" type="range" min="0" max="{len(frames) - 1}" value="0" style="flex:1" />
-    <span id="lb{key}" style="min-width:210px;font-size:13px"></span>
+    <input id="sl{key}" type="range" min="0" max="{len(frames) - 1}" value="0" style="flex:1;min-width:160px" />
+    <span id="lb{key}" style="min-width:150px;font-size:13px"></span>
     <select id="fp{key}" style="font-size:13px">{options}</select>
   </div>
 </div>
@@ -73,5 +73,5 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
   show(0); setInterval(tick, 20);
 }})();
 </script>"""
-    height = int(column_width_px * h / w) + 105
+    height = int(column_width_px * h / w) + 150       # image (width capped at column_width_px, so its height is known) + loading line + controls
     components.html(html, height=height, scrolling=False)
