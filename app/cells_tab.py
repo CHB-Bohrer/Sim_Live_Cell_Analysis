@@ -148,7 +148,8 @@ def render(st, run_path: Path, cfg: dict):
             with st.spinner("Rendering frames…"):
                 cd = load_cell(sdir, cid)
                 pc_ = pos[pos.cell_id == cid] if len(pos) else None
-                fr_list, lb_list = single_cell_frames(cd.channels, cd.mask, cd.frames, loc_ch, pc_, truth, px_um)
+                tc_ = truth[truth.cell_id == cid] if truth is not None else None      # this cell's loci only (neighbours' loci can fall in the crop)
+                fr_list, lb_list = single_cell_frames(cd.channels, cd.mask, cd.frames, loc_ch, pc_, tc_, px_um)
             show_player(fr_list, lb_list, fps=10, column_width_px=800, key="onecell")
     ci = st.slider("Frame (this cell)", 0, len(frames) - 1, 0, key="cell_idx")
     t_now, fr_now = int(frames.t.iloc[ci]), frames.iloc[ci]

@@ -51,7 +51,7 @@ flowchart TD
         S4A["<b>Find the cells</b> (stage 4a)<br/>Draw an outline around every nucleus<br/>in every frame (Cellpose, GPU)"]:::built
         S4B["<b>Follow each cell through time</b> (stage 4b)<br/>Decide which outline in frame 2<br/>is the same cell as in frame 1<br/>(Trackastra, GPU)"]:::built
         S5["<b>Cut out each cell</b> (stage 5)<br/>Make one small movie per cell,<br/>centred on it, so cells can be<br/>analyzed side by side in parallel"]:::built
-        S6["<b>Locate the loci</b> (stage 6)<br/>In each cell's movie, find the<br/>position of each locus in every frame.<br/>NOW: a simple placeholder.<br/>LATER: your analysis."]:::standin
+        S6["<b>Locate the loci</b> (stage 6)<br/>In each cell's movie, find the<br/>position of each locus in every frame.<br/>NOW: placeholder spot finder<br/>(Bennabi 2025 steps + Gaussian fit,<br/>scored against the truth).<br/>LATER: your analysis."]:::standin
     end
 
     subgraph GRADE["③ GRADING: compare with the answer key"]

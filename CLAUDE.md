@@ -108,7 +108,8 @@ branch, not main": that was a misreading of the user's intent.)
   functions.
 - Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
   on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
-  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Cells, Images, Transcription, Probes, Library, Chromatin, Config.
+  user's server once). Tabs: Movie, Metrics, Trajectories, Scans, Cells, Spot finding, Images, Calibration, Stage & fiducials, Transcription, Probes,
+  Library, Chromatin, Config.
 
 ## Status (update this section every session)
 Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
@@ -117,8 +118,8 @@ Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclea
 (per-cell isolation: `stage5_linking/isolate.py`, `celldata.py`), stage 7a (CTC metrics via traccuracy + own
 identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, dashboard (tabs incl. Scans, Cells).
 STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per nucleus doing confined diffusion in
-the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/localize.py` (brightest-spot localizer, placeholder for
-the user's analysis). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
+the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/spots.py` + `localize.py` / `localize3d.py` (placeholder for the user's
+analysis, but now a measured one: see "Spot finding" below). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
 Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (PLACEHOLDER 50; NOT rescaled to the nucleus) and placed at a random territory centre per cell (re-drawn until all loci stay inside the nucleus in every frame), `block_duration_s` is a PLACEHOLDER) is unit-tested with a fake library on CPU but NOT yet run end-to-end with a real library or on the GPU machine.
 Dashboard redesign + library monitor (2026-10-08, built on the cloud container with fake data, NOT yet seen on the Windows machine
 with a real GPU run): `.streamlit/config.toml` + `app/style.py` (one theme, CSS, matplotlib defaults), new 🗂 Library tab
@@ -239,7 +240,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 85 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 100 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -259,8 +260,8 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   truth in y_um/x_um + `y_drawn_um/x_drawn_um` = where the spot is drawn, incl. chromatic shift), `imaging_errors.json`. Stage 6 localization is scored against
   `loci_truth_image.csv` (drift cannot be known by an analysis; the chromatic shift IS counted as error). Dashboard Cells tab/trajectories use the image-space files.
 - Findings (1 seed each, placeholder error sizes; do not over-read): default hard tracking config, 3 seeds: CHOTA 0.909 with errors vs 0.903 without (id switches
-  14/23/23 vs 14/21/25) -> bright nuclear images are robust to these errors. Loci (library smoke, MS2 + probes on, seed 11): the placeholder brightest-spot
-  localizer's detection rate falls 99.9% -> 85.1% and its RMS error 0.019 -> 2.05 um (median 16 -> 52 nm, p95 5.8 um) with all errors on: hot pixels, cosmic rays and
+  14/23/23 vs 14/21/25) -> bright nuclear images are robust to these errors. Loci (library smoke, MS2 + probes on, seed 11): the OLD placeholder brightest-spot
+  localizer's (replaced 2026-10-11, see "Spot finding") detection rate falls 99.9% -> 85.1% and its RMS error 0.019 -> 2.05 um (median 16 -> 52 nm, p95 5.8 um) with all errors on: hot pixels, cosmic rays and
   the cross-talk ghost of the nucleus fool a "brightest spot in the mask" detector. That is the kind of failure this framework is meant to expose; the user's own
   analysis will replace the placeholder.
 - Dashboard: new 🖼 Images tab (`app/images_tab.py`): (1) recorded frame per channel with true outlines / IDs / locus positions (cyan o) / drawn positions (red x) /
@@ -284,8 +285,8 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   OpenMP runtime; importing torch after that fails, see the gotcha above) and analyses the loci again with the calibration applied (`loci_positions_cal.csv`, `truth_calibrated`, `truth_3d_calibrated`).
 - Results (placeholder instrument; one seed each): 53 of 53 compared quantities within tolerance (gain 0.3%, read noise 0.1%, hot pixels 40/40 and 0 false, vignetting 0.1496 vs 0.15, chromatic shift
   0.001 px / 0.0003 um, PSF width 0.3%, drift 0.001 px); the cosmic-ray rate is only roughly known. Applying it: 2D library run (seed 11) locus median error 54 -> 27 nm, p95 4.7 um -> 76 nm, rms 1.57 -> 0.16 um;
-  3D run (seed 5) median 3D error 193 -> 90 nm but p95 stays ~4 um because cosmic rays (independent in every plane, ~0.75 events per stack per channel) fool the brightest-voxel detector. A real analysis needs
-  outlier rejection over time/planes.
+  3D run (seed 5) median 3D error 193 -> 90 nm but p95 stays ~4 um because cosmic rays (independent in every plane, ~0.75 events per stack per channel) fool the brightest-voxel detector (OLD finder;
+  the 2026-10-11 spot finder's track choice addresses this: see "Spot finding").
 - Dashboard: 🖼 Images has a z-slice slider / projection toggle, truth markers with their z offset, and x-z / y-z side views; new 🎯 Calibration tab (estimate vs truth table, dark / flat / bead panels, photon transfer
   curve, before-after scores); sidebar loci form has field of view, 3D z-stacks (planes, spacing, confocal) and calibration switches (warns about disk size, refuses > 12 GB).
 - Piezo + fiducials (2026-10-11, docs/CALIBRATION_AND_3D.md section 3): source `piezo` (true plane heights = nominal + random + bow + hysteresis + settling lag; alternating scan direction; truth
@@ -294,7 +295,33 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   cannot measure plane errors at nuclear height; only the piezo log can. RNG gotcha: `errors.INDEX` is FROZEN (new sources get the next number) so adding a source to ORDER does not change old noise.
   With the placeholder 30 nm repeatability the piezo effect is small next to the placeholder 3D locus finder's ~80 nm noise (beads: height wander 84 -> 65 nm; log: 83 -> 80 nm).
 - Not done: real (measured) values for any placeholder; 3D transcription spots in thick tissue; z-dependent chromatic focal shift beyond a constant offset; cell isolation in 3D (stage 5 stays 2D on projections);
-  3D tracking; a cosmic-ray-robust localizer; calibration of the quantum efficiency and of the nuclear brightness; lens distortion / field-dependent chromatic shift (shifts are constant over the field).
+  3D tracking; calibration of the quantum efficiency and of the nuclear brightness; lens distortion / field-dependent chromatic shift (shifts are constant over the field).
+
+## Spot finding (stage 6; built 2026-10-11; full description + numbers in docs/SPOT_FINDING.md)
+- The user asked to localize spots the way Bennabi et al. 2025 did (Sci. Adv. 11, eadv7790; code github.com/gregorlab/SizeProject2024,
+  `modules/raw_live_analysis.py`, read 2026-10-11). That paper finds Mesp2 expression POLES (hundreds of px), not diffraction-limited spots: rank median 7x7 ->
+  one threshold per movie (median of per-frame Otsu, or th=70) -> area (fill holes, remove < 5000 px, erode) -> Gaussian sigma 20 -> peak_local_max(min_distance
+  100). `spots.py` implements those steps rescaled to spots (median 3x3, Gaussian 1 px, min area 3 px, min distance 4 px) and ADDS: local background (9x9 median
+  subtracted), threshold on the smoothed image (`threshold_on: smoothed`; the paper's order = `filtered`), candidate choice `select: track` (nearest the locus'
+  median position in +-3 frames, gate 8 px; skips one-frame cosmic rays), Gaussian-fit refinement. Config `locus_analysis:` (method `median_peaks` default,
+  `brightest` = the old placeholder); the sidebar loci form has method / choice / min_snr controls.
+- Measured (4 runs, 1 seed each; `scripts/compare_localizers.py --run <run>` re-runs stage 6 only on saved crops and writes
+  `stage6_analysis/method_comparison.csv` + `comparison/<variant>.csv`): library run (probes+MS2, all errors) calibrated: found 82.2% -> 90.7%, wrong-object picks
+  0.13% -> 0.06%, median 27 -> 25 nm; uncalibrated wrong picks 9.8% -> 0.06%, p95 4.7 um -> 96 nm. 3D run: 2D-on-projection wrong picks 4.7% -> 0% (cosmic rays
+  of all 17 planes end up in the max projection), 3D p95 320 -> 183 nm. The paper's literal pipeline (cell background, Otsu, brightest, integer pixel) finds 100%
+  but picks the wrong object 15% of the time (Otsu rejects nothing for a single spot); one background per cell drops detection to 56% (nuclear cross-talk ghost in
+  locus 0's channel); integer positions cost ~35 nm.
+- Scores (`score_localization[_3d]`) now: detection over loci WITH light (`photons` > 0, new column of `loci_truth_image.csv` from `Imager.locus_photons()`),
+  `n_false_on_dark`, `frac_far` (> 0.5 um = wrong object), `rms_error_near_um`. Old runs lack `photons`: `compare.truth_with_photons` rebuilds it.
+- Logic errors fixed in this review: u/v measured from the rounded crop centre (<= 0.5 px); `min_sep_px` silently ignored; loci without light counted as misses;
+  single-cell player drew OTHER cells' true loci and put markers half a pixel off (PIL pixel-corner convention); 5x5 centroid pixel-locking (now Gaussian fit).
+- Dashboard 🔎 Spot finding tab (`app/spots_tab.py`): (1) step table paper vs here vs this run, (2) every intermediate image for any cell / colour / frame with
+  editable settings (form + Apply), problem-frame jump list, per-frame error and candidate plots, (3) run scores + error histogram, (4) "Compare methods" button
+  (shells out to the script) + table and bar charts. Uses `localize.analyse_channel` / `channel_inputs`, so it runs exactly the pipeline's code.
+- Open: `median_z: auto` keeps the axial median off at 0.8 um planes (it helped with bright spots: 0.3% -> 0% wrong; would hurt dim spots); dim spots (100-200
+  photons) found 71%; all numbers are 1 seed each with placeholder brightness; sweep.py still reports tracking metrics only (locus metrics not in sweeps yet).
+- Gotcha: scripts that call `map_cells` with workers need `if __name__ == "__main__":` (Windows spawn re-imports the script). CLAUDE.md had one stray cp1252 byte
+  (fixed); keep it UTF-8.
 
 ## Dashboard walk-through findings (2026-10-09)
 - Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,
@@ -316,6 +343,6 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - Literature checked against PMC full texts, see docs/PLAN_transcription.md: TFF1 ON 16 min (not 6), burst period 66-86 min, 1.5 transcripts/burst;
   Pol II 2.6 kb/min, 3' dwell 116 s (our default 30 s). Defaults not changed: needs the user's choice of gene.
 
-- Players (app/player.py): every in-browser movie now shows 'Loading frames� n / N' with a progress bar and a disabled button, then 'Ready: press Play'. Chromatin player: the grey circle is the simulation's confining sphere (the territory, NOT the nucleus); caption and in-image label say so. The territory is ~1-1.5 um across at 50 nm/unit vs a 12 um nucleus.
+- Players (app/player.py): every in-browser movie now shows 'Loading frames… n / N' with a progress bar and a disabled button, then 'Ready: press Play'. Chromatin player: the grey circle is the simulation's confining sphere (the territory, NOT the nucleus); caption and in-image label say so. The territory is ~1-1.5 um across at 50 nm/unit vs a 12 um nucleus.
 
 - Display scaling (2026-10-11): single-cell and all-cells players scale each locus colour once for the whole movie from the cell's own mask region (fastview.movie_limits); before, each frame was scaled to the crop maximum, so cosmic rays and fiducial beads in the crop corners made the real spots look missing (spot < 30% of crop max in 70-92% of frames in 3D runs). Measured locus D = MSD/(4t) at 10 s: library loci 0.0017-0.0019 um2/s (falls to 0.0011 at 100 s, nm_per_unit 50 and block_duration_s 10 are PLACEHOLDERS), toy loci 0.0029; the nucleus itself moves 0.43 um per frame.

@@ -1,9 +1,16 @@
 """Stage 6 PLACEHOLDER (3D): locate every locus in the full z-stack of one isolated cell.
 
 The 2D crops written by stage 5 (maximum-intensity projections) give each cell's window in every frame (`frames.csv`: crop_y0, crop_x0)
-and its mask; this module re-reads the same window from the full z-stack TIFFs (memory-mapped, one frame at a time) and finds, per locus
-colour, the brightest voxel inside the (dilated) cell mask after smoothing in 3D, then refines it with an intensity-weighted centroid.
-Positions: lab pixels (y, x) and height z_um (from the slice positions). `score_localization_3d` compares with the true 3D positions.
+and its mask; this module re-reads the same window from the full z-stack TIFFs (memory-mapped, one frame at a time). Methods as in 2D
+(`localize.py`): `median_peaks` (default; Bennabi et al. 2025 steps in 3D: median filter with a (median_z, k, k) footprint, one threshold
+per movie, area above it, 3D Gaussian smoothing, 3D local maxima, brightest candidate refined by a 3D Gaussian fit) or `brightest` (the
+original: brightest voxel after 3D smoothing, refined by a centroid). Positions: lab pixels (y, x) and height z_um (nominal slice positions).
+`score_localization_3d` compares with the true 3D positions.
+
+Axial median: a cosmic ray hits ONE plane, a real spot spans several planes when they are closer than the axial PSF width. With
+median_z = 3 the median over neighbouring planes removes single-plane events but keeps finely sampled spots; with coarse planes (spacing >
+axial sigma) it would remove the spot too. median_z = "auto" chooses 3 when the spacing is at most the axial sigma (`axial_sigma_um`, from the
+microscope's optics), else 1.
 """
 from __future__ import annotations
 
@@ -12,10 +19,16 @@ import pandas as pd
 import tifffile
 from scipy.ndimage import gaussian_filter
 
+from simlive.stage6_analysis import spots as SP
+
+COLUMNS = ["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr", "n_candidates", "fit_ok"]
+THRESHOLD_FRAMES = 25          # the movie threshold (median over frames) is taken from at most this many evenly spaced frames
+MAX_TRACK_CANDIDATES = 5       # select: track considers the 5 brightest candidates of each frame
+
 
 def _crop3d(vol, y0: int, x0: int, S: int, pad_value: float) -> np.ndarray:
     nz, ny, nx = vol.shape
-    out = np.full((nz, S, S), pad_value, dtype=float)
+    out = np.full((nz, S, S), pad_value, dtype=np.float32)
     ya, yb, xa, xb = max(y0, 0), min(y0 + S, ny), max(x0, 0), min(x0 + S, nx)
     if yb > ya and xb > xa:
         out[:, ya - y0:yb - y0, xa - x0:xb - x0] = vol[:, ya:yb, xa:xb]
@@ -23,7 +36,7 @@ def _crop3d(vol, y0: int, x0: int, S: int, pad_value: float) -> np.ndarray:
 
 
 def _detect_one_3d(vol: np.ndarray, region2d: np.ndarray, sigma_xy: float, sigma_z: float, min_snr: float, win: int = 2):
-    """Brightest spot inside the region (a 2D mask applied to every plane) -> (z_index, y, x, snr) or None."""
+    """Original placeholder: brightest spot inside the region (a 2D mask applied to every plane) -> (z_index, y, x, snr) or None."""
     region = np.broadcast_to(region2d[None], vol.shape)
     vals = vol[region]
     if vals.size < 20:
@@ -44,39 +57,79 @@ def _detect_one_3d(vol: np.ndarray, region2d: np.ndarray, sigma_xy: float, sigma
     return ((w * (zz + z0)).sum() / w.sum(), (w * (yy + y0)).sum() / w.sum(), (w * (xx + x0)).sum() / w.sum(), work[iz, iy, ix] / noise)
 
 
-def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, smooth_sigma_px: float = 1.0, smooth_sigma_z: float = 0.8,
-                     min_snr: float = 5.0, dilate_px: int = 2, calib: str | None = None, **_) -> pd.DataFrame:
+def median_z_for(median_z, step_um: float, axial_sigma_um: float | None) -> int:
+    """Resolve median_z = "auto": 3 (axial median removes single-plane events) when the planes sample the axial PSF finely, else 1."""
+    if median_z == "auto":
+        return 3 if axial_sigma_um and step_um <= axial_sigma_um else 1
+    return int(median_z)
+
+
+def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: str = "median_peaks", dilate_px: int = 2,
+                     calib: str | None = None, axial_sigma_um: dict | None = None, **kw) -> pd.DataFrame:
     """Locate every locus in every frame of one isolated cell from the full z-stacks. `stacks`: {channel: path of (T, Z, Y, X) TIFF}.
     With `calib` (folder of a saved Calibration) the crops are dark/flat/hot-pixel corrected and the measured chromatic shift (lateral and
-    axial) of the colour is subtracted from the detected position."""
-    from simlive.stage6_analysis.localize import _load_calibration
+    axial) of the colour is subtracted from the detected position. `axial_sigma_um`: {channel: nominal axial PSF sigma} for median_z: auto."""
+    from simlive.stage6_analysis.localize import _load_calibration, centroid_in_crop, spot_params
 
     cal = _load_calibration(calib) if calib else None
     chans = cell.locus_channels[:n_loci]
     if not chans:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=COLUMNS)
     reg = cell.analysis_mask(dilate_px)
     fr = cell.frames.reset_index(drop=True)
     S = cell.crop_size
     z = np.asarray(z_um, float)
     step = float(np.mean(np.diff(z))) if len(z) > 1 else 1.0
+    p = spot_params(kw)
     rows = []
     for k, name in enumerate(chans):
         st = tifffile.memmap(stacks[name], mode="r")
         pad = float(np.percentile(np.asarray(st[0, len(z) // 2]), 1))
-        for i, r in enumerate(fr.itertuples()):
-            vol = _crop3d(np.asarray(st[int(r.t)]), int(r.crop_y0), int(r.crop_x0), S, pad)
-            if cal is not None:
-                vol = cal.correct(vol, name, int(r.crop_y0), int(r.crop_x0)).astype(float)
-            d = _detect_one_3d(vol, reg[i], smooth_sigma_px, smooth_sigma_z, min_snr)
+
+        def volume(i, r):
+            v = _crop3d(np.asarray(st[int(r.t)]), int(r.crop_y0), int(r.crop_x0), S, pad)
+            return cal.correct(v, name, int(r.crop_y0), int(r.crop_x0)).astype(np.float32) if cal is not None else v
+
+        frames = list(fr.itertuples())
+        if method == "brightest":
+            dets = []
+            for i, r in enumerate(frames):
+                d = _detect_one_3d(volume(i, r), reg[i], kw.get("smooth_sigma_px", 1.0), kw.get("smooth_sigma_z", 0.8), kw.get("min_snr", 5.0))
+                dets.append(None if d is None else (d[0], d[1], d[2], d[3], 1, True))
+        elif method == "median_peaks":
+            mz = median_z_for(p["median_z"], step, (axial_sigma_um or {}).get(name))
+            pz = {**p, "median_z": mz}
+            thr = None
+            if p["threshold_scope"] == "movie":           # pass 1: per-frame thresholds on evenly spaced frames, median over them
+                pick = np.unique(np.linspace(0, len(frames) - 1, min(THRESHOLD_FRAMES, len(frames))).round().astype(int))
+                vals = [SP.frame_threshold(SP.prefilter(volume(i, frames[i]), reg[i], **pz), reg[i], p["threshold"], p["min_snr"], p["threshold_on"])
+                        for i in pick if reg[i].sum() >= 20]
+                thr = float(np.median(vals)) if vals else None
+            # pass 2: candidates of every frame, refined (only the brightest unless select: track, which needs the alternatives too)
+            n_keep = MAX_TRACK_CANDIDATES if p["select"] == "track" else 1
+            refined = []
+            for i, r in enumerate(frames):
+                c = SP.candidates(volume(i, r), reg[i], thr, None, **pz) if reg[i].sum() >= 20 else None
+                refined.append([] if c is None else [SP.refine_peak(c, j, **pz) for j in range(min(len(c["peaks"]), n_keep))])
+            if p["select"] == "track":
+                centre = centroid_in_crop(fr, S)
+                choice = SP.select_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined], centre,
+                                         int(p["track_window"]), float(p["track_gate_px"]))
+            else:
+                choice = [0 if rr else None for rr in refined]
+            dets = [None if j is None else (*rr[j]["pos"], rr[j]["snr"], rr[j]["n_candidates"], rr[j]["fit_ok"]) for rr, j in zip(refined, choice)]
+        else:
+            raise ValueError(f"unknown locus_analysis.method {method!r}")
+        for i, d in enumerate(dets):
             if d is None:
                 continue
+            r = frames[i]
             y, x, zz = r.crop_y0 + d[1], r.crop_x0 + d[2], z[0] + d[0] * step
             if cal is not None:
                 sy, sx = cal.shift_px(name)
                 y, x, zz = y - sy, x - sx, zz - cal.shift_z_um(name)
-            rows.append((cell.cell_id, r.t, k, y, x, zz, d[3]))
-    return pd.DataFrame(rows, columns=["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr"])
+            rows.append((cell.cell_id, int(r.t), k, y, x, zz, d[3], d[4], bool(d[5])))
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 def locus_distances_3d(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
@@ -88,18 +141,26 @@ def locus_distances_3d(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
     return d.rename("dist_um").reset_index()
 
 
-def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float) -> tuple[pd.DataFrame, dict]:
+def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: float = 0.5) -> tuple[pd.DataFrame, dict]:
     """Compare 3D detections with the true positions (same cell, frame, locus; truth in image coordinates, i.e. drift-corrected).
-    err_um = 3D error, err_xy_um = lateral error, err_z_um = signed axial error."""
+    err_um = 3D error, err_xy_um = lateral error, err_z_um = signed axial error. Rates and far fraction as in `score_localization`."""
+    from simlive.stage6_analysis.localize import _visible
+
     est = pos.assign(est_y_um=pos.lab_y_px * px_um, est_x_um=pos.lab_x_px * px_um)
-    j = est.merge(truth, on=["cell_id", "t", "locus_id"], how="inner", suffixes=("", "_true"))
+    tr = truth.assign(visible=_visible(truth))
+    j = est.merge(tr, on=["cell_id", "t", "locus_id"], how="inner", suffixes=("", "_true"))
     j["err_xy_um"] = np.hypot(j.est_y_um - j.y_um, j.est_x_um - j.x_um)
     j["err_z_um"] = j.z_um - j.z_um_true
     j["err_um"] = np.sqrt(j.err_xy_um**2 + j.err_z_um**2)
-    err = j[["cell_id", "t", "locus_id", "err_um", "err_xy_um", "err_z_um"]]
+    err = j[["cell_id", "t", "locus_id", "err_um", "err_xy_um", "err_z_um", "visible"]]
     if err.empty:
         return err, {"n_detections": 0}
-    return err, {"n_detections": len(err), "detection_rate": len(err) / len(truth),
-                 "rms_error_um": float(np.sqrt((err.err_um ** 2).mean())), "median_error_um": float(err.err_um.median()),
-                 "p95_error_um": float(err.err_um.quantile(0.95)), "rms_xy_um": float(np.sqrt((err.err_xy_um ** 2).mean())),
-                 "rms_z_um": float(np.sqrt((err.err_z_um ** 2).mean())), "median_z_um": float(err.err_z_um.median())}
+    ok = err[err.visible]
+    n_vis = int(tr.visible.sum())
+    near = ok.err_um <= far_um
+    return err, {"n_detections": len(err), "detection_rate": len(ok) / max(n_vis, 1), "n_visible": n_vis,
+                 "n_false_on_dark": int((~err.visible).sum()),
+                 "rms_error_um": float(np.sqrt((ok.err_um ** 2).mean())), "median_error_um": float(ok.err_um.median()),
+                 "p95_error_um": float(ok.err_um.quantile(0.95)), "rms_xy_um": float(np.sqrt((ok.err_xy_um ** 2).mean())),
+                 "rms_z_um": float(np.sqrt((ok.err_z_um ** 2).mean())), "median_z_um": float(ok.err_z_um.median()),
+                 "frac_far": float((~near).mean()), "rms_error_near_um": float(np.sqrt((ok.err_um[near] ** 2).mean())) if near.any() else np.nan}

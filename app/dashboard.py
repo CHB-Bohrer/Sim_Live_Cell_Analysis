@@ -269,6 +269,17 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_tx = st.checkbox("Model distance-dependent transcription: MS2 spots (settings from the ⚡ Transcription tab)", False, key="l_tx",
                            help="Adds bright MS2 spots at the promoter in the nuclear channel; the promoter turns ON more often when the "
                                 "enhancer is close. Works best with the saved chromatin library (real distances).")
+        st.markdown("**Spot finding (stage 6)**")
+        st.caption("How each locus is found in each cell. The 🔎 Spot finding tab shows every step and compares methods.")
+        l_meth = st.radio("Method", ["median_peaks", "brightest"], key="l_meth", horizontal=True,
+                          format_func={"median_peaks": "Bennabi 2025 steps (median, threshold, peaks)", "brightest": "Original: brightest pixel"}.get,
+                          help="median_peaks: median filter, local background, one threshold per movie, local maxima, Gaussian fit "
+                               "(adapted from Bennabi et al. 2025, Sci. Adv.). brightest: the original placeholder.")
+        l_sel = st.radio("Which candidate is the locus", ["track", "brightest"], key="l_sel", horizontal=True,
+                         format_func={"track": "Consistent with neighbouring frames", "brightest": "Brightest"}.get,
+                         help="Consistent with neighbouring frames skips one-frame events such as cosmic rays (our addition, not in the paper).")
+        l_snr = st.slider("Detection threshold (signal-to-noise)", 3.0, 10.0, 5.0, 0.5, key="l_snr",
+                          help="Lower finds dimmer spots but risks picking noise peaks.")
         l_ie = error_controls("loci")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
@@ -316,7 +327,8 @@ if go_loci:
     common = [f"seed={l_seed}", f"cells.n_cells={l_cells}", f"acquisition.n_frames={l_frames}",
               f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
               f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", f"geometry.fov_um=[{l_fov}, {l_fov}]", *l_ie,
-              f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}"]
+              f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}",
+              f"locus_analysis.method={l_meth}", f"locus_analysis.select={l_sel}", f"locus_analysis.min_snr={l_snr}"]
     if l_conf:
         common.append("optics.modality=confocal")
     est_gb = 0.0
@@ -431,8 +443,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_img, tab_cal, tab_stage, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🖼 Images", "🎯 Calibration", "📍 Stage & fiducials", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_spots, tab_img, tab_cal, tab_stage, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🔎 Spot finding", "🖼 Images", "🎯 Calibration", "📍 Stage & fiducials", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -546,7 +558,7 @@ with tab_cfg:
                     "nucleus_texture": "chromatin-like texture and dark nucleoli inside nuclei",
                     "loci": "the two labelled loci: where their motion comes from, brightness, probes and transcription",
                     "imaging_errors": "the sources of image error and their settings (🖼 Images tab)",
-                    "isolation": "how single-cell movies are cut out", "locus_analysis": "settings of the placeholder locus finder",
+                    "isolation": "how single-cell movies are cut out", "locus_analysis": "settings of the locus spot finder (stage 6; 🔎 Spot finding tab)",
                     "segmentation": "finding nuclei in each image", "tracking": "linking nuclei through time"}
     st.markdown("**Settings by section**")
     for sec, val in R["cfg"].items():
@@ -681,6 +693,14 @@ def calibration_frag():
     calibration_tab.render(st, run_path, R)
 
 
+@st.fragment
+def spots_frag():
+    import spots_tab  # noqa: E402  (app/spots_tab.py)
+    spots_tab.render(st, run_path, R)
+
+
+with tab_spots:
+    spots_frag()
 with tab_img:
     images_frag()
 with tab_cal:

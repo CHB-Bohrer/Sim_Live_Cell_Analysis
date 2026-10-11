@@ -188,7 +188,7 @@ def cell_composite(nuc: np.ndarray, loci: list, nuc_w: float = 0.35, lims: list 
 
 def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: list, pos, truth, px_um: float,
                        target_w: int = 430):
-    """Frames for one cell: [loci on nucleus (+ detected / true markers)] | [the two (or three) locus colours alone, no nucleus, no markers].
+    """Frames for one cell (`pos`, `truth`: this cell's rows only): [loci on nucleus (+ detected / true markers)] | [the two (or three) locus colours alone, no nucleus, no markers].
     The right panel uses one brightness scale per colour for the WHOLE movie, so the spots' brightness and shape changes through time are real."""
     n, S = mask.shape[0], mask.shape[1]
     nuc = channels["nucleus"]
@@ -202,14 +202,16 @@ def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: l
         comp = cell_composite(nuc[i], [channels[c][i] for c in loc_names], lims=lims)
         a = Image.fromarray(comp.astype(np.uint8))
         d = ImageDraw.Draw(a)
+        # PIL puts integer coordinates on pixel CORNERS; positions here are array indices (pixel centres), hence the + 0.5
         if pos is not None and len(pos):
             for q in pos[pos.t == t].itertuples():
-                d.line([q.crop_x_px - 7, q.crop_y_px, q.crop_x_px + 7, q.crop_y_px], fill=(255, 255, 255), width=2)
-                d.line([q.crop_x_px, q.crop_y_px - 7, q.crop_x_px, q.crop_y_px + 7], fill=(255, 255, 255), width=2)
+                x, y = q.crop_x_px + 0.5, q.crop_y_px + 0.5
+                d.line([x - 7, y, x + 7, y], fill=(255, 255, 255), width=2)
+                d.line([x, y - 7, x, y + 7], fill=(255, 255, 255), width=2)
         if truth is not None:
             fr = frames_df.iloc[i]
             for q in truth[truth.t == t].itertuples():
-                x, y = q.x_um / px_um - fr.crop_x0, q.y_um / px_um - fr.crop_y0
+                x, y = q.x_um / px_um - fr.crop_x0 + 0.5, q.y_um / px_um - fr.crop_y0 + 0.5
                 d.ellipse([x - 8, y - 8, x + 8, y + 8], outline=(0, 255, 255), width=1)
         ov = np.zeros((S, S, 3))
         for k, c in enumerate(chs):

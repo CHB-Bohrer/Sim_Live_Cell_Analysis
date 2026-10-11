@@ -132,6 +132,7 @@ GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked an
          ("🔬 New single-cell loci run (sidebar)", "Adds two coloured loci per nucleus (optional probes, MS2, 3D z-stacks and a calibration). 2 to 10 min."),
          ("🎞 Movie · 📊 Metrics · 🧭 Trajectories", "How well the tracker did, frame by frame, with the errors marked."),
          ("🔬 Cells · 📈 Scans", "Single-cell movies with their loci; sweeps over many seeds and settings."),
+         ("🔎 Spot finding", "How each locus is found (steps adapted from Bennabi et al. 2025), every intermediate image, the error per frame, and a comparison of methods."),
          ("🖼 Images", "Every recorded image next to the ground truth behind it, in 2D or as z-slices and side views; the image built up one error at a time."),
          ("📍 Stage & fiducials", "z-piezo plane errors, the beads on the slide that track drift and focus, and what correcting with them (or the piezo's log) does."),
          ("🎯 Calibration", "Simulated dark frames, flat-field slide and bead slide: what the instrument is, estimated vs true, and how much correcting for it helps."),

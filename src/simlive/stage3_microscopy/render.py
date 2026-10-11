@@ -689,6 +689,12 @@ class Imager:
             rows.append(row)
         return pd.DataFrame(rows)
 
+    def locus_photons(self) -> pd.DataFrame:
+        """Photons of every locus spot per exposure before bleaching and illumination (t, cell_id, locus_id, photons). 0 = nothing was drawn
+        (the probe model can leave a locus with no probe attached for a whole exposure), so a localizer cannot find it."""
+        rows = [(int(t), int(c), k, float(p)) for k, L in enumerate(self.loci) for t, d in L.by_t.items() for c, p in zip(d["ids"], d["ph"])]
+        return pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "photons"])
+
     def static_truth(self) -> dict:
         """Constant imaging properties: per-channel shift and blur, pixel size, z-stack geometry, which sources were on and their parameters."""
         out = {"pixel_size_um": self.px_um, "exposure_s": self.exposure_s,

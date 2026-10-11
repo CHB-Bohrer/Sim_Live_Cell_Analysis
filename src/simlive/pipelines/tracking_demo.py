@@ -101,9 +101,9 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
     st_truth = imager.static_truth()
     cells_in_image(cells, it, px_um).to_csv(s3 / "cells_image.csv", index=False)
-    if truth is not None:
-        truth_in_image(truth, it, px_um, st_truth["channel_shift_px"],
-                       (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).to_csv(s3 / "loci_truth_image.csv", index=False)
+    if truth is not None:      # + photons per spot, so scoring can tell a missed spot from a locus that had no light at all
+        truth_in_image(truth, it, px_um, st_truth["channel_shift_px"], (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).merge(
+            imager.locus_photons(), on=["t", "cell_id", "locus_id"], how="left").to_csv(s3 / "loci_truth_image.csv", index=False)
     if imager.is3d and imager.E.on("piezo"):               # where the planes really were, and what the piezo's position sensor logged
         imager.piezo_truth().to_csv(s3 / "piezo_truth.csv", index=False)
     (s3 / "imaging_errors.json").write_text(json.dumps(st_truth, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
@@ -168,6 +168,13 @@ def _run_calibration(cfg: dict, run: Path, progress) -> Path:
     return d
 
 
+def nominal_axial_sigma(cfg: dict) -> dict:
+    """Axial PSF sigma (um) of every locus colour from the microscope's specification (NA, wavelength, modality): what an analysis may know."""
+    from simlive.stage3_microscopy.render import axial_sigma_um
+
+    return {f"locus{k}": axial_sigma_um(cfg["optics"], wl) for k, wl in enumerate(cfg["loci"]["wavelengths_nm"][:int(cfg["loci"]["n_loci"])])}
+
+
 def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = None) -> None:
     """Stage 5 (isolate each cell) + stage 6 (placeholder per-cell locus analysis), for each identity source."""
     iso = cfg.get("isolation", {})
@@ -216,8 +223,9 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
         if zinfo is not None:   # z-stacks: locate the loci in 3D from the full stacks (the 2D result above uses the projections)
             progress(f"Stage 6: locating loci in 3D in {len(summ)} cells")
             stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(int(cfg["loci"]["n_loci"]))}
+            ana3 = {**ana, "axial_sigma_um": nominal_axial_sigma(cfg)}      # the microscope's nominal axial PSF (for median_z: auto)
             pos3 = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
-                             n_loci=cfg["loci"]["n_loci"], **ana)
+                             n_loci=cfg["loci"]["n_loci"], **ana3)
             pos3.to_csv(out6 / "loci_positions_3d.csv", index=False)
             (locus_distances_3d(pos3, px_um) if len(pos3) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
                 out6 / "locus_distances_3d.csv", index=False)
@@ -227,7 +235,7 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
                 scores["truth_3d"] = sc3
             if apply_cal:
                 pos3c = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
-                                  n_loci=cfg["loci"]["n_loci"], calib=str(cal_dir), **ana)
+                                  n_loci=cfg["loci"]["n_loci"], calib=str(cal_dir), **ana3)
                 pos3c.to_csv(out6 / "loci_positions_3d_cal.csv", index=False)
                 (locus_distances_3d(pos3c, px_um) if len(pos3c) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
                     out6 / "locus_distances_3d_cal.csv", index=False)

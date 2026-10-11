@@ -216,8 +216,8 @@ def _effect_section(run: Path, cal: Calibration) -> None:
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption("Errors are the distance between each located locus and its true position (true cell IDs only). The calibrated analysis "
                    "subtracts the measured chromatic shift and works on dark-subtracted, flat-fielded images with hot pixels replaced. "
-                   "Cosmic rays cannot be removed this way (they are random per frame). The median error is the typical locus; the rms error "
-                   "is dominated by the occasional wrong detection.")
+                   "Cosmic rays cannot be removed this way (they are random per frame); the spot finder's 'track' choice skips them instead "
+                   "(🔎 Spot finding tab). The median error is the typical locus; the rms error is dominated by the occasional wrong detection.")
     else:
         st.info("This run was made without 'apply calibration'; make a new run with the calibration switched on to compare.")
     ch = st.selectbox("Show the correction on channel", cal.channels, format_func=CH_SHORT.get, key="cal_eff_ch")
