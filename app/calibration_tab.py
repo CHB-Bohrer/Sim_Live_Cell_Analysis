@@ -60,6 +60,7 @@ def _tidy(table: pd.DataFrame) -> pd.DataFrame:
     t["estimate"] = t.estimate.map(lambda v: None if v is None else float(f"{v:.4g}"))
     t["truth"] = t.truth.map(lambda v: None if v is None or not np.isfinite(v) else float(f"{v:.4g}"))
     t["error %"] = t.error_pct.map(lambda v: None if v is None or not np.isfinite(v) else round(float(v), 1))
+    t["note"] = t.note.map(lambda v: "" if v is None or (isinstance(v, float) and np.isnan(v)) else v)
     return t[["ok", "quantity", "channel", "unit", "estimate", "truth", "error %", "note"]]
 
 
@@ -174,6 +175,11 @@ def _beads_section(cal: Calibration) -> None:
             sy, sx = b["shift_px"][x]
             ax.plot(sx, sy, "k+", ms=14, mew=2)
         ax.axhline(0, color="#999", lw=0.8); ax.axvline(0, color="#999", lw=0.8)
+        allr = np.concatenate([np.array(b["residual_px"][x]) for x in others])
+        allr = allr[np.isfinite(allr).all(axis=1)]
+        sh = np.array([b["shift_px"][x] for x in others])
+        lo, hi = np.minimum(sh.min(0), np.median(allr, axis=0)) - 0.5, np.maximum(sh.max(0), np.median(allr, axis=0)) + 0.5
+        ax.set_ylim(lo[0], hi[0]); ax.set_xlim(lo[1], hi[1])               # an occasional badly fitted bead must not squash the plot
         ax.set_xlabel("x offset from the nuclear channel (px)"); ax.set_ylabel("y offset (px)")
         ax.set_title("Each dot = one bead; + = the estimated shift", fontsize=11); ax.legend(fontsize=8); ax.set_aspect("equal")
         c[1].pyplot(fig, width="stretch"); plt.close(fig)
