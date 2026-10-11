@@ -14,7 +14,7 @@ import style
 import tifffile
 from PIL import Image
 
-from fastview import all_cells_frames, cell_composite, single_cell_frames
+from fastview import all_cells_frames, cell_composite, movie_limits, single_cell_frames
 from player import show_player
 from simlive.stage5_linking.celldata import load_cell
 
@@ -34,10 +34,14 @@ def cell_rgb(cdir: Path, i: int, channels: list) -> np.ndarray:
     nuc = read_frame(cdir / "nucleus.tif", i)
     nuc = np.clip((nuc - np.percentile(nuc, 1)) / max(np.percentile(nuc, 99.5) - np.percentile(nuc, 1), 1e-9), 0, 1)
     rgb = np.repeat(nuc[..., None] * 0.35, 3, axis=2)
+    from scipy.ndimage import binary_dilation
+
+    region = binary_dilation(read_frame(cdir / "mask.tif", i) > 0, iterations=4)        # scale from the cell's own region: beads, cosmic rays elsewhere are ignored
     for k, ch in enumerate(channels[:3]):
         im = read_frame(cdir / f"{ch}.tif", i)
-        # a diffraction-limited spot covers only a few pixels, so scale to the true maximum (a percentile lands on noise)
-        im = np.clip((im - np.median(im)) / max(im.max() - np.median(im), 1e-9), 0, 1)
+        v = im[region] if region.any() else im
+        lo, hi = np.median(v) + 1.5 * 1.4826 * np.median(np.abs(v - np.median(v))), max(v.max(), np.median(v) + 1)
+        im = np.clip((im - lo) / max(hi - lo, 1e-9), 0, 1)
         rgb[..., k] = np.clip(rgb[..., k] + im, 0, 1)
     return rgb
 
@@ -49,9 +53,10 @@ def _all_cells_movie(sdir: str, stamp: float, loc_names: tuple, tile: int = 150)
     data = []
     for cid in summ.cell_id:
         c = load_cell(sdir, cid)
+        lims = [movie_limits(c.channels[n], c.mask) for n in loc_names]      # one scale per colour for this cell's whole movie, from its own region
         tiles = {}
         for i, t in enumerate(c.t):
-            rgb = cell_composite(c.channels["nucleus"][i], [c.channels[n][i] for n in loc_names])
+            rgb = cell_composite(c.channels["nucleus"][i], [c.channels[n][i] for n in loc_names], lims=lims)
             tiles[int(t)] = np.asarray(Image.fromarray(rgb.astype(np.uint8)).resize((tile, tile), Image.BILINEAR))
         data.append((int(cid), tiles))
     return all_cells_frames(data, int(summ.last_t.max()) + 1, tile=tile)

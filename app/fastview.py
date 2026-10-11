@@ -160,12 +160,29 @@ def _norm(a, lo=None, hi=None):
     return np.clip((a.astype(float) - lo) / max(hi - lo, 1e-9), 0, 1)
 
 
-def cell_composite(nuc: np.ndarray, loci: list, nuc_w: float = 0.35) -> np.ndarray:
-    """(S,S) nucleus + list of (S,S) locus images -> RGB 0-255 (loci in red/green/blue)."""
+def movie_limits(stack: np.ndarray, mask: np.ndarray, grow: int = 4) -> tuple[float, float]:
+    """Black and white level of one colour for a whole single-cell movie, taken from the cell's own region only (its mask grown a few pixels).
+    The spot is tiny, so the white level is just above the cell's noise up to the brightest 0.05% of the cell's pixels. Cosmic rays, hot
+    pixels and fiducial beads elsewhere in the crop (which used to set the scale and make the real spot look missing) are ignored."""
+    from scipy.ndimage import binary_dilation
+
+    region = binary_dilation(mask, structure=np.ones((1, 2 * grow + 1, 2 * grow + 1), bool)) if grow else mask
+    v = np.asarray(stack, float)[region]
+    med = float(np.median(v))
+    sd = 1.4826 * float(np.median(np.abs(v - med)))
+    return med + 1.5 * sd, float(max(np.percentile(v, 99.95), med + 8 * sd + 1))
+
+
+def cell_composite(nuc: np.ndarray, loci: list, nuc_w: float = 0.35, lims: list | None = None) -> np.ndarray:
+    """(S,S) nucleus + list of (S,S) locus images -> RGB 0-255 (loci in red/green/blue). `lims`: [(black, white)] per locus colour, fixed for the
+    whole movie (see movie_limits); without it each frame is scaled to its own brightest pixel (a cosmic ray then hides the spot)."""
     rgb = np.repeat(_norm(nuc)[..., None] * nuc_w, 3, axis=2)
     for k, im in enumerate(loci[:3]):
         im = im.astype(float)
-        rgb[..., k] = np.clip(rgb[..., k] + np.clip((im - np.median(im)) / max(im.max() - np.median(im), 1e-9), 0, 1), 0, 1)
+        if lims is not None:
+            rgb[..., k] = np.clip(rgb[..., k] + np.clip((im - lims[k][0]) / max(lims[k][1] - lims[k][0], 1e-9), 0, 1), 0, 1)
+        else:
+            rgb[..., k] = np.clip(rgb[..., k] + np.clip((im - np.median(im)) / max(im.max() - np.median(im), 1e-9), 0, 1), 0, 1)
     return rgb * 255
 
 
@@ -178,15 +195,11 @@ def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: l
     nlo, nhi = float(np.percentile(nuc, 1)), float(np.percentile(nuc, 99.5))
     scale = target_w / S
     chs = [np.asarray(channels[c], float) for c in loc_names[:3]]
-    def _lim(c):      # black level a little above the typical background so the camera noise is not the loudest thing in the picture
-        med = float(np.median(c))
-        sd = 1.4826 * float(np.median(np.abs(c - med)))
-        return med + 1.5 * sd, float(max(np.percentile(c, 99.95), med + 4 * sd + 1))
-    lims = [_lim(c) for c in chs]                                                                       # one scale per colour, whole movie
+    lims = [movie_limits(c, mask) for c in chs]            # one scale per colour for the whole movie, from the cell's own region only
     out, labels = [], []
     for i in range(n):
         t = int(frames_df.t.iloc[i])
-        comp = cell_composite(nuc[i], [channels[c][i] for c in loc_names])
+        comp = cell_composite(nuc[i], [channels[c][i] for c in loc_names], lims=lims)
         a = Image.fromarray(comp.astype(np.uint8))
         d = ImageDraw.Draw(a)
         if pos is not None and len(pos):
