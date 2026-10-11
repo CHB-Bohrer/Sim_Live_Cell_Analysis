@@ -250,6 +250,10 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_nz = st.slider("Planes per stack", 5, 31, 15, 2, key="l_nz", help="Number of planes in each stack (used only for z-stacks).")
         l_dz = st.number_input("Plane spacing (µm)", 0.2, 2.0, 0.8, 0.1, key="l_dz",
                                help="Distance between planes. The axial blur is about 0.4 µm (sigma) for widefield: spacing much larger than that undersamples z.")
+        l_fid = st.checkbox("Fiducial beads on the slide (z-stacks)", True, key="l_fid",
+                            help="A few bright beads lie on the slide in every image and in every colour. They show how far each frame has drifted in x, y and z. "
+                                 "The stack is lowered so that it reaches the slide. See the 📍 Stage & fiducials tab.")
+        l_nfid = st.slider("Number of beads", 2, 16, 8, key="l_nfid", help="Beads are placed away from every nucleus.")
         l_conf = st.checkbox("Confocal instead of widefield", False, key="l_conf",
                              help="A confocal / spinning-disk microscope has a narrower axial PSF and a narrower lateral PSF than widefield.")
         st.markdown("**Calibration**")
@@ -319,7 +323,11 @@ if go_loci:
     if l_3d:
         px_um = load_config(REPO_ROOT / "configs" / "loci_demo.yaml")["optics"]["pixel_size_nm"] / 1000.0
         est_gb = l_frames * l_nz * (l_fov / px_um) ** 2 * 2 * 3 / 1e9
-        common += [f"acquisition.z_stack={{enabled: true, n_slices: {l_nz}, step_um: {l_dz}, center_um: null, slice_time_s: 0.15, projection: max}}",
+        zc = round(0.2 + (l_nz - 1) / 2 * l_dz, 3) if l_fid else "null"      # fiducial beads need the stack to reach the slide
+        if l_fid:
+            common += ["fiducials.enabled=true", f"fiducials.n_beads={l_nfid}"]
+            st.info(f"The stack will cover z = 0.2 to {0.2 + (l_nz - 1) * l_dz:.1f} µm so that it reaches the beads on the slide; nuclei above that are cut off.")
+        common += [f"acquisition.z_stack={{enabled: true, n_slices: {l_nz}, step_um: {l_dz}, center_um: {zc}, slice_time_s: 0.15, projection: max}}",
                    "geometry.z={nucleus_semi_axis_ratio: 1.0, z_center_um: 7.0, z_spread_um: 0.5, z_walk_um_per_frame: 0.05}"]
         st.info(f"3D run: about {est_gb:.1f} GB of images will be written ({l_frames} frames × {l_nz} planes × 3 colours).")
     if l_probes:      # the checkboxes used to be ignored: nothing was passed on
@@ -423,8 +431,8 @@ for v in ("auto_masks", "gt_masks"):
     d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
              help="Fraction of cell-frames on the cell's main track ID")
 
-tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_img, tab_cal, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
-    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🖼 Images", "🎯 Calibration", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
+tab_movie, tab_metrics, tab_traj, tab_scan, tab_cells, tab_img, tab_cal, tab_stage, tab_tx, tab_probe, tab_lib, tab_chrom, tab_cfg = st.tabs(
+    ["🎞 Movie", "📊 Metrics", "🧭 Trajectories", "📈 Scans", "🔬 Cells", "🖼 Images", "🎯 Calibration", "📍 Stage & fiducials", "⚡ Transcription", "🧪 Probes", "🗂 Library", "🧬 Chromatin", "⚙ Config"])
 
 # ----------------------------------------------------------------------------- movie
 @st.fragment
@@ -677,6 +685,16 @@ with tab_img:
     images_frag()
 with tab_cal:
     calibration_frag()
+
+
+@st.fragment
+def stage_frag():
+    import stage_tab  # noqa: E402  (app/stage_tab.py)
+    stage_tab.render(st, run_path, R)
+
+
+with tab_stage:
+    stage_frag()
 
 import chromatin_tab  # noqa: E402  (app/chromatin_tab.py)
 import library_tab  # noqa: E402  (app/library_tab.py)

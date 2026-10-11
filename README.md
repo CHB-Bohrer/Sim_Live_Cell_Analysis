@@ -117,6 +117,10 @@ explained in [docs/IMAGE_ERRORS.md](docs/IMAGE_ERRORS.md) and in the dashboard's
 (true masks, true locus positions, drift/focus/light level of that frame), builds an image up one error at a time, and measures how much each error matters.
 
 
+### z-piezo errors and fiducial beads
+The z-piezo that steps through the planes has random, bowed, hysteretic and lagging position errors, and beads on the slide track drift and focus in every image. The 📍 **Stage & fiducials** tab explains
+each piece, shows where the planes really were, what the beads can and cannot measure, and what correcting with them or with the piezo's own position log does.
+
 ### 3D z-stacks and calibration
 Tick **Record 3D z-stacks** in the sidebar's loci form (or use `configs\loci_3d.yaml`): every frame becomes a stack of planes, nuclei are 3D ellipsoids, the loci have a height, and
 the microscope blurs along z too. The loci are located in 3D and the 🖼 Images tab shows slices, projections and x-z / y-z side views next to the ground truth.

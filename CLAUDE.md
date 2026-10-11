@@ -288,6 +288,11 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   outlier rejection over time/planes.
 - Dashboard: 🖼 Images has a z-slice slider / projection toggle, truth markers with their z offset, and x-z / y-z side views; new 🎯 Calibration tab (estimate vs truth table, dark / flat / bead panels, photon transfer
   curve, before-after scores); sidebar loci form has field of view, 3D z-stacks (planes, spacing, confocal) and calibration switches (warns about disk size, refuses > 12 GB).
+- Piezo + fiducials (2026-10-11, docs/CALIBRATION_AND_3D.md section 3): source `piezo` (true plane heights = nominal + random + bow + hysteresis + settling lag; alternating scan direction; truth
+  `piezo_truth.csv` incl. the sensor `readout_um`), `fiducials:` block (beads ON THE SLIDE in every image; the stack must reach z = 0.3 um, loci_3d.yaml is now 17 planes from z = 0.2),
+  `stage6_analysis/fiducials.py` (bead tracking -> whole-picture shift; piezo-log correction; `score_variants` with MEDIAN errors), tab 📍 Stage & fiducials. Key point shown in the UI: beads on the slide
+  cannot measure plane errors at nuclear height; only the piezo log can. RNG gotcha: `errors.INDEX` is FROZEN (new sources get the next number) so adding a source to ORDER does not change old noise.
+  With the placeholder 30 nm repeatability the piezo effect is small next to the placeholder 3D locus finder's ~80 nm noise (beads: height wander 84 -> 65 nm; log: 83 -> 80 nm).
 - Not done: real (measured) values for any placeholder; 3D transcription spots in thick tissue; z-dependent chromatic focal shift beyond a constant offset; cell isolation in 3D (stage 5 stays 2D on projections);
   3D tracking; a cosmic-ray-robust localizer; calibration of the quantum efficiency and of the nuclear brightness; lens distortion / field-dependent chromatic shift (shifts are constant over the field).
 

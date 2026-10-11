@@ -228,11 +228,11 @@ def _part_view(R, run: Path, im, cfg):
                         format_func=lambda k: f"locus {k}" + (" (promoter)" if k == 0 else " (enhancer)" if k == 1 else ""))
     truth_img = _csv(run, "stage3_microscopy", "loci_truth_image.csv")
     tx, occ = _csv(run, "stage1_chromatin", "transcription.csv"), _csv(run, "stage1_chromatin", "probe_occupancy.csv")
-    show_over = st.multiselect("Draw the ground truth on the images", ["masks", "ids", "loci", "ms2"],
-                               default=["masks", "ids", "loci", "ms2"], key="img_over",
+    show_over = st.multiselect("Draw the ground truth on the images", ["masks", "ids", "loci", "ms2", "fid"],
+                               default=["masks", "ids", "loci", "ms2", "fid"], key="img_over",
                                format_func={"masks": "true nucleus outlines", "ids": "true cell ID numbers",
                                             "loci": "true locus positions (○ truth, × where it is drawn)",
-                                            "ms2": "promoter with an MS2 spot (◇)"}.get)
+                                            "ms2": "promoter with an MS2 spot (◇)", "fid": "fiducial beads on the slide (□)"}.get)
     c = st.columns(2)
     ideal = c[0].checkbox("Also show the error-free version", True, key="img_ideal",
                           help="The same frame rendered with every source of image error switched off.")
@@ -314,6 +314,12 @@ def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now
             cx, cy = r.x_um / im.px_um, r.y_um / im.px_um
             if x0 <= cx < x1 and y0 <= cy < y1:
                 ax.text(cx, cy, str(int(r.cell_id)), color="yellow", fontsize=11, ha="center", va="center", weight="bold")
+    if "fid" in show_over:
+        fp = Path(st.session_state.get("_run_path", "")) / "stage3_microscopy" / "fiducials.csv"
+        if fp.exists():
+            for q in pd.read_csv(fp).itertuples():
+                if x0 <= q.x_um / im.px_um < x1 and y0 <= q.y_um / im.px_um < y1:
+                    ax.plot(q.x_um / im.px_um, q.y_um / im.px_um, "s", mfc="none", mec="magenta", ms=13, mew=1.5)
     if truth_img is None:
         return
     tt = truth_img[truth_img.t == t]
@@ -603,6 +609,7 @@ def render(st_, run_path: Path, R: dict):
                 "Part 1: pick a frame and see the camera images with the truth drawn on top (and the error-free version). Part 2: watch the "
                 "image being built up one error at a time. Part 3: see which error matters most. Part 4: read what each error is.")
     run = Path(run_path)
+    st.session_state["_run_path"] = str(run)
     if not (run / "stage3_microscopy" / "imaging_truth.csv").exists():
         st.info("This run was made before the image-error model existed, so the build-up and the imaging ground truth are not available. "
                 "Make a new run (sidebar) to see them. The recorded images are still in the 🎞 Movie tab (tick 'Also show raw image panel').")

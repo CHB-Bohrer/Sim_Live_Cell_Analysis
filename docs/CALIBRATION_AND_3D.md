@@ -59,3 +59,28 @@ so ~6% of 3D detections are still wrong (3D run: median error 193 -> 90 nm, but 
 
 **Gotcha.** The fits use numpy LAPACK (`lstsq`, `curve_fit`), which loads a second OpenMP runtime; importing torch AFTER that fails on Windows. The pipeline therefore runs the
 calibration after the tracker (torch already imported). Do not call it before `import torch` in the same process.
+
+## 3. Piezo plane-position errors and fiducial beads (tab 📍 Stage & fiducials)
+
+**The problem.** A z-stack is made by stepping a piezo through planes at nominal heights; locus heights are read from those nominal heights. The source `piezo`
+(`imaging_errors.piezo`) makes the true plane heights differ from the nominal ones: error of plane k = random N(0, `repeatability_nm`) + `bow_um` x (1 - u^2)
+(u = -1..+1 across the stack) + direction x `hysteresis_um` / 2 - direction x `settling_um` x exp(-recording order / 2). The scan direction alternates every frame when
+`bidirectional`. Images are drawn with the planes at their TRUE heights; analysis is told the nominal heights. Truth: `stage3_microscopy/piezo_truth.csv` (per frame and plane:
+nominal height, true height, error, the sensor readout = true + `readout_noise_nm`, scan direction, recording order). The values are placeholders: ask the user for their piezo's
+repeatability / hysteresis.
+
+**Fiducial beads** (`fiducials:` block, `stage3_microscopy/fiducials.py`): bright sub-resolution beads ON THE SLIDE (z = `z_um` above the coverslip) in every image and every colour, placed away from
+nuclei, drifting with everything else; truth `fiducials.csv`. A stack must reach the slide (configs/loci_3d.yaml: 17 planes x 0.8 um from z = 0.2) or the beads are almost invisible
+(only out-of-focus haze). The sidebar lowers the stack automatically when the beads are ticked.
+
+**What each tool can and cannot correct** (`stage6_analysis/fiducials.py`):
+- bead tracking (`track_fiducials`: beads found outside the nuclei in frame 0, a Gaussian fit per bead per frame, median displacement relative to frame 0) measures the movement of the
+  WHOLE picture (drift, focus error) -> `correct_with_beads` subtracts it. It cannot see plane-to-plane errors at nuclear height, because all beads are at one height.
+- the piezo's position log (`readout_um`) gives every plane's real height -> `correct_with_plane_positions` replaces the nominal heights (interpolating the fitted fractional plane index).
+  With the log, the beads are fitted with the logged heights, so they measure drift + focus only.
+- `score_variants` (uncorrected / beads / piezo log / both) reports MEDIAN absolute errors of: the 3D locus0-locus1 distance, their height difference, and each height after the
+  movie-wide constant is removed. Medians, because the placeholder locus finder has rare wrong detections (cosmic rays) that would otherwise hide everything.
+
+**Result with the placeholder values** (loci_3d, seed 22, 4 cells, 8 beads, repeatability 30 nm, bow 0.1 um, hysteresis 0.05 um): height wander 84 -> 65 nm with the beads (the whole-picture shift is removed);
+the piezo log changes the height-difference error only 83 -> 80 nm and the distance error 50 -> 46 nm, because at 30 nm the piezo errors are small next to the placeholder detector's own
+~80 nm height noise. Increase `repeatability_nm` to see the plane-to-plane errors dominate: only the log helps then. Do not over-read one seed.

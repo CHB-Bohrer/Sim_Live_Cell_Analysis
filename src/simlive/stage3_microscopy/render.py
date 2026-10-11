@@ -293,7 +293,7 @@ class Imager:
     def __init__(self, cfg: dict, cells: pd.DataFrame | None = None, truth: pd.DataFrame | None = None,
                  spots: pd.DataFrame | None = None, occupancy: pd.DataFrame | None = None, entropy: int = 0,
                  errors: ErrorSet | None = None, session: int | None = None, n_frames: int | None = None,
-                 channels: list[str] | None = None):
+                 channels: list[str] | None = None, fiducials: pd.DataFrame | None = None):
         self.cfg, self.entropy = cfg, int(entropy)
         self.session = self.entropy if session is None else int(session)
         self.opt, self.acq = cfg["optics"], cfg["acquisition"]
@@ -309,6 +309,11 @@ class Imager:
         self.slice_time_s = float(zs.get("slice_time_s", 0.0))
         self.projection = str(zs.get("projection", "max"))
         self.zk = self.zcenter + (np.arange(self.nz) - (self.nz - 1) / 2) * self.zstep if self.nz else np.zeros(0)
+        # fiducial beads lying on the slide in every image: static point sources that emit in every colour
+        self.fid = None
+        if fiducials is not None and len(fiducials):
+            self.fid = dict(y=fiducials.y_um.to_numpy() / self.px_um, x=fiducials.x_um.to_numpy() / self.px_um, z=fiducials.z_um.to_numpy(),
+                            ph=np.full(len(fiducials), float((cfg.get("fiducials") or {}).get("photons", 20000.0))))
         self.nucleus = _NucleusModel(cells, cfg, self.entropy, spots) if cells is not None else None
         if self.nucleus is not None and self.nz and "z_um" not in cells.columns:
             raise ValueError("z-stack imaging needs cells with z positions (stage2_cells.motion.add_z)")
@@ -382,6 +387,53 @@ class Imager:
         if not self.nz or channel == "nucleus" or not E.on("chromatic_shift"):
             return 0.0
         return float(E.par("chromatic_shift", "shift_z_um").get(channel, 0.0))
+
+    # ------------------------------------------------------------------ the piezo that steps through the planes
+    def scan_dir(self, t: int, E: ErrorSet | None = None) -> int:
+        """+1 when the planes of frame t are recorded bottom to top, -1 top to bottom (alternating if the piezo is bidirectional)."""
+        E = E or self.E
+        if not self.nz or not E.on("piezo") or not E.par("piezo", "bidirectional"):
+            return 1
+        return 1 if int(t) % 2 == 0 else -1
+
+    def time_index(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
+        """When (0 = first) each plane is recorded within the stack of frame t."""
+        k = np.arange(self.nz)
+        return k if self.scan_dir(t, E) > 0 else k[::-1]
+
+    def piezo_error_um(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
+        """How far each plane of frame t really is from its nominal height (um): random step error + bow + hysteresis + settling lag."""
+        E = E or self.E
+        if not self.nz or not E.on("piezo"):
+            return np.zeros(self.nz)
+        p, n, d = E.params["piezo"], self.nz, self.scan_dir(t, E)
+        u = (np.arange(n) - (n - 1) / 2) / max((n - 1) / 2, 1)
+        rnd = ERR.rng_for(self.session, t, "piezo", 0).normal(0, p["repeatability_nm"] / 1000.0, n)
+        bow = p["bow_um"] * (1 - u ** 2)
+        hyst = d * p["hysteresis_um"] / 2
+        lag = -d * p["settling_um"] * np.exp(-self.time_index(t, E) / 2.0)
+        return rnd + bow + hyst + lag
+
+    def plane_z(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
+        """The true height of every plane of frame t (nominal + piezo error)."""
+        return self.zk + self.piezo_error_um(t, E)
+
+    def piezo_readout(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
+        """What the piezo's position sensor would log for the planes of frame t: the true heights plus the sensor's own noise."""
+        E = E or self.E
+        noise = ERR.rng_for(self.session, t, "piezo", 1).normal(0, E.par("piezo", "readout_noise_nm") / 1000.0, self.nz) if E.on("piezo") else 0.0
+        return self.plane_z(t, E) + noise
+
+    def piezo_truth(self) -> pd.DataFrame:
+        """Per frame and plane: nominal height, true height, error, and the sensor readout. Empty unless this is a z-stack with the piezo source on."""
+        if not self.nz or not self.E.on("piezo"):
+            return pd.DataFrame(columns=["t", "k", "z_nominal_um", "z_actual_um", "error_um", "readout_um", "scan_dir", "time_index"])
+        rows = []
+        for t in range(self.T):
+            z, ro, ti = self.plane_z(t), self.piezo_readout(t), self.time_index(t)
+            for k in range(self.nz):
+                rows.append((t, k, self.zk[k], z[k], z[k] - self.zk[k], ro[k], self.scan_dir(t), int(ti[k])))
+        return pd.DataFrame(rows, columns=["t", "k", "z_nominal_um", "z_actual_um", "error_um", "readout_um", "scan_dir", "time_index"])
 
     def z_shift_um(self, channel: str, t: int, E: ErrorSet | None = None) -> float:
         """Total axial displacement of the objects of `channel` in frame t: stage drift + focus error + chromatic shift."""
@@ -474,7 +526,7 @@ class Imager:
             pos = {int(i): j for j, i in enumerate(nxt["ids"])}
             idx = np.array([pos.get(int(i), -1) for i in d["ids"]])
             ok = idx >= 0
-            frac = (np.arange(self.nz) * self.slice_time_s / float(self.acq["frame_interval_s"]))[:, None]
+            frac = (self.time_index(t, E) * self.slice_time_s / float(self.acq["frame_interval_s"]))[:, None]
             for arr, key in ((Y, "y"), (X, "x"), (Z, "z")):
                 dv = np.where(ok, nxt[key][np.clip(idx, 0, None)] - d[key], 0.0)
                 arr += frac * dv[None, :]
@@ -503,6 +555,8 @@ class Imager:
                 ph = np.zeros(self.shape, np.float32)
             else:
                 ph = _spots_from_arrays(self.shape, d["y"] + dy + cy, d["x"] + dx + cx, d["ph"] * bleach, sig)
+        if self.fid is not None:
+            ph = ph + _spots_from_arrays(self.shape, self.fid["y"] + dy + cy, self.fid["x"] + dx + cx, self.fid["ph"], sig)
         if E.on("haze"):
             f = float(E.par("haze", "fraction"))
             ph = (1 - f) * ph + f * ERR.broad_blur(ph, E.par("haze", "sigma_um") / self.px_um)
@@ -521,18 +575,25 @@ class Imager:
         sig_h = float(E.par("haze", "sigma_um")) / self.px_um if E.on("haze") else 1.0
         sz_h = float(E.par("haze", "sigma_um")) if E.on("haze") else 1.0
         bleach = self.bleach(channel, t, E)
-        zk, nz = self.zk, self.nz
+        zk, nz = self.plane_z(t, E), self.nz               # where the planes really are (nominal unless the piezo source is on)
         lab = None
         if channel == "nucleus":
             m = int(np.ceil(self.zstep / 0.25))
             dzf = self.zstep / m
-            n_pad = int(np.ceil(4 * sz / dzf))
-            zf = zk[0] - n_pad * dzf + dzf * np.arange((nz - 1) * m + 1 + 2 * n_pad)
+            n_pad = int(np.ceil(4 * sz / dzf)) + (2 if E.on("piezo") else 0)
+            zf = self.zk[0] - n_pad * dzf + dzf * np.arange((nz - 1) * m + 1 + 2 * n_pad)
             vol, lab = self.nucleus.volume(t, (dy, dx), dz, zf, zk)
-            core = gaussian_filter(vol, (sz / dzf, sig, sig) if sig > 0 else (sz / dzf, 0, 0))[n_pad:n_pad + (nz - 1) * m + 1:m]
+            blurred = gaussian_filter(vol, (sz / dzf, sig, sig) if sig > 0 else (sz / dzf, 0, 0))
+            if E.on("piezo"):                       # planes are off their nominal heights: interpolate the fine grid at the true heights
+                pos = (zk - zf[0]) / dzf
+                i0 = np.clip(np.floor(pos).astype(int), 0, len(zf) - 2)
+                w = (pos - i0)[:, None, None].astype(np.float32)
+                core, raw = (1 - w) * blurred[i0] + w * blurred[i0 + 1], (1 - w) * vol[i0] + w * vol[i0 + 1]
+            else:
+                core, raw = blurred[n_pad:n_pad + (nz - 1) * m + 1:m], vol[n_pad:n_pad + (nz - 1) * m + 1:m]
             ph = (1 - fh) * core
             if fh > 0:
-                ph = ph + fh * ERR.broad_blur3d(vol[n_pad:n_pad + (nz - 1) * m + 1:m], sig_h, sz_h / self.zstep)
+                ph = ph + fh * ERR.broad_blur3d(raw, sig_h, sz_h / self.zstep)
             ph = ph * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach
             s = self.nucleus.spots_by_t.get(int(t))
             if s is not None:
@@ -545,6 +606,11 @@ class Imager:
                 ph = np.zeros((nz, *self.shape), np.float32)
             else:
                 ph = _points3d(self.shape, zk, P[0] + dy + cy, P[1] + dx + cx, P[2] + dz, P[3] * bleach, sig, sz, fh, sig_h, sz_h)
+        if self.fid is not None:
+            nb = len(self.fid["ph"])
+            Y, X = np.tile(self.fid["y"] + dy + cy, (nz, 1)), np.tile(self.fid["x"] + dx + cx, (nz, 1))
+            Z = np.tile(self.fid["z"] + dz, (nz, 1))
+            ph = ph + _points3d(self.shape, zk, Y, X, Z, self.fid["ph"], sig, sz, fh, sig_h, sz_h)
         flat = self._flat(channel, E)
         if flat is not None:
             ph = ph * flat[None]
@@ -615,6 +681,7 @@ class Imager:
                    "defocus_sigma_px": self._defocus_sigma_px(t, self.E)}
             if self.nz:
                 row["drift_z_um"] = self.drift_z_um(t)
+                row["scan_dir"] = self.scan_dir(t)
             for c in self.channels:
                 row[f"flicker_{c}"] = self.flicker(c, t)
                 row[f"bleach_{c}"] = self.bleach(c, t)
@@ -678,12 +745,14 @@ def imager_for_run(run, cfg: dict, errors: ErrorSet | None = None) -> Imager:
     s1 = run / "stage1_chromatin"
     truth = pd.read_csv(s1 / "loci_truth.csv") if (s1 / "loci_truth.csv").exists() else None
     occ = pd.read_csv(s1 / "probe_occupancy.csv") if (s1 / "probe_occupancy.csv").exists() else None
+    fid_p = run / "stage3_microscopy" / "fiducials.csv"
+    fid = pd.read_csv(fid_p) if fid_p.exists() else None
     spots = None
     if (s1 / "transcription.csv").exists() and truth is not None:
         from simlive.stage1_chromatin.transcription import ms2_spots
 
         spots = ms2_spots(pd.read_csv(s1 / "transcription.csv"), truth, cfg)
-    return Imager(cfg, cells, truth, spots, occ, entropy_for(cfg["seed"]), errors)
+    return Imager(cfg, cells, truth, spots, occ, entropy_for(cfg["seed"]), errors, fiducials=fid)
 
 
 # ---------------------------------------------------------------------- one-channel wrappers (kept for tests and simple use)

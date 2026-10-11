@@ -52,6 +52,21 @@ The slices of a stack are recorded one after the other, so the last slice is rec
 
 **Effect:** Within one stack a locus is at a slightly different place in each slice; it blurs the 3D spot along the direction of motion. Only in z-stacks (acquisition.z_stack.slice_time_s sets the time per slice).
 
+### Piezo z-stage errors (plane positions)  (`piezo`)
+
+The piezo that moves the focus from plane to plane does not put every plane exactly where it was asked to: each step has a small random error, the response bows slightly over the range, it differs when scanning up and down (hysteresis, so the scan direction alternates from frame to frame), and it lags just after it starts moving.
+
+**Effect:** The planes are not equally spaced and sit slightly off their nominal heights, differently in every stack. A locus is then assigned a height from the nominal plane positions and is placed wrongly in z; the error between two loci at different heights does not cancel. Beads on the slide measure only the shift near the slide; a position readout of the piezo measures every plane.
+
+| parameter | default | unit | meaning |
+|---|---|---|---|
+| `repeatability_nm` | `30.0` | nm | random error of each plane's height, independent in every plane of every stack |
+| `bow_um` | `0.1` | um | systematic error in the middle of the range (zero at both ends): the piezo's non-linearity |
+| `hysteresis_um` | `0.05` | um | up-scan planes sit this much higher than down-scan planes (half each way) |
+| `settling_um` | `0.04` | um | lag just after the piezo starts a scan: the first planes are recorded before it has settled |
+| `bidirectional` | `True` |  | alternate the scan direction (up, down, up, ...) from frame to frame |
+| `readout_noise_nm` | `5.0` | nm | noise of the piezo's own position sensor, which logs where each plane really was |
+
 
 ## Optics
 

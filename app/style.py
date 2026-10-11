@@ -133,6 +133,7 @@ GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked an
          ("🎞 Movie · 📊 Metrics · 🧭 Trajectories", "How well the tracker did, frame by frame, with the errors marked."),
          ("🔬 Cells · 📈 Scans", "Single-cell movies with their loci; sweeps over many seeds and settings."),
          ("🖼 Images", "Every recorded image next to the ground truth behind it, in 2D or as z-slices and side views; the image built up one error at a time."),
+         ("📍 Stage & fiducials", "z-piezo plane errors, the beads on the slide that track drift and focus, and what correcting with them (or the piezo's log) does."),
          ("🎯 Calibration", "Simulated dark frames, flat-field slide and bead slide: what the instrument is, estimated vs true, and how much correcting for it helps."),
          ("⚡ Transcription · 🧪 Probes", "Build and explore the models behind the MS2 spot and the locus brightness."),
          ("🗂 Library · 🧬 Chromatin", "The saved polymer simulations: progress, choosing them, and looking inside one.")]
@@ -172,6 +173,10 @@ GLOSSARY = {
     "Bead slide": "A slide of tiny fluorescent beads (smaller than the blur) used to measure the PSF, the colour offsets and the drift.",
     "Photon transfer curve": "Noise variance plotted against signal; its slope is the camera gain (counts per electron).",
     "DSNU / PRNU": "Fixed pixel-to-pixel differences: in the dark offset (DSNU) and in the gain (PRNU).",
+    "Piezo": "The small motor that moves the focus up and down in steps to record the planes of a z-stack. Its real positions differ a little from the requested ones.",
+    "Hysteresis": "A piezo ends up at a slightly different place when it arrives from below than when it arrives from above.",
+    "Fiducial bead": "A bright tiny bead lying on the slide, visible in every image, used to measure how far the whole picture has drifted.",
+    "Position log": "The piezo's own sensor reading of where each plane really was (a few nm of noise).",
     "Kymograph": "A picture with time along one axis and position along a line on the other.",
 }
 

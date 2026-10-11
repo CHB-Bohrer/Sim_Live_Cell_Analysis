@@ -11,7 +11,8 @@ CFG = REPO_ROOT / "configs" / "loci_3d.yaml"
 
 
 def _cfg(*extra):
-    return load_config(CFG, ["geometry.fov_um=[24, 24]", "geometry.cell_radius_um=4.0", "cells.n_cells=2", "acquisition.n_frames=4", "optics.bleach_tau_s=null",
+    return load_config(CFG, ["geometry.fov_um=[24, 24]", "geometry.cell_radius_um=4.0", "cells.n_cells=2", "acquisition.n_frames=4", "optics.bleach_tau_s=null", "acquisition.z_stack.n_slices=15", "acquisition.z_stack.center_um=7.0",
+                             "fiducials.enabled=false",
                              "imaging_errors.enabled=false", *extra])
 
 

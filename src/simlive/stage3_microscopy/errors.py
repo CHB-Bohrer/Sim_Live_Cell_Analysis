@@ -50,6 +50,20 @@ SOURCES: dict[str, dict] = {
         effect="Within one stack a locus is at a slightly different place in each slice; it blurs the 3D spot along the direction of motion. "
                "Only in z-stacks (acquisition.z_stack.slice_time_s sets the time per slice).",
         params={}),
+    "piezo": dict(
+        group="Sample position", title="Piezo z-stage errors (plane positions)", baseline=False,
+        what="The piezo that moves the focus from plane to plane does not put every plane exactly where it was asked to: each step has a small random "
+             "error, the response bows slightly over the range, it differs when scanning up and down (hysteresis, so the scan direction alternates "
+             "from frame to frame), and it lags just after it starts moving.",
+        effect="The planes are not equally spaced and sit slightly off their nominal heights, differently in every stack. A locus is then assigned a height "
+               "from the nominal plane positions and is placed wrongly in z; the error between two loci at different heights does not cancel. "
+               "Beads on the slide measure only the shift near the slide; a position readout of the piezo measures every plane.",
+        params={"repeatability_nm": (30.0, "nm", "random error of each plane's height, independent in every plane of every stack"),
+                "bow_um": (0.10, "um", "systematic error in the middle of the range (zero at both ends): the piezo's non-linearity"),
+                "hysteresis_um": (0.05, "um", "up-scan planes sit this much higher than down-scan planes (half each way)"),
+                "settling_um": (0.04, "um", "lag just after the piezo starts a scan: the first planes are recorded before it has settled"),
+                "bidirectional": (True, "", "alternate the scan direction (up, down, up, ...) from frame to frame"),
+                "readout_noise_nm": (5.0, "nm", "noise of the piezo's own position sensor, which logs where each plane really was")}),
     "psf_blur": dict(
         group="Optics", title="Diffraction blur (PSF)", baseline=True,
         what="A point of light is imaged as a small blob, not a point: sigma = 0.21 x wavelength / NA.",
@@ -165,11 +179,14 @@ SOURCES: dict[str, dict] = {
 }
 
 # physical order in which a frame is degraded (used for the cumulative build-up in the dashboard)
-ORDER = ["stage_drift", "chromatic_shift", "slice_skew", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
+ORDER = ["stage_drift", "chromatic_shift", "slice_skew", "piezo", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
          "background", "autofluorescence", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
          "read_noise", "row_noise", "dsnu", "adc"]
 assert set(ORDER) == set(SOURCES)
-INDEX = {s: i + 1 for i, s in enumerate(ORDER)}
+# Random-stream numbers. Frozen: a source keeps its number when others are inserted into ORDER, so images made before a new source existed are
+# still reproduced bit for bit. New sources get the next free number.
+INDEX = {s: i + 1 for i, s in enumerate([x for x in ORDER if x != "piezo"])}
+INDEX["piezo"] = len(INDEX) + 1
 BASELINE = [s for s in ORDER if SOURCES[s]["baseline"]]
 # values of baseline parameters that reproduce the original model when imaging_errors is off
 LEGACY = {("read_noise", "pixel_cv"): 0.0, ("shot_noise", "excess_noise_factor"): 1.0}

@@ -236,7 +236,8 @@ def _fit_bead(frame, cy: float, cx: float, z_um, half: int = 6):
     if r is None:
         return None
     step = float(z_um[1] - z_um[0]) if len(z_um) > 1 else 1.0
-    return (r[0], r[1], r[2], float(z_um[0] + g[0] * step), float(g[1] * step))
+    zc = float(np.interp(g[0], np.arange(len(z_um)), z_um)) if len(z_um) > 1 else float(z_um[0])    # plane heights need not be equally spaced
+    return (r[0], r[1], r[2], zc, float(g[1] * step))
 
 
 def fit_beads(stacks: dict, px_um: float, z_um=None, ref: str = "nucleus", half: int = 6) -> dict:

@@ -22,11 +22,13 @@ from simlive.stage1_chromatin.probes import simulate_probe_occupancy
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
 from simlive.stage1_chromatin.transcription import ms2_spots, simulate_transcription, traces_from_truth
 from simlive.stage3_microscopy.calibration.run import run_calibration
+from simlive.stage3_microscopy.fiducials import make_fiducials
 from simlive.stage3_microscopy.render import Imager, cells_in_image, entropy_for, truth_in_image
 from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
 from simlive.stage6_analysis.localize import localize_loci, locus_distances, score_localization
+from simlive.stage6_analysis.fiducials import (correct_with_beads, correct_with_plane_positions, score_variants, track_fiducials)
 from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances_3d, score_localization_3d
 from simlive.stage4_segtrack.trackers import make_tracker
 from simlive.stage7_validation.identity import identity_summary, match_ids
@@ -76,7 +78,10 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
             spots = ms2_spots(tx, truth, cfg)
 
     stage_dir(run, "stage3_microscopy")
-    imager = Imager(cfg, cells, truth, spots, occ, entropy_for(seed))
+    fid = make_fiducials(cfg, cells, np.random.default_rng(ss[7]))          # beads on the slide in every image (None if off)
+    if fid is not None:
+        fid.to_csv(s3 / "fiducials.csv", index=False)
+    imager = Imager(cfg, cells, truth, spots, occ, entropy_for(seed), fiducials=fid)
     on = imager.E.enabled_ids()
     progress("Stage 3: rendering " + " + ".join(imager.channels) + (" (MS2 spots are in the nuclear channel)" if spots is not None else "")
              + f" with {len(on)} image-error sources on: {', '.join(on)}")
@@ -99,6 +104,8 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     if truth is not None:
         truth_in_image(truth, it, px_um, st_truth["channel_shift_px"],
                        (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).to_csv(s3 / "loci_truth_image.csv", index=False)
+    if imager.is3d and imager.E.on("piezo"):               # where the planes really were, and what the piezo's position sensor logged
+        imager.piezo_truth().to_csv(s3 / "piezo_truth.csv", index=False)
     (s3 / "imaging_errors.json").write_text(json.dumps(st_truth, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
     del mv
     write_provenance(s3, cfg, seed)
@@ -228,6 +235,23 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
                     err3c, sc3c = score_localization_3d(pos3c, truth, px_um)
                     err3c.to_csv(out6 / "localization_errors_3d_cal.csv", index=False)
                     scores["truth_3d_calibrated"] = sc3c
+            if src == "truth" and (s3 / "fiducials.csv").exists() and "z_um" in truth.columns:
+                progress("Stage 6: tracking the fiducial beads and correcting the heights")
+                seg = run / "stage4_segtrack" / "auto_segmentation.tif"
+                shifts, _ = track_fiducials(s3 / "nucleus_zstack.tif", zinfo["z_positions_um"], seg)
+                shifts.to_csv(out6 / "fiducial_shifts.csv", index=False)
+                basepos = pos3c if apply_cal else pos3
+                variants = {"uncorrected": basepos, "fiducial beads": correct_with_beads(basepos, shifts)}
+                pt = s3 / "piezo_truth.csv"
+                if pt.exists():
+                    log = pd.read_csv(pt)
+                    variants["piezo position log"] = correct_with_plane_positions(basepos, log, zinfo["z_positions_um"])
+                    zlog = {int(t): g.sort_values("k").readout_um.to_numpy() for t, g in log.groupby("t")}
+                    shifts_l, _ = track_fiducials(s3 / "nucleus_zstack.tif", zinfo["z_positions_um"], seg, z_per_frame=zlog)
+                    variants["beads + piezo log"] = correct_with_beads(variants["piezo position log"], shifts_l)
+                tab = score_variants(variants, pd.read_csv(run / "stage1_chromatin" / "loci_truth.csv"), px_um)
+                tab.to_csv(out6 / "fiducial_corrections.csv", index=False)
+                scores["fiducial_corrections"] = tab.to_dict("records")
         scores.setdefault(src, {})["peak_worker_memory_mb"] = summ.attrs.get("peak_worker_mb")
     try:  # peak working set of this (main) process over the whole run, incl. segmentation/tracking input arrays
         import psutil

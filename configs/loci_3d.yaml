@@ -11,9 +11,9 @@ acquisition:
   exposure_s: 0.1
   z_stack:                  # a z-stack in every frame (remove this block for 2D)
     enabled: true
-    n_slices: 15            # planes per stack
+    n_slices: 17            # planes per stack (the stack must reach the slide, z = 0.3 um, for the fiducial beads to be seen)
     step_um: 0.8            # spacing between planes (Nyquist for the axial PSF is about 0.4 um; larger = faster, coarser)
-    center_um: null         # height of the stack centre above the coverslip (null = geometry.z.z_center_um)
+    center_um: 6.6          # height of the stack centre above the coverslip: 17 planes x 0.8 um cover z = 0.2 to 13.0 um
     slice_time_s: 0.15      # time per plane (exposure + piezo move); loci move during a stack
     projection: max         # 2D image used for segmentation and tracking: max | mean
 
@@ -135,6 +135,7 @@ imaging_errors:
   stage_drift: {enabled: true, drift_px_per_frame: 0.15, jitter_px: 0.05, drift_z_um_per_frame: 0.03, jitter_z_um: 0.02}
   chromatic_shift: {enabled: true, shift_px: {"locus0": [0.25, -0.15], "locus1": [-0.3, 0.2]}, shift_z_um: {"locus0": 0.15, "locus1": -0.2}}
   slice_skew: {enabled: true}          # Time skew within a z-stack
+  piezo: {enabled: true, repeatability_nm: 30.0, bow_um: 0.1, hysteresis_um: 0.05, settling_um: 0.04, bidirectional: true, readout_noise_nm: 5.0}
   # ---- Optics
   psf_blur: {enabled: true}          # Diffraction blur (PSF)
   defocus: {enabled: true, rms_um: 0.1, memory: 0.9, immersion_n: 1.33}
@@ -161,8 +162,17 @@ imaging_errors:
   dsnu: {enabled: true, adu: 1.0}
   adc: {enabled: true, bit_depth: 16, full_well_e: 30000.0}
 
-# Calibration of the imaging instrument: simulated dark frames, a flat-field slide and a bead slide are acquired with the same instrument as the movie,
 # the instrument is estimated from them blindly (stage3_microscopy/calibration), and compared with the truth. All acquisition settings are PLACEHOLDERS.
 calibration:
   simulate: true            # acquire and fit (about 15 s at 130 nm pixels, 40 um field; longer for larger fields and z-stacks)
   apply: true               # also locate the loci with the calibration applied (dark/flat/hot-pixel correction, chromatic shift removed): a second set of scores
+
+# Fiducial beads: a few bright sub-resolution beads on the slide, visible in every image and in every colour. They let the analysis measure how far each
+# frame has moved (stage drift, focus error). In a z-stack the stack must reach down to the slide (z_um above the coverslip) for them to be seen.
+fiducials:
+  enabled: true
+  n_beads: 8
+  photons: 20000           # PLACEHOLDER photons per bead per plane when in focus
+  z_um: 0.3                # height above the coverslip (beads sit on the slide)
+  min_distance_um: 3.0     # beads are placed at least this far from every nucleus (at every time)
+  min_separation_um: 8.0
