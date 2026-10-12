@@ -113,6 +113,29 @@ exposure on a nucleus of ~300 photons per pixel, and in ON frames the true spot'
 nucleus' local maxima). The own-track mode then follows a fixed texture feature of the nucleus. The MS2 brightness per loop and the nuclear
 MCP/NLS-GFP brightness are placeholders the user should set from data; the result above says transcription becomes measurable at roughly
 3-10x the current MS2 brightness (or correspondingly less nuclear background).
+
+**Brightness sweep** (`scripts/sweep_ms2_brightness.py`, 2026-10-11).
+- **R** = photons of one Pol II carrying all 24 loops / photons of one nuclear-GFP pixel, same exposure. Placeholder R = 0.8.
+- **Setup:** toy loci with probes and transcription on, all image errors, calibration applied, true cell IDs. 3 seeds per value. Mean (min..max).
+- **The ON signal:** the gene was ON in 12% of cell-frames (6-19% by seed), with a median of 24 loops (about one Pol II) when ON.
+- **What a real movie still needs:** no published ratio of spot to nuclear background was found (2026-10-11 search), so R has to be measured on a
+  real movie. Take the background-subtracted spot photons per Pol II over the mean nuclear pixel value, with the camera offset removed.
+
+| R | trace r, at the promoter | ON called from that trace (sensitivity / specificity) | trace r, MS2 spot's own track | ON frames located by its own track |
+|---|---|---|---|---|
+| 0.25 | 0.07 (-0.17..0.31) | 0.01 / 1.00 | 0.02 | 0% |
+| 0.8 (placeholder) | 0.15 (-0.04..0.34) | 0.01 / 1.00 | 0.03 | 0% |
+| 2.5 | 0.40 (0.33..0.46) | 0.11 / 1.00 | 0.00 | 5% |
+| 8 | 0.76 (0.71..0.86) | 0.64 / 1.00 | 0.30 | 21% |
+| 25 | 0.95 (0.93..0.96) | 0.97 / 1.00 | 0.57 | 38% |
+| 80 | 0.99 (0.99..0.99) | 0.99 / 1.00 | 0.83 | 69% |
+
+What this means:
+- **Reading at the promoter:**
+  - single Pol II: needs R of about 8 to be followed (r 0.76) and about 25 to be called reliably ON/OFF (97%);
+  - at R <= 0.8 it cannot be seen at all;
+  - bursts with several Pol II scale accordingly (n Pol II x R).
+- **Finding the MS2 spot by itself** needs roughly 10x more brightness than reading it at the tracked promoter, and is unreliable even at R = 80.
 Scores in `scores.json` (`ms2`, `ms2_calibrated`): `found_on`, `median_error_um`, `intensity_r`, ON/OFF called from the trace alone
 (`call_sensitivity`, `call_specificity`; threshold 3 x the trace's robust noise).
 
