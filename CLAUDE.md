@@ -249,7 +249,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 103 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 107 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -327,6 +327,24 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   ring-subtracted spot intensities over cells), exponential fit; `intensity_corr` = background-subtracted intensity / b(t) in loci_positions*.csv and
   ms2_traces*.csv; stage6_analysis/bleach.csv (+ true and naive curves), scores["bleaching"]. Measured: nucleus tau 18.4k s vs true 20k (naive, background left in:
   27.9k s, misses ~30% of the decay); locus0 6001 vs 6000 s; spot late/early ratio 0.86-0.89 raw -> 1.00-1.03 corrected (truth 0.97-1.03).
+- Uneven illumination + per-cell bleaching (2026-10-11, docs/SPOT_FINDING.md section "Uneven illumination"):
+  - **Simulation:** `imaging_errors.bleaching.per_cell` (ON in the loci configs; default off in the table) bleaches each cell by its own light dose: the flat-field at
+    its centre (+ stage drift) summed over its earlier frames, 0 outside the lit area (`lit_margin_um`), daughters inherit it (`Imager.cell_bleach`). Truth:
+    `bleach_cells.csv`, plus `bleach`, `bleach_nucleus` and `in_image` columns in loci_truth_image.csv. `geometry.outside_um` gives cells room outside the view
+    (walls at -m and fov+m), so they leave and enter.
+  - **Downstream:** scoring ignores spots outside the image; the CTC truth splits each cell's stretches in view into linked tracks (`ctc_ground_truth`;
+    traccuracy rejects tracks with gaps).
+  - **Analysis:** `stage6_analysis/flatfield.py` self-calibration fits log nuclear signal = a_cell + log F(x) - k D_cell(t), with a quadratic F, a ridge prior and
+    4-fold cross-validation over cells (F kept only if held-out loss improves by >= 2%). Locus colours reuse the nuclear F (`locus_flat="nucleus"`): their own spot
+    fit gave a 12% map error. `bleach_correct_run` now writes `intensity_corr` (illumination + per cell) and keeps the old curve as `intensity_corr_global`.
+  - **Measured:**
+    - Seed 31 (moving cells, entering): map error 2.1% vs 3.8% for even light (flat slide 1.0%); per-cell bleaching error 0.044 vs 0.091 for one curve.
+    - Seed 12 (slow cells): the fit was rejected, correctly.
+    - Locus tau stays biased (probe brightness changes over time).
+- MS2 brightness sweep: `scripts/sweep_ms2_brightness.py` (R = one Pol II's MS2 photons / one nuclear pixel; placeholder R = 0.8; 6 values x 3 seeds, `tracking.skip: true`
+  = new config switch that skips stages 4/7 and analyses true IDs only; such runs do not appear in the dashboard's run list). Results in
+  `$SIMLIVE_DATA/sweeps/ms2_brightness/results.csv`, Spot finding page part 3d.
+- NOT built: using promoter + enhancer + MS2 jointly to choose spots, and separating homologous copies: plan in docs/PLAN_three_signals_and_homologs.md.
 - scripts/compare_localizers.py --run <run> also computes MS2 traces and the bleaching correction (`--ms2-only` = just those; for older runs). Variants in
   compare.py: original, default, chen_literal, no_median, dog_snr5, integer (+3D: zmed3); tables are merged, so delete method_comparison.csv after renaming variants.
 - Scores (`score_localization[_3d]`): detection over loci WITH light (`photons` in loci_truth_image.csv), `n_false_on_dark`, `frac_far` (> 0.5 um), `rms_error_near_um`,

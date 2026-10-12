@@ -214,6 +214,12 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div", help="Chance per frame that a cell divides into two.")
         l_fov = st.slider("Field of view (µm, square)", 30, 120, 80, 5, key="l_fov",
                           help="Side length of the imaged area. A smaller field is much cheaper for z-stacks (50 µm is a good start).")
+        l_out = st.slider("Room outside the field (µm)", 0, 40, 0, 5, key="l_out",
+                          help="0 = cells bounce off the edge of the image. More = cells live in a larger area, wander out of view and new ones "
+                               "walk in (unbleached, if the light only falls on the imaged field). Add cells to keep the density.")
+        l_pcb = st.checkbox("Bleach each cell by the light it has received", True, key="l_pcb",
+                            help="Each cell bleaches by its own light dose: the uneven illumination along its path, nothing while outside the lit "
+                                 "area, daughters inherit the mother's dose. Off = one bleaching curve for the whole movie (the original model).")
         st.markdown("**3D z-stacks**")
         st.caption("Instead of one picture per frame, record a stack of planes at different heights. Nuclei become 3D ellipsoids, loci get a "
                    "height, and the microscope blurs along z as well. Segmentation and tracking use the maximum projection; the loci are located in 3D.")
@@ -297,7 +303,8 @@ if go_loci:
               f"acquisition.frame_interval_s={l_dt}", f"motion.speed_scale={l_speed}",
               f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", f"geometry.fov_um=[{l_fov}, {l_fov}]", *l_ie,
               f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}",
-              f"locus_analysis.method={l_meth}", f"locus_analysis.dog_snr={l_snr}"]
+              f"locus_analysis.method={l_meth}", f"locus_analysis.dog_snr={l_snr}",
+              f"geometry.outside_um={l_out}", f"imaging_errors.bleaching.per_cell={'true' if l_pcb else 'false'}"]
     if l_conf:
         common.append("optics.modality=confocal")
     est_gb = 0.0

@@ -60,6 +60,10 @@ def simulate_cells(cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
     harm = np.array(sh["harmonics"], float)
     n_frames, dt = cfg["acquisition"]["n_frames"], cfg["acquisition"]["frame_interval_s"]
     fov = np.array(g["fov_um"], float)  # (y, x)
+    # cells live in a world that may extend `outside_um` beyond the field of view on every side: they can then leave the view and enter
+    # it (unbleached, if the light only falls on the field). 0 = reflecting walls at the edge of the view (the original model)
+    out_um = float(g.get("outside_um", 0.0) or 0.0)
+    lo, hi = np.full(2, -out_um), fov + out_um
     scale = m.get("speed_scale", 1.0)  # multiplies every displacement: 0.5 = cells move half as far per frame
     sigma = scale * np.sqrt(2 * m["D_um2_s"] * dt)
     drift = scale * m.get("drift_um_s", 0.0) * dt
@@ -72,7 +76,7 @@ def simulate_cells(cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
     pos = np.zeros((n0, 2))
     for i in range(n0):  # random non-overlapping initial placement
         for _ in range(2000):
-            p = rng.uniform(bound[i], fov - bound[i])
+            p = rng.uniform(lo + bound[i], hi - bound[i])
             if all(np.hypot(*(p - pos[j])) >= bound[i] + bound[j] for j in range(i)):
                 pos[i] = p
                 break
@@ -127,15 +131,15 @@ def simulate_cells(cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
         # --- motion ---
         heading = heading + rng.normal(0, m.get("heading_diffusion_rad", 0.3), n)
         pos = pos + rng.normal(0, sigma, pos.shape) + drift * np.stack([np.sin(heading), np.cos(heading)], 1)
-        _resolve_collisions(pos, bound, fov, rng)
+        _resolve_collisions(pos, bound, lo, hi, rng)
 
     return pd.DataFrame(rows, columns=cols)
 
 
-def _resolve_collisions(pos: np.ndarray, radius: np.ndarray, fov: np.ndarray, rng, iters: int = 100) -> None:
+def _resolve_collisions(pos: np.ndarray, radius: np.ndarray, lo: np.ndarray, hi: np.ndarray, rng, iters: int = 100) -> None:
     n = len(pos)
     for _ in range(iters):
-        np.clip(pos, radius[:, None], fov - radius[:, None], out=pos)  # reflecting walls (before the overlap
+        np.clip(pos, lo + radius[:, None], hi - radius[:, None], out=pos)  # reflecting walls (before the overlap
         moved = False                                                  # pass, so a clip can't leave an overlap)
         for i in range(n):
             for j in range(i + 1, n):

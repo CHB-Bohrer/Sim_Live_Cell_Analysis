@@ -99,12 +99,15 @@ def ms2_truth(run: Path) -> pd.DataFrame | None:
     cfg = yaml.safe_load((run / "stage2_cells" / "params.yaml").read_text())
     tc = cfg["loci"]["transcription"]
     prom = pd.read_csv(ti)
-    prom = prom[prom.locus_id == 0][["t", "cell_id", "y_um", "x_um"]]       # the MS2 spot is drawn at the promoter, in the nuclear channel
+    keep = ["t", "cell_id", "y_um", "x_um"] + [c for c in ("bleach_nucleus", "in_image") if c in prom.columns]
+    prom = prom[prom.locus_id == 0][keep]       # the MS2 spot is drawn at the promoter, in the nuclear channel
     tx = pd.read_csv(tx_f)[["t", "cell_id", "ms2_loops", "promoter_on"]]
     m = prom.merge(tx, on=["t", "cell_id"])
     m["photons"] = float(tc.get("photons_per_loop_s", 100.0)) * float(cfg["acquisition"]["exposure_s"]) * m.ms2_loops
     it = run / "stage3_microscopy" / "imaging_truth.csv"
-    if it.exists():
+    if "bleach_nucleus" in m.columns:          # per-cell bleaching: this cell's own factor
+        m["photons_frame"] = m.photons * m.bleach_nucleus.fillna(1.0)
+    elif it.exists():
         b = pd.read_csv(it).set_index("t")
         m["photons_frame"] = m.photons * (b["bleach_nucleus"].reindex(m.t).to_numpy() if "bleach_nucleus" in b else 1.0)
     else:
@@ -117,6 +120,8 @@ def score_ms2(trace: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: fl
     found_on = share of ON frames with a detection within far_um of the true spot; detected_on = with any detection; false_on_off = share of OFF frames with one; err = distance of detections to the true
     spot in ON frames (frac_far > far_um); intensity_r = Pearson r of the trace with the true photons over ALL frames; ON/OFF call from
     the trace alone: intensity > k_call x robust noise of the trace (noise from its median absolute deviation, dominated by OFF frames)."""
+    if "in_image" in truth.columns:            # a promoter outside the image (its cell half out of view) cannot be measured
+        truth = truth[truth.in_image.astype(bool)]
     j = trace.merge(truth, on=["cell_id", "t"], how="inner")
     if j.empty:
         return j, {}

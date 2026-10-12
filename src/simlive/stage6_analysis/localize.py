@@ -157,10 +157,12 @@ def locus_distances(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
 
 
 def _visible(truth: pd.DataFrame) -> pd.Series:
-    """True where the simulation drew a spot at all (the probe model can leave a locus with no probe attached during an exposure)."""
-    if "photons" in truth.columns:
-        return truth.photons > 0
-    return pd.Series(True, index=truth.index)
+    """True where the simulation drew a spot at all (the probe model can leave a locus with no probe attached during an exposure) and
+    it lies inside the image (cells may walk in and out of the field: geometry.outside_um)."""
+    vis = truth.photons > 0 if "photons" in truth.columns else pd.Series(True, index=truth.index)
+    if "in_image" in truth.columns:
+        vis = vis & truth.in_image.astype(bool)
+    return vis
 
 
 def photons_in_frame(truth: pd.DataFrame, imaging_truth: pd.DataFrame | None) -> pd.DataFrame:
@@ -170,7 +172,9 @@ def photons_in_frame(truth: pd.DataFrame, imaging_truth: pd.DataFrame | None) ->
         return truth
     out = truth.copy()
     out["photons_frame"] = out.photons.astype(float)
-    if imaging_truth is not None:
+    if "bleach" in out.columns:            # per-cell bleaching (each cell by its own light dose): the factor of this spot's cell and colour
+        out["photons_frame"] = out.photons * out.bleach.fillna(1.0)
+    elif imaging_truth is not None:
         it = imaging_truth.set_index("t")
         for k in out.locus_id.unique():
             col = f"bleach_locus{int(k)}"

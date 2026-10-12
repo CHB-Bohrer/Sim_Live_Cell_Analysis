@@ -354,6 +354,9 @@ def render(run_path: Path | None = None) -> None:
     bg = float(c[1].number_input("Nuclear haze (photons/pixel/s)", 0.0, 100000.0, 3000.0, 100.0, key="tx_bg"))
     pxn = float(c[2].number_input("Pixel size (nm)", 50.0, 1000.0, 130.0, 10.0, key="tx_px"))
     sigma = float(c[3].number_input("PSF sigma (pixels)", 0.5, 5.0, 1.4, 0.1, key="tx_sig"))
+    st.caption(f"Relative brightness R = one Pol II with all {p.n_loops} loops / one nuclear pixel = {p.n_loops * ph / max(bg, 1e-9):.2f} "
+               "(placeholder 0.8). The 🔎 Spot finding page (part 3d) shows how well transcription can be measured as a function of R; "
+               "measure R on a real movie as the background-subtracted spot photons per Pol II over the nuclear pixel value (offset removed).")
     nt = 8
     first = int(st.slider("First frame shown", 0, max(0, n_frames - nt), 0, key="tx_f0"))
     idx = np.arange(first, min(first + nt, n_frames))

@@ -12,6 +12,7 @@ acquisition:
 
 geometry:
   fov_um: [80, 80]
+  outside_um: 0             # room around the field where cells live out of view (they can walk in and out); 0 = walls at the image edge
   cell_radius_um: 6.0
   shape:
     aspect_mean: 1.25
@@ -145,7 +146,7 @@ imaging_errors:
   exposure_motion: {enabled: true, locus_sigma_nm: 25.0}
   haze: {enabled: true, fraction: 0.06, sigma_um: 2.5}
   # ---- Illumination
-  bleaching: {enabled: true}          # Photobleaching
+  bleaching: {enabled: true, per_cell: true, lit_margin_um: 0.0}   # per_cell: each cell bleaches by the light it received (flat-field along its path; 0 outside the lit area)
   flat_field: {enabled: true, vignette: 0.15, tilt: 0.03}
   flicker: {enabled: true, cv: 0.01, memory: 0.8}
   # ---- Background

@@ -33,7 +33,7 @@ from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances
 from simlive.stage6_analysis.ms2 import ms2_trace, ms2_truth, score_ms2
 from simlive.stage4_segtrack.trackers import make_tracker
 from simlive.stage7_validation.identity import identity_summary, match_ids
-from simlive.stage7_validation.tracking_metrics import evaluate, gt_table, write_ctc
+from simlive.stage7_validation.tracking_metrics import ctc_ground_truth, evaluate, write_ctc
 
 VARIANTS = ("gt_masks", "auto_masks")
 
@@ -102,14 +102,36 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
     st_truth = imager.static_truth()
     cells_in_image(cells, it, px_um).to_csv(s3 / "cells_image.csv", index=False)
+    bt = imager.bleach_truth()          # per-cell bleaching (each cell by its own light dose), empty unless bleaching.per_cell is on
+    if len(bt):
+        bt.to_csv(s3 / "bleach_cells.csv", index=False)
     if truth is not None:      # + photons per spot, so scoring can tell a missed spot from a locus that had no light at all
-        truth_in_image(truth, it, px_um, st_truth["channel_shift_px"], (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).merge(
-            imager.locus_photons(), on=["t", "cell_id", "locus_id"], how="left").to_csv(s3 / "loci_truth_image.csv", index=False)
+        tim = truth_in_image(truth, it, px_um, st_truth["channel_shift_px"], (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).merge(
+            imager.locus_photons(), on=["t", "cell_id", "locus_id"], how="left")
+        ny, nx = imager.shape                                   # cells can be partly or wholly outside the field (geometry.outside_um)
+        yd, xd = (tim[c] if c in tim else tim[c.replace("_drawn", "")] for c in ("y_drawn_um", "x_drawn_um"))
+        tim["in_image"] = (yd / px_um >= 0) & (yd / px_um <= ny - 1) & (xd / px_um >= 0) & (xd / px_um <= nx - 1)
+        if len(bt):     # the true bleaching factor of each spot (its own colour) and of its nucleus (the MS2 spot's MCP-GFP)
+            b = bt.set_index(["t", "cell_id"])
+            key = pd.MultiIndex.from_arrays([tim.t, tim.cell_id])
+            tim["bleach"] = [b[f"bleach_locus{int(k)}"].get(i, np.nan) if f"bleach_locus{int(k)}" in b else np.nan
+                             for k, i in zip(tim.locus_id, key)]
+            tim["bleach_nucleus"] = b["bleach_nucleus"].reindex(key).to_numpy() if "bleach_nucleus" in b else np.nan
+        tim.to_csv(s3 / "loci_truth_image.csv", index=False)
     if imager.is3d and imager.E.on("piezo"):               # where the planes really were, and what the piezo's position sensor logged
         imager.piezo_truth().to_csv(s3 / "piezo_truth.csv", index=False)
     (s3 / "imaging_errors.json").write_text(json.dumps(st_truth, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
     del mv
     write_provenance(s3, cfg, seed)
+
+    if (cfg.get("tracking") or {}).get("skip"):          # quick runs (sweeps of the imaging / spot analysis): true IDs only
+        progress("Stage 4: skipped (tracking.skip); the analysis uses the true cell IDs only")
+        if cfg.get("loci"):
+            cal_dir = _run_calibration(cfg, run, progress) if (cfg.get("calibration") or {}).get("simulate") else None
+            cfg = {**cfg, "isolation": {**(cfg.get("isolation") or {}), "sources": ["truth"]}}
+            _isolate_and_analyze(cfg, run, progress, cal_dir)
+        progress("Done")
+        return run
 
     progress("Stage 4: segmenting")
     stage_dir(run, "stage4_segtrack")
@@ -123,7 +145,7 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     tracker = make_tracker(tname, **tcfg)
 
     stage_dir(run, "stage7_validation")
-    gt_dir = write_ctc(gt_lab, gt_table(cells), s7 / "ctc_gt")
+    gt_dir = write_ctc(*ctc_ground_truth(gt_lab, cells), s7 / "ctc_gt")      # cells that leave and re-enter: one CTC track per stretch
     metrics = {}
     for variant, masks in (("gt_masks", gt_lab), ("auto_masks", auto_lab)):
         progress(f"Stage 4: tracking on {variant} ({tname})")

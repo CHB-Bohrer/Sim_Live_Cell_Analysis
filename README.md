@@ -138,5 +138,21 @@ every step on any cell, spot and frame, the error of every frame against the tru
 terminal (re-runs only stage 6 on a finished run, ~1-3 min; also adds MS2 traces and the bleaching correction to older runs):
 `scripts\run.cmd python scripts\compare_localizers.py --run <run folder or name>`. Method, sources and measured numbers: [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md).
 
+**Uneven illumination, per-cell bleaching, cells entering the field.**
+- **Simulation:** with `imaging_errors.bleaching.per_cell: true` (on in the loci configs) every cell bleaches by the light it has received. That dose follows
+  the uneven illumination along its path, a cell gets nothing while outside the lit area (`lit_margin_um`), and daughters inherit the dose.
+  `geometry.outside_um` lets cells live outside the imaged field and walk in and out (sidebar: *Room outside the field*). Truth per cell is in
+  `stage3_microscopy/bleach_cells.csv`.
+- **Analysis (`stage6_analysis/flatfield.py`):** estimates the illumination map and the bleaching from the movie itself, with no flat-field image. The same
+  nucleus is seen at many places, so brightness changes that follow position reveal the illumination, and decline that follows accumulated light reveals
+  bleaching. The illumination term is kept only if it predicts held-out cells better than even light.
+- **Results:** shown on the Spot finding page, part 3c.
+
+**How bright must the MS2 spot be?** `scripts\run.cmd python scripts\sweep_ms2_brightness.py` sweeps R = (one Pol II's MS2 photons) / (one nuclear GFP pixel),
+3 seeds per value, tracking skipped (`tracking.skip: true`). Results: Spot finding page, part 3d.
+
+**Not built yet:** using the promoter, the enhancer and the MS2 spot together to choose spots, and separating the copies of a locus on different
+chromosomes. The plan is in [docs/PLAN_three_signals_and_homologs.md](docs/PLAN_three_signals_and_homologs.md).
+
 The dashboard now runs only the page you have open (a navigation bar replaces the tabs), which made reruns ~5-10x faster; the run summary has a one-line description
 of every image-error source.

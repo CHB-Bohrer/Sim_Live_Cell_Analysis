@@ -67,7 +67,7 @@ def correct(df: pd.DataFrame, b: np.ndarray, col: str = "intensity") -> pd.Serie
     return df[col] / b[np.clip(df.t.to_numpy().astype(int), 0, len(b) - 1)]
 
 
-def bleach_correct_run(run: Path, sources: tuple = ("truth",)) -> dict:
+def bleach_correct_run(run: Path, sources: tuple = ("truth",), locus_flat: str = "nucleus") -> dict:
     """Estimate b(t) for every channel of a finished run, add `intensity_corr` to its locus and MS2 tables, and return a summary with the
     estimates next to the simulation's true bleaching (imaging_truth.csv). Writes stage6_analysis/bleach.csv."""
     import yaml
@@ -116,10 +116,124 @@ def bleach_correct_run(run: Path, sources: tuple = ("truth",)) -> dict:
                     summary[c]["max_error"] = float(np.nanmax(np.abs(out[f"{c}_est"] - out[f"{c}_true"])))
         if "nucleus_true" in out:
             summary["nucleus"]["max_error_naive"] = float(np.nanmax(np.abs(out.nucleus_naive - out.nucleus_true)))
-    summary.update(_scores(run, s6))
     s6.mkdir(parents=True, exist_ok=True)
     out.to_csv(s6 / "bleach.csv", index=False)
+    for src in sources:        # the global correction above is kept as intensity_corr_global; intensity_corr becomes flat-field + per cell
+        try:
+            ff = flat_bleach_correct(run, src, cfg, locus_flat)
+        except FileNotFoundError:
+            continue
+        if src == "truth":
+            summary["flatfield"] = ff
+    summary.update(_scores(run, s6))
     return summary
+
+
+LABELS = {"truth": ("stage3_microscopy", "labels.tif"), "tracked_gt_masks": ("stage4_segtrack", "tracked_gt_masks.tif"),
+          "tracked_auto_masks": ("stage4_segtrack", "tracked_auto_masks.tif")}
+
+
+def flat_bleach_correct(run: Path, src: str, cfg: dict, locus_flat: str = "nucleus") -> dict:
+    """Uneven illumination + per-cell bleaching from the movie itself (flatfield.py), for one identity source: fit on the nuclei (the nuclear
+    channel, also the MS2 spots) and on each locus colour's spot intensities, then intensity_corr = intensity / (F(spot) x b_cell(t)) in the
+    locus and MS2 tables (tables made with the calibration applied are already flat-field corrected: only b_cell(t) is divided out). The
+    previous global correction moves to intensity_corr_global. Returns the fits and, for the truth source, how close they are to the truth."""
+    from simlive.stage6_analysis.flatfield import correct_values, fit_flat_bleach, nuclear_signals
+
+    run = Path(run)
+    s3, d6 = run / "stage3_microscopy", run / "stage6_analysis" / src
+    lab = run / LABELS[src][0] / LABELS[src][1]
+    if not lab.exists() or not d6.exists():
+        raise FileNotFoundError(lab)
+    dt = float(cfg["acquisition"]["frame_interval_s"])
+    nuc = nuclear_signals(s3 / "nucleus.tif", lab)
+    shape = tifffile.TiffFile(str(lab)).pages[0].shape[-2:]
+    track = nuc[["cell_id", "t", "y_px", "x_px"]]
+    fits = {"nucleus": fit_flat_bleach(nuc[~nuc.touches_border].rename(columns={"signal": "value"}), track, shape, dt)}
+    nuc["b_est"] = fits["nucleus"].bleach(track).to_numpy()
+    nuc["flat_est"] = fits["nucleus"].F(nuc.y_px.to_numpy(), nuc.x_px.to_numpy())
+    raw_tables = {}
+    for name in ("loci_positions.csv", "loci_positions_cal.csv"):
+        f = d6 / name
+        if not f.exists():
+            continue
+        pos = pd.read_csv(f)
+        if "intensity" not in pos:
+            continue
+        if "intensity_corr" in pos:
+            pos["intensity_corr_global"] = pos.intensity_corr
+        cal = name.endswith("_cal.csv")
+        for k, g in pos.groupby("locus_id"):
+            ch = f"locus{int(k)}"
+            if not cal or ch not in fits:
+                vals = g.rename(columns={"lab_y_px": "y_px", "lab_x_px": "x_px", "intensity": "value"})
+                if locus_flat == "own" and not cal:      # the colour's own illumination, fitted on its spot intensities
+                    fits[ch] = fit_flat_bleach(vals, track, shape, dt, fit_flat=True)
+                else:      # "nucleus": the nuclear channel's illumination shape (same light path), only the bleaching rate fitted; "none": even light
+                    fits[ch] = fit_flat_bleach(vals, track, shape, dt, fit_flat=False, dose_flat=fits["nucleus"] if locus_flat == "nucleus" else None)
+            pos.loc[g.index, "intensity_corr"] = correct_values(g, fits[ch], track, divide_flat=not cal).to_numpy()
+        pos.to_csv(f, index=False)
+        raw_tables[name] = pos
+    for name in ("ms2_traces.csv", "ms2_traces_cal.csv"):
+        f = d6 / name
+        if f.exists():
+            tr = pd.read_csv(f)
+            if "intensity_corr" in tr:
+                tr["intensity_corr_global"] = tr.intensity_corr
+            tr["intensity_corr"] = correct_values(tr, fits["nucleus"], track, divide_flat=not name.endswith("_cal.csv")).to_numpy()
+            tr.to_csv(f, index=False)
+    nuc.to_csv(d6 / "nuclear_signals.csv", index=False)
+    np.savez_compressed(d6 / "flatfield_est.npz", **{c: v.map() for c, v in fits.items()})
+    summary = {c: v.summary() for c, v in fits.items()}
+    for c in summary:
+        if c != "nucleus" and locus_flat != "own":
+            summary[c]["flat_source"] = {"nucleus": "the nuclear channel's estimate", "none": "even light"}[locus_flat]
+    # a nucleus' NLS-GFP brightness is constant in the simulation: what spread over time is left in each cell after each correction?
+    ok = (~nuc.touches_border) & (nuc.signal > 0)
+    n = nuc[ok]
+    bg = pd.read_csv(run / "stage6_analysis" / "bleach.csv").set_index("t").nucleus_est if (run / "stage6_analysis" / "bleach.csv").exists() else None
+    spread = lambda v: float(np.nanmedian(pd.Series(np.log(v.to_numpy()), index=n.index).groupby(n.cell_id).std()))  # noqa: E731
+    summary["nucleus"]["within_cell_sd_raw"] = spread(n.signal)
+    if bg is not None:
+        summary["nucleus"]["within_cell_sd_global"] = spread(n.signal / bg.reindex(n.t).to_numpy())
+    summary["nucleus"]["within_cell_sd_corrected"] = spread(n.signal / (n.flat_est * n.b_est))
+    if src == "truth":
+        _flat_truth(run, cfg, fits, nuc, summary)
+    return summary
+
+
+def _flat_truth(run: Path, cfg: dict, fits: dict, nuc: pd.DataFrame, summary: dict) -> None:
+    """Compare the estimated illumination maps and per-cell bleaching with the simulation's truth (and with the calibration's flat-field)."""
+    from simlive.stage3_microscopy.render import imager_for_run
+
+    s3 = run / "stage3_microscopy"
+    try:
+        im = imager_for_run(run, cfg)
+    except Exception:
+        return
+    cal = None
+    if (s3 / "calibration" / "calibration.json").exists():
+        from simlive.stage3_microscopy.calibration.model import Calibration
+
+        cal = Calibration.load(s3 / "calibration")
+    rms = lambda a, b: float(np.sqrt(np.mean((a / a.mean() - b / b.mean()) ** 2)))  # noqa: E731
+    for c, fit in fits.items():
+        true = im._flat(c, im.E)
+        true = np.ones(im.shape, np.float32) if true is None else true
+        s = summary[c]
+        s["flat_rms_error_est"] = rms(fit.map(), true)              # the map used (even light if the fit was rejected)
+        s["flat_rms_error_none"] = rms(np.ones_like(true), true)              # error of assuming even illumination
+        if cal is not None and c in cal.maps:
+            s["flat_rms_error_calibration"] = rms(cal.maps[c]["flat"].astype(np.float64), true)
+        s["tau_true_s"] = im._tau(c)
+    bc = s3 / "bleach_cells.csv"
+    if bc.exists():                         # per-cell truth: how far is each cell's estimated bleaching from its true one?
+        b = pd.read_csv(bc).merge(nuc[["t", "cell_id", "b_est"]], on=["t", "cell_id"])
+        glob = pd.read_csv(run / "stage6_analysis" / "bleach.csv").set_index("t")
+        b["b_global"] = glob.nucleus_est.reindex(b.t).to_numpy()
+        summary["nucleus"]["per_cell_b_rms_error_est"] = float(np.sqrt(np.mean((b.b_est - b.bleach_nucleus) ** 2)))
+        summary["nucleus"]["per_cell_b_rms_error_global"] = float(np.sqrt(np.mean((b.b_global - b.bleach_nucleus) ** 2)))
+        summary["nucleus"]["per_cell_b_true_range"] = [float(b.bleach_nucleus.min()), float(b.bleach_nucleus.max())]
 
 
 def _scores(run: Path, s6: Path) -> dict:
@@ -160,5 +274,10 @@ def _r(g: pd.DataFrame, truth_col: str) -> dict:
     T = g.t.max()
     early, late = g[g.t < T / 4], g[g.t >= 3 * T / 4]
     ratio = lambda c: float(late[c].mean() / early[c].mean()) if len(early) and len(late) and early[c].mean() != 0 else np.nan  # noqa: E731
-    return {"r_raw": float(np.corrcoef(g.intensity, g[truth_col])[0, 1]), "r_corrected": float(np.corrcoef(g.intensity_corr, g[truth_col])[0, 1]),
-            "late_early_raw": ratio("intensity"), "late_early_corrected": ratio("intensity_corr"), "late_early_true": ratio(truth_col)}
+    out = {"r_raw": float(np.corrcoef(g.intensity, g[truth_col])[0, 1]), "r_corrected": float(np.corrcoef(g.intensity_corr, g[truth_col])[0, 1]),
+           "late_early_raw": ratio("intensity"), "late_early_corrected": ratio("intensity_corr"), "late_early_true": ratio(truth_col)}
+    if "intensity_corr_global" in g:     # the earlier correction: one b(t) for the whole field, illumination ignored
+        gg = g[np.isfinite(g.intensity_corr_global)]
+        out["r_corrected_global"] = float(np.corrcoef(gg.intensity_corr_global, gg[truth_col])[0, 1]) if len(gg) > 10 else np.nan
+        out["late_early_corrected_global"] = ratio("intensity_corr_global")
+    return out

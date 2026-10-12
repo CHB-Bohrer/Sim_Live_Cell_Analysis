@@ -4,7 +4,7 @@ import numpy as np
 from simlive.io.runs import load_config, REPO_ROOT
 from simlive.stage2_cells.motion import simulate_cells
 from simlive.stage3_microscopy.render import render_nuclei
-from simlive.stage7_validation.tracking_metrics import evaluate, gt_table, write_ctc
+from simlive.stage7_validation.tracking_metrics import ctc_ground_truth, evaluate, gt_table, write_ctc
 
 CFG = REPO_ROOT / "configs" / "tracking_demo.yaml"
 
@@ -81,3 +81,18 @@ def test_ground_truth_scores_perfectly_against_itself(tmp_path):
     pred = write_ctc(lab, gt_table(cells), tmp_path / "pred")
     m = evaluate(gt, pred)
     assert m["CTCMetrics"]["TRA"] == 1.0 and m["CTCMetrics"]["DET"] == 1.0
+
+
+def test_cells_can_walk_out_of_the_field_and_back(tmp_path):
+    """geometry.outside_um: cells live in a larger world; the CTC truth splits a cell's stretches in view into linked tracks."""
+    cfg = small_cfg(**{"acquisition.n_frames": 60, "geometry.outside_um": 30, "motion.speed_scale": 3.0})
+    cells = simulate_cells(cfg, np.random.default_rng(4))
+    fov = np.array(cfg["geometry"]["fov_um"])
+    assert (cells.y_um < 0).any() or (cells.x_um < 0).any() or (cells.y_um > fov[0]).any() or (cells.x_um > fov[1]).any()
+    _, lab = render_nuclei(cells, cfg, np.random.default_rng(3))
+    masks, tab = ctc_ground_truth(lab, cells)
+    for r in tab.itertuples():           # every track is present in every frame from t1 to t2 (what traccuracy requires)
+        assert all((masks[t] == r.label).any() for t in range(r.t1, r.t2 + 1))
+    gt = write_ctc(masks, tab, tmp_path / "gt")
+    m = evaluate(gt, write_ctc(masks, tab, tmp_path / "pred"))
+    assert m["CTCMetrics"]["DET"] == 1.0

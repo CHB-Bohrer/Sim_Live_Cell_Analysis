@@ -116,7 +116,12 @@ A widefield microscope also collects light from above and below the focal plane;
 
 Fluorophores are destroyed by the excitation light, so every channel dims exponentially during the movie.
 
-**Effect:** Signal falls over time (nuclear: optics.bleach_tau_s; loci: loci.bleach_tau_s); late frames are noisier.
+**Effect:** Signal falls over time (nuclear: optics.bleach_tau_s; loci: loci.bleach_tau_s); late frames are noisier. With `per_cell` each cell bleaches by the light it has received: its dose follows the uneven illumination (flat-field) along its path, nothing outside the lit area, so a cell that walks into the field arrives unbleached and daughters inherit the mother's dose. tau is the time constant at the field's mean illumination.
+
+| parameter | default | unit | meaning |
+|---|---|---|---|
+| `per_cell` | `False` |  | bleach every cell by its own light dose (uneven illumination, cells entering the field) |
+| `lit_margin_um` | `0.0` | um | the excitation light reaches this far beyond the camera's field (0 = only what is imaged) |
 
 ### Uneven illumination (flat-field)  (`flat_field`)
 

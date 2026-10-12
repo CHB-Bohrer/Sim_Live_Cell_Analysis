@@ -128,6 +128,51 @@ naive estimate on raw brightness (background left in) gives tau 27,900 s and mis
 7,180 vs 6,000. The spot intensities' late / early ratio goes 0.86-0.89 (bleaching) -> 1.00-1.03 after correction, matching the true photons
 (0.97-1.03). In these movies bleaching is mild (6% nucleus, 18% loci over 20 min); the same code handles stronger bleaching.
 `tests/test_spots.py::test_bleaching_is_measured_after_removing_the_background...` checks it on a synthetic movie with a known tau.
+That single curve is kept as `intensity_corr_global`. `intensity_corr` is now the per-cell correction below.
+
+## Uneven illumination + per-cell bleaching, without a flat-field image (`flatfield.py`, built 2026-10-11)
+
+**The simulation** (`imaging_errors.bleaching.per_cell: true`, on in the loci configs):
+- Each cell bleaches by the light it has received: the illumination (flat-field map) at its position, summed over its earlier frames.
+- It receives nothing while outside the lit area (the camera's field + `lit_margin_um`).
+- Daughters inherit the mother's dose. tau refers to the field's mean illumination.
+- `geometry.outside_um` lets cells live outside the imaged field, so cells leave and unbleached cells walk in.
+- Truth: `stage3_microscopy/bleach_cells.csv`, plus `bleach` / `bleach_nucleus` / `in_image` columns in loci_truth_image.csv. Spots outside
+  the image are not counted as misses.
+- The CTC tracking truth writes each stretch a cell spends in view as its own track, linked to the previous stretch.
+
+**The estimate** (self-calibration on the moving cells):
+- **Model:** log(background-subtracted nuclear brightness) = log a_cell + log F(position) - k x D_cell(t), where D_cell = the sum of F along
+  the cell's own track before frame t. F is a smooth quadratic surface with mean 1.
+- **Fit:**
+  - Each cell's brightness a_cell is removed exactly (each cell's mean is subtracted).
+  - Robust least squares, with a prior of sd 0.1 on each coefficient of F.
+  - The illumination term is kept only if it lowers the robust loss of held-out cells by at least 2% (4-fold cross-validation over cells).
+- **Locus colours:** use the nuclear channel's illumination shape (same light path) and fit only their own bleaching rate (`locus_flat="nucleus"`;
+  `"own"` / `"none"` also exist).
+- **What it cannot know:** light received before a cell is first seen. That is absorbed into a_cell, so a cell's correction is relative to
+  its first frame in view. It is absolute when light falls only on the imaged field.
+- **Correction:** intensity_corr = intensity / (F(spot) x b_cell(t)). Tables made with the calibration applied are already flat-field corrected,
+  so only b_cell is divided out there.
+- **Outputs:** `stage6_analysis/<src>/nuclear_signals.csv`, `flatfield_est.npz`, `scores.json["bleaching"]["flatfield"]`.
+- **Tests:** `tests/test_flatfield.py` (synthetic cells with a known map and tau; renderer dose for a cell entering at frame 10).
+
+**Measured (one seed each; placeholder flat-field: vignette 0.15, tilt 0.03, i.e. 3.8% rms over the field):**
+
+| movie | illumination map error (estimate / assume even / flat-field slide) | tau nucleus (est / true) | nuclear brightness spread within a cell (raw / one curve / new) | per-cell bleaching rms error (new / one curve) |
+|---|---|---|---|---|
+| seed 12, slow cells (~5 um over the movie), all in view | fit rejected by cross-validation: even light used, 3.8% / 3.8% / 1.0% | 18,300 / 20,000 s | 2.5% / 1.6% / 1.6% | (global bleaching in this run) |
+| seed 31, speed 1.0, drift 0.03 um/s, 20 um outside, 16 cells, per-cell bleaching, tau 4000 s | 2.1% / 3.8% / 1.0% | 3,680 / 4,000 s (one curve: 3,170) | 6.6% / 2.1% / 1.5% | 0.044 / 0.091 |
+
+Locus colours (seed 31):
+- **Spot intensity vs true photons:** r = 0.784 / 0.801 (raw 0.734 / 0.766, one curve 0.777 / 0.790).
+- **Bleaching rate:** their tau stays biased (about 4,200 vs 3,000 s) because spot brightness also changes through probe binding.
+- **Locus 0's own illumination fit:** map error 12%, worse than doing nothing. That is why the nuclear shape is used for the loci.
+
+Lesson: the illumination can only be learnt where the cells went, and cells must cross a real part of the field. Slow cells or few
+cells give nothing, and the cross-validation then falls back to even light, as it should. Pooling several movies of the same instrument
+(one shared F) is the cheap way to make this work. A dark + flat-field slide, which the calibration simulates, is still 2x more accurate.
+The standard alternative from still images is BaSiC (Peng et al. 2017, Nat. Commun.).
 
 # History: `median_peaks` (removed 2026-10-11)
 

@@ -211,7 +211,7 @@ class _NucleusModel:
             self.textures[r.cell_id] = make_texture(self.tex_cfg, r.radius_um, rng)
         return self.textures[r.cell_id]
 
-    def clean(self, t: int, shift) -> tuple[np.ndarray, np.ndarray]:
+    def clean(self, t: int, shift, factor: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
         """Relative nuclear intensity (brightness x texture) and the label mask of frame t, objects moved by `shift` = (dy, dx) px."""
         ny, nx = self.shape
         clean = np.zeros((ny, nx), np.float32)
@@ -228,13 +228,13 @@ class _NucleusModel:
                 continue
             inside, xn, yn = _nucleus_mask(self.yy[y0:y1, x0:x1] - cy, self.xx[y0:y1, x0:x1] - cx, r, self.px_um, self.harm)
             lab[y0:y1, x0:x1][inside] = r.cell_id
-            val = self._bright(r.cell_id) * np.ones(inside.shape, np.float32)
+            val = self._bright(r.cell_id) * (1.0 if factor is None else factor.get(int(r.cell_id), 1.0)) * np.ones(inside.shape, np.float32)
             if self.tex_cfg:
                 val = val * _sample_texture(self._texture(r), xn, yn)
             clean[y0:y1, x0:x1][inside] = val[inside]
         return clean, lab
 
-    def volume(self, t: int, shift, dz: float, zf: np.ndarray, zk: np.ndarray):
+    def volume(self, t: int, shift, dz: float, zf: np.ndarray, zk: np.ndarray, factor: dict | None = None):
         """3D version of `clean`: (relative intensity on the fine z grid `zf`, label stack on the slice positions `zk`). Each nucleus is a flattened
         ellipsoid: at lateral position with relative radius q its half thickness is z_semi * sqrt(1 - q^2). Objects are moved by `shift` (px)
         and `dz` (um)."""
@@ -254,7 +254,7 @@ class _NucleusModel:
             q, xn, yn = _nucleus_q(self.yy[y0:y1, x0:x1] - cy, self.xx[y0:y1, x0:x1] - cx, r, self.px_um, self.harm)
             inside = q <= 1.0
             h = r.z_semi_um * np.sqrt(np.clip(1 - q * q, 0, None))              # half thickness (um) at every pixel
-            val = self._bright(r.cell_id) * np.ones(inside.shape, np.float32)
+            val = self._bright(r.cell_id) * (1.0 if factor is None else factor.get(int(r.cell_id), 1.0)) * np.ones(inside.shape, np.float32)
             if self.tex_cfg:
                 val = val * _sample_texture(self._texture(r), xn, yn)
             for i in np.nonzero(np.abs(zf - zc) <= r.z_semi_um)[0]:
@@ -486,7 +486,90 @@ class Imager:
         tau = self.opt.get("bleach_tau_s") if channel == "nucleus" else self.cfg["loci"].get("bleach_tau_s", self.opt.get("bleach_tau_s"))
         if not E.on("bleaching") or not tau:
             return 1.0
+        if self.per_cell_bleach(E):          # one number per frame for the record: the mean over the cells in view
+            d = self.cell_bleach(channel, E)
+            v = [b for (tt, _), (b, seen) in d.items() if tt == int(t) and seen]
+            return float(np.mean(v)) if v else 1.0
         return float(np.exp(-self.acq["frame_interval_s"] * t / tau))
+
+    def _tau(self, channel: str):
+        return self.opt.get("bleach_tau_s") if channel == "nucleus" else self.cfg["loci"].get("bleach_tau_s", self.opt.get("bleach_tau_s"))
+
+    def per_cell_bleach(self, E: ErrorSet | None = None) -> bool:
+        E = E or self.E
+        return bool(E.on("bleaching") and E.par("bleaching", "per_cell") and self.nucleus is not None)
+
+    def illumination_at(self, channel: str, y_px: np.ndarray, x_px: np.ndarray, E: ErrorSet | None = None) -> np.ndarray:
+        """Relative excitation (the flat-field map, field mean 1) at image positions; 0 outside the lit area (the camera's field +
+        `lit_margin_um`); beyond the imaged pixels inside the margin the edge value is used."""
+        E = E or self.E
+        y_px, x_px = np.asarray(y_px, float), np.asarray(x_px, float)
+        ny, nx = self.shape
+        m = float(E.par("bleaching", "lit_margin_um")) / self.px_um
+        lit = (y_px >= -0.5 - m) & (y_px <= ny - 0.5 + m) & (x_px >= -0.5 - m) & (x_px <= nx - 0.5 + m)
+        flat = self._flat(channel, E)
+        if flat is None:
+            val = np.ones(len(y_px))
+        else:
+            val = flat[np.clip(np.rint(y_px).astype(int), 0, ny - 1), np.clip(np.rint(x_px).astype(int), 0, nx - 1)]
+        return np.where(lit, val, 0.0)
+
+    def cell_bleach(self, channel: str, E: ErrorSet | None = None) -> dict:
+        """Per-cell bleaching: {(t, cell_id): (bleach factor at frame t, centre in view)}. A cell's dose is the excitation it received in all
+        earlier frames (illumination_at its centre, which moves with the stage drift); daughters start with their mother's dose; tau is
+        the time constant at the field's mean illumination, so with even illumination and no cell ever outside, this equals the global model."""
+        E = E or self.E
+        key = ("cellbleach", channel, E.on("flat_field"), E.par("flat_field", "vignette"), E.par("flat_field", "tilt"),
+               E.par("bleaching", "lit_margin_um"), E.on("stage_drift"), E.par("stage_drift", "drift_px_per_frame"), E.par("stage_drift", "jitter_px"))
+        if key in E.cache:
+            return E.cache[key]
+        tau, dt = self._tau(channel), float(self.acq["frame_interval_s"])
+        ny, nx = self.shape
+        run, out = {}, {}
+        parents = {}
+        for t in sorted(self.nucleus.by_t):
+            g = self.nucleus.by_t[t]
+            dy, dx = self.drift_px(t, E)
+            y, x = g.y_um.to_numpy() / self.px_um + dy, g.x_um.to_numpy() / self.px_um + dx
+            ill = self.illumination_at(channel, y, x, E)
+            pid = g.parent_id.to_numpy() if "parent_id" in g else np.zeros(len(g), int)
+            for cid, p, yy, xx, i in zip(g.cell_id.to_numpy(), pid, y, x, ill):
+                cid = int(cid)
+                if cid not in run:
+                    run[cid] = parents.get(int(p), 0.0)
+                b = float(np.exp(-dt * run[cid] / tau)) if tau else 1.0
+                out[(int(t), cid)] = (b, bool(0 <= yy < ny and 0 <= xx < nx))
+                run[cid] += float(i)
+                parents[cid] = run[cid]
+        E.cache[key] = out
+        return out
+
+    def bleach_of(self, channel: str, t: int, ids, E: ErrorSet | None = None) -> np.ndarray:
+        """Bleaching factor of the objects of cells `ids` in frame t (the global factor for all of them unless per_cell is on)."""
+        E = E or self.E
+        ids = np.asarray(ids)
+        if not self.per_cell_bleach(E) or not E.on("bleaching") or not self._tau(channel):
+            return np.full(len(ids), self.bleach(channel, t, E))
+        d = self.cell_bleach(channel, E)
+        return np.array([d.get((int(t), int(c)), (1.0, False))[0] for c in ids])
+
+    def _factor_dict(self, channel: str, t: int, E: ErrorSet) -> dict:
+        d = self.cell_bleach(channel, E)
+        g = self.nucleus.by_t.get(int(t))
+        return {} if g is None else {int(c): d[(int(t), int(c))][0] for c in g.cell_id.to_numpy()}
+
+    def bleach_truth(self) -> pd.DataFrame:
+        """Per cell and frame: the true bleaching factor of every channel and whether the cell's centre is in view (per_cell bleaching only)."""
+        if not self.per_cell_bleach():
+            return pd.DataFrame()
+        cols = {}
+        for c in self.channels:
+            d = self.cell_bleach(c)
+            cols[f"bleach_{c}"] = {k: v[0] for k, v in d.items()}
+            cols["in_view"] = {k: v[1] for k, v in d.items()}
+        df = pd.DataFrame(cols)
+        df.index = pd.MultiIndex.from_tuples(df.index, names=["t", "cell_id"])
+        return df.reset_index().sort_values(["t", "cell_id"])
 
     # ------------------------------------------------------------------ fixed fields (instrument / sample)
     def _flat(self, channel: str, E: ErrorSet) -> np.ndarray | None:
@@ -541,20 +624,26 @@ class Imager:
         dy, dx = self.drift_px(t, E)
         cy, cx = self.channel_shift_px(channel, E)
         sig = self.sigma_px(channel, t, E)
-        bleach = self.bleach(channel, t, E)
+        per_cell = self.per_cell_bleach(E)
+        bleach = 1.0 if per_cell else self.bleach(channel, t, E)
         lab = None
         if channel == "nucleus":
-            clean, lab = self.nucleus.clean(t, (dy, dx))
+            fac = self._factor_dict(channel, t, E) if per_cell else None
+            clean, lab = self.nucleus.clean(t, (dy, dx), fac)
             ph = (gaussian_filter(clean, sig) if sig > 0 else clean) * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach
             s = self.nucleus.spots_by_t.get(int(t))
-            if s is not None:
-                ph = ph + bleach * _spots_from_arrays(self.shape, s["y"] + dy, s["x"] + dx, s["ph"], sig)
+            if s is not None:     # MS2 spots: MCP-GFP comes from the nuclear pool, so it bleaches with its nucleus
+                if per_cell:
+                    ph = ph + _spots_from_arrays(self.shape, s["y"] + dy, s["x"] + dx, s["ph"] * self.bleach_of(channel, t, s["ids"], E), sig)
+                else:
+                    ph = ph + bleach * _spots_from_arrays(self.shape, s["y"] + dy, s["x"] + dx, s["ph"], sig)
         else:
             d = self.loci[int(channel[5:])].by_t.get(int(t)) if int(channel[5:]) < len(self.loci) else None
             if d is None:
                 ph = np.zeros(self.shape, np.float32)
             else:
-                ph = _spots_from_arrays(self.shape, d["y"] + dy + cy, d["x"] + dx + cx, d["ph"] * bleach, sig)
+                w = self.bleach_of(channel, t, d["ids"], E) if per_cell else bleach
+                ph = _spots_from_arrays(self.shape, d["y"] + dy + cy, d["x"] + dx + cx, d["ph"] * w, sig)
         if self.fid is not None:
             ph = ph + _spots_from_arrays(self.shape, self.fid["y"] + dy + cy, self.fid["x"] + dx + cx, self.fid["ph"], sig)
         if E.on("haze"):
@@ -574,7 +663,8 @@ class Imager:
         fh = float(E.par("haze", "fraction")) if E.on("haze") else 0.0
         sig_h = float(E.par("haze", "sigma_um")) / self.px_um if E.on("haze") else 1.0
         sz_h = float(E.par("haze", "sigma_um")) if E.on("haze") else 1.0
-        bleach = self.bleach(channel, t, E)
+        per_cell = self.per_cell_bleach(E)
+        bleach = 1.0 if per_cell else self.bleach(channel, t, E)
         zk, nz = self.plane_z(t, E), self.nz               # where the planes really are (nominal unless the piezo source is on)
         lab = None
         if channel == "nucleus":
@@ -582,7 +672,7 @@ class Imager:
             dzf = self.zstep / m
             n_pad = int(np.ceil(4 * sz / dzf)) + (2 if E.on("piezo") else 0)
             zf = self.zk[0] - n_pad * dzf + dzf * np.arange((nz - 1) * m + 1 + 2 * n_pad)
-            vol, lab = self.nucleus.volume(t, (dy, dx), dz, zf, zk)
+            vol, lab = self.nucleus.volume(t, (dy, dx), dz, zf, zk, self._factor_dict(channel, t, E) if per_cell else None)
             blurred = gaussian_filter(vol, (sz / dzf, sig, sig) if sig > 0 else (sz / dzf, 0, 0))
             if E.on("piezo"):                       # planes are off their nominal heights: interpolate the fine grid at the true heights
                 pos = (zk - zf[0]) / dzf
@@ -598,14 +688,16 @@ class Imager:
             s = self.nucleus.spots_by_t.get(int(t))
             if s is not None:
                 P = self._points_at(self.nucleus.spots_by_t, t, E)
-                ph = ph + bleach * _points3d(self.shape, zk, P[0] + dy, P[1] + dx, P[2] + dz, P[3], sig, sz, fh, sig_h, sz_h)
+                w = self.bleach_of(channel, t, s["ids"], E) if per_cell else 1.0
+                ph = ph + bleach * _points3d(self.shape, zk, P[0] + dy, P[1] + dx, P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
         else:
             k = int(channel[5:])
             P = self._points_at(self.loci[k].by_t, t, E) if k < len(self.loci) else None
             if P is None:
                 ph = np.zeros((nz, *self.shape), np.float32)
             else:
-                ph = _points3d(self.shape, zk, P[0] + dy + cy, P[1] + dx + cx, P[2] + dz, P[3] * bleach, sig, sz, fh, sig_h, sz_h)
+                w = self.bleach_of(channel, t, self.loci[k].by_t[int(t)]["ids"], E) if per_cell else bleach
+                ph = _points3d(self.shape, zk, P[0] + dy + cy, P[1] + dx + cx, P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
         if self.fid is not None:
             nb = len(self.fid["ph"])
             Y, X = np.tile(self.fid["y"] + dy + cy, (nz, 1)), np.tile(self.fid["x"] + dx + cx, (nz, 1))

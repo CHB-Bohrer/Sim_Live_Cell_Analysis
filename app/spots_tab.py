@@ -15,10 +15,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import yaml
 from matplotlib.patches import Circle, Rectangle
 
 import style
-from simlive.io.runs import REPO_ROOT
+from simlive.io.runs import DATA_ROOT, REPO_ROOT
 from simlive.stage5_linking.celldata import load_cell
 from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
@@ -518,13 +519,158 @@ def _part_bleach(run: Path):
     for key, lab in (("locus0_r", "locus 0 intensity"), ("locus1_r", "locus 1 intensity"), ("ms2_r", "MS2 trace")):
         v = sc.get(key) or {}
         if v:
-            rows.append({"what": lab, "r with true photons: raw": v.get("r_raw"), "r: corrected": v.get("r_corrected"),
-                         "late / early mean: raw": v.get("late_early_raw"), "late / early: corrected": v.get("late_early_corrected"),
+            rows.append({"what": lab, "r with true photons: raw": v.get("r_raw"), "r: one curve": v.get("r_corrected_global"),
+                         "r: illumination + per cell": v.get("r_corrected"),
+                         "late / early mean: raw": v.get("late_early_raw"), "late / early: one curve": v.get("late_early_corrected_global"),
+                         "late / early: illumination + per cell": v.get("late_early_corrected"),
                          "late / early: true photons": v.get("late_early_true")})
     if rows:
         st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
         st.caption("'late / early' = mean of the last quarter of frames over the first quarter: raw intensities fall with the bleaching, corrected "
                    "ones should match the true photons (which change only through biology: probes, bursts). True photons are counted before bleaching.")
+
+
+@st.cache_data(show_spinner=False, max_entries=6)
+def _true_flats(run: str, stamp: float) -> dict:
+    """The simulation's true illumination map of every channel (mean 1; None = even light)."""
+    from simlive.stage3_microscopy.render import imager_for_run
+
+    cfg = yaml.safe_load((Path(run) / "stage2_cells" / "params.yaml").read_text())
+    im = imager_for_run(Path(run), cfg)
+    return {c: im._flat(c, im.E) for c in im.channels}
+
+
+def _part_flat(run: Path):
+    st.markdown("### 3c · Uneven illumination and per-cell bleaching, from the movie itself (no flat-field image)")
+    d6 = run / "stage6_analysis" / "truth"
+    ff, ns = d6 / "flatfield_est.npz", d6 / "nuclear_signals.csv"
+    sc = ((json.loads((run / "stage6_analysis" / "scores.json").read_text()) if (run / "stage6_analysis" / "scores.json").exists() else {})
+          .get("bleaching") or {}).get("flatfield") or {}
+    if not ff.exists() or not sc:
+        st.info("This run has no illumination estimate yet: `scripts\\run.cmd python scripts\\compare_localizers.py --run <run> --ms2-only`.")
+        return
+    st.markdown(
+        "The cells move, so the **same nucleus is seen at many places** in the field. Its background-subtracted brightness is "
+        "*its own brightness × illumination at its position × its bleaching*, and its bleaching follows the **light it has received along its "
+        "own path**: a cell sitting in the bright centre bleaches faster than one in a dim corner, and a cell that walks in from outside the "
+        "field arrives unbleached. Fitting all cells together (per-cell brightness free, illumination = smooth 2D surface, one bleaching rate) "
+        "separates the illumination (changes that follow position) from bleaching (decline that follows accumulated light). The locus colours "
+        "use the nuclear channel's illumination shape (same light path) and fit only their own bleaching rate: spot brightness fluctuates with "
+        "probe binding far too much to map the illumination from the spots (tried: map error 12% vs 4% for doing nothing). A safeguard: the illumination term is kept only if it predicts **held-out cells** at least "
+        "2% better than even light (4-fold cross-validation over cells); otherwise even light is assumed and only bleaching is fitted.")
+    rows = []
+    for c, lab in (("nucleus", "nuclear channel (+ MS2)"), ("locus0", "locus 0"), ("locus1", "locus 1")):
+        s = sc.get(c)
+        if not s:
+            continue
+        cv = s.get("cross_validation") or {}
+        rows.append({"channel": lab, "illumination used": s.get("flat_source") if s.get("flat_source") and not s.get("fitted_flat") else "fitted" if s.get("fitted_flat") else "even (fit rejected)" if s.get("flat_rejected") else "even",
+                     "held-out gain": cv.get("gain"),
+                     "map error: estimate": s.get("flat_rms_error_est"), "map error: assume even": s.get("flat_rms_error_none"),
+                     "map error: flat-field slide": s.get("flat_rms_error_calibration"),
+                     "tau estimated (s)": s.get("tau_s"), "tau true (s)": s.get("tau_true_s")})
+    st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
+    st.caption("Map error = rms difference from the true illumination map over the whole field (both scaled to mean 1). 'Assume even' = the error of "
+               "doing nothing; 'flat-field slide' = the calibration acquisition's map (needs the extra images). Tau = bleaching time constant at the "
+               "field's mean illumination.")
+    n = sc.get("nucleus") or {}
+    if "within_cell_sd_raw" in n:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Nuclear brightness spread within a cell: raw", f"{100 * n['within_cell_sd_raw']:.1f} %")
+        c2.metric("… one bleaching curve for all", f"{100 * n.get('within_cell_sd_global', np.nan):.1f} %")
+        c3.metric("… illumination + per-cell bleaching", f"{100 * n['within_cell_sd_corrected']:.1f} %")
+        if "per_cell_b_rms_error_est" in n:
+            c4.metric("Per-cell bleaching error (rms)", f"{n['per_cell_b_rms_error_est']:.3f}",
+                      f"{n['per_cell_b_rms_error_est'] - n['per_cell_b_rms_error_global']:+.3f} vs one curve", delta_color="inverse")
+        st.caption("A nucleus' NLS-GFP brightness is constant in the simulation, so whatever spread is left over time (median over cells, sd of "
+                   "log brightness) is noise, texture, shape change, or an uncorrected illumination / bleaching effect.")
+    est = np.load(ff)
+    true = _true_flats(str(run), ff.stat().st_mtime)
+
+    def draw_maps():
+        chans = [c for c in ("nucleus", "locus0", "locus1") if c in est.files]
+        fig, axes = plt.subplots(2, len(chans), figsize=(17, 8.2), squeeze=False)
+        for j, c in enumerate(chans):
+            t = true.get(c)
+            t = np.ones_like(est[c]) if t is None else t / t.mean()
+            lo, hi = float(min(t.min(), est[c].min())), float(max(t.max(), est[c].max()))
+            for i, (m, lab) in enumerate(((t, "true"), (est[c], "estimated from the movie"))):
+                ax = axes[i][j]
+                h = ax.imshow(m, cmap="magma", vmin=lo, vmax=hi)
+                ax.set_title(f"{c}: {lab}", fontsize=12)
+                ax.set_xticks([]); ax.set_yticks([])
+                fig.colorbar(h, ax=ax, fraction=0.046)
+        if ns.exists():
+            nn = pd.read_csv(ns)
+            for i in range(2):
+                axes[i][0].plot(nn.x_px, nn.y_px, ".", ms=1.5, color="#22d3ee", alpha=0.5)
+        fig.tight_layout()
+        return fig
+
+    style.cached_figure(st, ("flatmaps", str(ff), ff.stat().st_mtime), draw_maps)
+    st.caption("Cyan dots (nuclear channel) = where the nuclei were seen: the illumination can only be learnt where the cells went.")
+    bc = run / "stage3_microscopy" / "bleach_cells.csv"
+    if ns.exists() and bc.exists():
+        nn = pd.read_csv(ns).merge(pd.read_csv(bc), on=["t", "cell_id"], how="left")
+        bl = pd.read_csv(run / "stage6_analysis" / "bleach.csv").set_index("t")
+
+        def draw_cells():
+            fig, ax = plt.subplots(figsize=(17, 4))
+            cells = nn.groupby("cell_id").t.min().sort_values()
+            pick = list(cells.index[:3]) + list(cells.index[-3:]) if len(cells) > 6 else list(cells.index)
+            colors = plt.cm.tab10(np.linspace(0, 1, len(pick)))
+            for col, cid in zip(colors, pick):
+                g = nn[nn.cell_id == cid].sort_values("t")
+                ax.plot(g.t, g.bleach_nucleus, color=col, lw=2.2, alpha=0.5)
+                ax.plot(g.t, g.b_est, color=col, lw=1.2, ls="--", label=f"cell {cid} (first seen at frame {int(g.t.min())})")
+            ax.plot(bl.index, bl.nucleus_est, color="#111827", lw=1.2, ls=":", label="one curve for the whole movie")
+            ax.set_xlabel("frame"); ax.set_ylabel("bleaching factor, nucleus")
+            ax.set_title("Per-cell bleaching: thick = true, dashed = estimated (cells seen first and last)")
+            ax.legend(fontsize=8, ncol=2)
+            fig.tight_layout()
+            return fig
+
+        style.cached_figure(st, ("cellbleach", str(ns), ns.stat().st_mtime), draw_cells)
+        st.caption("An estimated curve starts at 1 when the cell is first seen: light it got before that (outside the camera's field but inside "
+                   "the lit area, or before the movie) cannot be known; with light only on the imaged field it is exact.")
+
+
+def _part_ms2_sweep():
+    st.markdown("### 3d · How bright must the MS2 spot be? (sweep over many movies)")
+    f = DATA_ROOT / "sweeps" / "ms2_brightness" / "results.csv"
+    if not f.exists():
+        st.info("No sweep yet: `scripts\\run.cmd python scripts\\sweep_ms2_brightness.py` (about 3 minutes per movie).")
+        return
+    d = pd.read_csv(f)
+    st.markdown("**R** = photons of one Pol II carrying all its MS2 loops ÷ photons of one pixel of nuclear GFP (same exposure). The placeholder is "
+                "R = 0.8. Each point = mean over seeds (bars = range); calibration applied, true cell IDs.")
+    g = d.groupby("ratio")
+
+    def draw():
+        fig, axes = plt.subplots(1, 3, figsize=(17, 4))
+        for ax, (col_p, col_o, title) in zip(axes, (("promoter_intensity_r", "own_intensity_r", "trace r with the true MS2 signal"),
+                                                    ("promoter_found_on", "own_found_on", "ON frames located (within 0.5 µm)"),
+                                                    ("promoter_call_sensitivity", "own_call_sensitivity", "ON frames called from the trace"))):
+            for col, lab, colr in ((col_p, "read at the tracked promoter (default)", "#0f766e"), (col_o, "MS2 spot's own track", "#7c3aed")):
+                if col not in d:
+                    continue
+                m, lo, hi = g[col].mean(), g[col].min(), g[col].max()
+                ax.errorbar(m.index, m, yerr=[m - lo, hi - m], marker="o", color=colr, capsize=3, label=lab)
+            ax.axvline(0.8, color="#b91c1c", ls=":", lw=1)
+            ax.set_xscale("log"); ax.set_xlabel("R (one Pol II / one nuclear pixel)"); ax.set_title(title, fontsize=12)
+            ax.set_ylim(-0.05, 1.05)
+        axes[0].legend(fontsize=9)
+        fig.tight_layout()
+        return fig
+
+    style.cached_figure(st, ("ms2sweep", str(f), f.stat().st_mtime), draw)
+    tab = g.agg(**{"movies": ("seed", "size"), "r at promoter": ("promoter_intensity_r", "mean"), "r own track": ("own_intensity_r", "mean"),
+                   "located, own track": ("own_found_on", "mean"), "ON called (sens.)": ("promoter_call_sensitivity", "mean"),
+                   "OFF called (spec.)": ("promoter_call_specificity", "mean")}).reset_index()
+    st.dataframe(tab.round(3), hide_index=True, width="stretch")
+    st.caption("Red dotted line = the placeholder. To place your experiment on the x axis, measure R on a real movie: background-subtracted spot "
+               "photons per Pol II (e.g. the spot of a single nascent transcript, or the spot sum / estimated Pol II number) over the mean nuclear "
+               "pixel value with the camera offset removed.")
 
 
 def _part_compare(run: Path):
@@ -606,4 +752,6 @@ def render(st_, run_path: Path, R: dict):
     _part_steps(run, cfg, p_run, truth)
     _part_scores(run)
     _part_bleach(run)
+    _part_flat(run)
+    _part_ms2_sweep()
     _part_compare(run)
