@@ -344,12 +344,12 @@ def _time_figure(df: pd.DataFrame, i: int, cands: list, px_um: float):
         return
     fig, axes = plt.subplots(1, 3, figsize=(17, 3.8))
     f = df[df.found]
-    axes[0].semilogy(f.t, f.err_nm.clip(lower=1), ".", color="#0f766e", ms=6)
+    axes[0].semilogy(f.t, f.err_nm.clip(lower=1), ".", color="#14b8a6", ms=6)
     far = f[f.err_nm > 1000 * FAR_UM]
-    axes[0].semilogy(far.t, far.err_nm, "o", mfc="none", mec="#b91c1c", ms=9, label="wrong object (> 0.5 µm)")
+    axes[0].semilogy(far.t, far.err_nm, "o", mfc="none", mec="#f87171", ms=9, label="wrong object (> 0.5 µm)")
     miss = df[(~df.found) & df.visible]
     if len(miss):
-        axes[0].plot(miss.t, np.full(len(miss), 2.0), "|", color="#b45309", ms=14, mew=2, label="missed")
+        axes[0].plot(miss.t, np.full(len(miss), 2.0), "|", color="#f59e0b", ms=14, mew=2, label="missed")
     axes[0].set_title("Error per frame (nm)")
     axes[0].legend(fontsize=10)
     # every candidate's distance from the true spot: shows whether the right one was there and whether the choice took it
@@ -360,12 +360,12 @@ def _time_figure(df: pd.DataFrame, i: int, cands: list, px_um: float):
         axes[1].semilogy(np.full(len(d), r.t), np.clip(d, 1, None), ".", color="#94a3b8", ms=5)
         if r.chosen is not None and not pd.isna(r.chosen):
             axes[1].semilogy([r.t], [max(d[int(r.chosen)], 1)], ".", color="#ef4444", ms=7)
-    axes[1].axhline(1000 * FAR_UM, color="#b91c1c", lw=0.8, ls=":")
+    axes[1].axhline(1000 * FAR_UM, color="#f87171", lw=0.8, ls=":")
     axes[1].set_title("Candidates: distance to truth (nm)")
     g = df[df.found & np.isfinite(df.get("photons_frame", np.nan))] if "photons_frame" in df else df.iloc[:0]
     if len(g):
-        axes[2].plot(g.t, g.photons_frame / g.photons_frame.max(), color="#64748b", lw=1.5, label="true photons")
-        axes[2].plot(g.t, g.intensity / max(np.nanmax(g.intensity), 1e-9), ".", color="#0f766e", ms=5, label="measured intensity")
+        axes[2].plot(g.t, g.photons_frame / g.photons_frame.max(), color="#94a3b8", lw=1.5, label="true photons")
+        axes[2].plot(g.t, g.intensity / max(np.nanmax(g.intensity), 1e-9), ".", color="#14b8a6", ms=5, label="measured intensity")
         axes[2].legend(fontsize=10)
     axes[2].set_title("Brightness (scaled to max)")
     for ax in axes:
@@ -395,11 +395,11 @@ def _ms2_trace_figure(df: pd.DataFrame, i: int, per_loop: float = 100.0):
     fig, ax = plt.subplots(figsize=(17, 3.8))
     on = (df.photons > 0).to_numpy()
     for t0, t1 in _runs(df.t.to_numpy(), on):
-        ax.axvspan(t0 - 0.5, t1 + 0.5, color="#fde68a", alpha=0.5, lw=0)
+        ax.axvspan(t0 - 0.5, t1 + 0.5, color="#a16207", alpha=0.5, lw=0)
     z = lambda v: (v - np.nanmedian(v)) / max(np.nanpercentile(v, 99) - np.nanmedian(v), 1e-9)  # noqa: E731  (scaled: 0 = typical, 1 = high)
-    ax.plot(df.t, z(df.intensity_at_promoter), color="#0f766e", lw=1.6, label="at the tracked promoter (default)")
-    ax.plot(df.t, z(df.trace_intensity), color="#7c3aed", lw=1.0, alpha=0.8, label="at the MS2 spot's own track")
-    ax.plot(df.t, df.photons_frame / max(df.photons_frame.max(), 1e-9), color="#111827", lw=1.2, ls="--", label="true MS2 photons")
+    ax.plot(df.t, z(df.intensity_at_promoter), color="#14b8a6", lw=1.6, label="at the tracked promoter (default)")
+    ax.plot(df.t, z(df.trace_intensity), color="#a78bfa", lw=1.0, alpha=0.8, label="at the MS2 spot's own track")
+    ax.plot(df.t, df.photons_frame / max(df.photons_frame.max(), 1e-9), color="#e5e7eb", lw=1.2, ls="--", label="true MS2 photons")
     ax.axvline(df.t.iloc[i], color="orange", lw=1.2)
     ax.set_xlabel("frame")
     ax.set_ylabel("scaled")
@@ -474,8 +474,8 @@ def _part_scores(run: Path):
         def draw():
             e = pd.read_csv(ef)
             fig, ax = plt.subplots(figsize=(17, 3.4))
-            ax.hist(np.log10(1000 * e.err_um.clip(lower=1e-3)), bins=60, color="#0f766e")
-            ax.axvline(np.log10(1000 * FAR_UM), color="#b91c1c", lw=1.2)
+            ax.hist(np.log10(1000 * e.err_um.clip(lower=1e-3)), bins=60, color="#14b8a6")
+            ax.axvline(np.log10(1000 * FAR_UM), color="#f87171", lw=1.2)
             ax.set_xlabel("error (nm, log scale: 1 = 10 nm, 2 = 100 nm, 3 = 1 µm)")
             ax.set_title("All 2D detections of the run (true cell IDs)")
             return fig
@@ -502,10 +502,10 @@ def _part_bleach(run: Path):
         fig, axes = plt.subplots(1, len(chans), figsize=(17, 3.6), squeeze=False)
         for ax, c in zip(axes[0], chans):
             if f"{c}_true" in b:
-                ax.plot(b.t, b[f"{c}_true"], color="#111827", lw=2, label="true (simulation)")
-            ax.plot(b.t, b[f"{c}_est"], color="#0f766e", lw=1.6, ls="--", label="estimated, background removed")
+                ax.plot(b.t, b[f"{c}_true"], color="#e5e7eb", lw=2, label="true (simulation)")
+            ax.plot(b.t, b[f"{c}_est"], color="#14b8a6", lw=1.6, ls="--", label="estimated, background removed")
             if f"{c}_naive" in b:
-                ax.plot(b.t, b[f"{c}_naive"], color="#b91c1c", lw=1.4, ls=":", label="naive, background left in")
+                ax.plot(b.t, b[f"{c}_naive"], color="#f87171", lw=1.4, ls=":", label="naive, background left in")
             ax.set_title({"nucleus": "nuclear channel (also MS2)", "locus0": "locus 0 (promoter)", "locus1": "locus 1 (enhancer)"}[c], fontsize=13)
             ax.set_xlabel("frame")
             ax.legend(fontsize=9)
@@ -623,7 +623,7 @@ def _part_flat(run: Path):
                 g = nn[nn.cell_id == cid].sort_values("t")
                 ax.plot(g.t, g.bleach_nucleus, color=col, lw=2.2, alpha=0.5)
                 ax.plot(g.t, g.b_est, color=col, lw=1.2, ls="--", label=f"cell {cid} (first seen at frame {int(g.t.min())})")
-            ax.plot(bl.index, bl.nucleus_est, color="#111827", lw=1.2, ls=":", label="one curve for the whole movie")
+            ax.plot(bl.index, bl.nucleus_est, color="#e5e7eb", lw=1.2, ls=":", label="one curve for the whole movie")
             ax.set_xlabel("frame"); ax.set_ylabel("bleaching factor, nucleus")
             ax.set_title("Per-cell bleaching: thick = true, dashed = estimated (cells seen first and last)")
             ax.legend(fontsize=8, ncol=2)
@@ -651,12 +651,12 @@ def _part_ms2_sweep():
         for ax, (col_p, col_o, title) in zip(axes, (("promoter_intensity_r", "own_intensity_r", "trace r with the true MS2 signal"),
                                                     ("promoter_found_on", "own_found_on", "ON frames located (within 0.5 µm)"),
                                                     ("promoter_call_sensitivity", "own_call_sensitivity", "ON frames called from the trace"))):
-            for col, lab, colr in ((col_p, "read at the tracked promoter (default)", "#0f766e"), (col_o, "MS2 spot's own track", "#7c3aed")):
+            for col, lab, colr in ((col_p, "read at the tracked promoter (default)", "#14b8a6"), (col_o, "MS2 spot's own track", "#a78bfa")):
                 if col not in d:
                     continue
                 m, lo, hi = g[col].mean(), g[col].min(), g[col].max()
                 ax.errorbar(m.index, m, yerr=[m - lo, hi - m], marker="o", color=colr, capsize=3, label=lab)
-            ax.axvline(0.8, color="#b91c1c", ls=":", lw=1)
+            ax.axvline(0.8, color="#f87171", ls=":", lw=1)
             ax.set_xscale("log"); ax.set_xlabel("R (one Pol II / one nuclear pixel)"); ax.set_title(title, fontsize=12)
             ax.set_ylim(-0.05, 1.05)
         axes[0].legend(fontsize=9)
@@ -721,7 +721,7 @@ def _bars(d: pd.DataFrame, cal: bool):
     y = np.arange(len(d))
     for ax, col, title, scale in ((axes[0], "detection_rate", "found (of visible spots)", 1), (axes[1], "frac_far", "wrong object (share)", 1),
                                   (axes[2], "median_error_um", "median error (nm)", 1000)):
-        ax.barh(y, scale * d[col].fillna(0), color=["#0f766e" if v == "default" else "#94a3b8" for v in d.variant])
+        ax.barh(y, scale * d[col].fillna(0), color=["#14b8a6" if v == "default" else "#94a3b8" for v in d.variant])
         ax.set_title(title, fontsize=13)
     axes[0].set_yticks(y)
     axes[0].set_yticklabels(d.variant)

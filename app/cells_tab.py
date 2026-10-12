@@ -203,7 +203,7 @@ def render(st, run_path: Path, cfg: dict):
         axes[0].legend(fontsize=8)
         dd = dist[dist.cell_id == cid] if len(dist) else dist
         if len(dd):
-            axes[2].plot(dd.t, dd.dist_um, color="k", label="estimated")
+            axes[2].plot(dd.t, dd.dist_um, color="#e5e7eb", label="estimated")
         if truth is not None:
             a = truth[(truth.cell_id == cid) & (truth.locus_id == 0)].set_index("t")
             b = truth[(truth.cell_id == cid) & (truth.locus_id == 1)].set_index("t")

@@ -6,15 +6,16 @@ import html
 
 import matplotlib as mpl
 
-PALETTE = {"ink": "#1f2933", "muted": "#64748b", "line": "#dfe4e1", "card": "#ffffff", "bg": "#fbfbf9",
-           "accent": "#0f766e", "accent_soft": "#d9efec", "good": "#15803d", "warn": "#b45309", "bad": "#b91c1c",
-           "blue": "#2563eb", "violet": "#7c3aed"}
-CYCLE = ["#0f766e", "#2563eb", "#b45309", "#7c3aed", "#b91c1c", "#475569", "#0891b2", "#a16207"]
+# dark theme (the user asked for a darker interface, 2026-10-12); .streamlit/config.toml holds the same colours for Streamlit's widgets
+PALETTE = {"ink": "#e5e7eb", "muted": "#94a3b8", "line": "#26324a", "card": "#111a2c", "bg": "#0b1220",
+           "accent": "#14b8a6", "accent_soft": "#123b3a", "good": "#4ade80", "warn": "#f59e0b", "bad": "#f87171",
+           "blue": "#60a5fa", "violet": "#a78bfa", "fig": "#0f1829", "grid": "#1d2940"}
+CYCLE = ["#2dd4bf", "#60a5fa", "#f59e0b", "#a78bfa", "#f87171", "#94a3b8", "#22d3ee", "#facc15"]
 
 CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-:root {{ --ink:{PALETTE['ink']}; --muted:{PALETTE['muted']}; --line:{PALETTE['line']}; --accent:{PALETTE['accent']}; }}
+:root {{ --ink:{PALETTE['ink']}; --muted:{PALETTE['muted']}; --line:{PALETTE['line']}; --accent:{PALETTE['accent']}; --card:{PALETTE['card']}; }}
 .block-container {{ padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1280px; }}
 h1 {{ font-weight: 700; letter-spacing: -0.02em; font-size: 2rem !important; margin-bottom: .1rem; }}
 h2, h3 {{ font-weight: 650; letter-spacing: -0.01em; }}
@@ -28,33 +29,33 @@ h3 {{ margin-top: 2rem; }}
 [data-baseweb="tab-highlight"] {{ background-color: var(--accent) !important; height: 3px; }}
 
 /* metrics as cards */
-[data-testid="stMetric"] {{ background:#fff; border:1px solid var(--line); border-radius:.8rem; padding:.8rem 1rem;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04); }}
+[data-testid="stMetric"] {{ background:var(--card); border:1px solid var(--line); border-radius:.8rem; padding:.8rem 1rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,.35); }}
 [data-testid="stMetricLabel"] {{ color: var(--muted); }}
 [data-testid="stMetricValue"] {{ font-weight: 700; letter-spacing:-0.02em; }}
 
 /* expanders, forms, dataframes, images get the same card edge */
-[data-testid="stExpander"] {{ border:1px solid var(--line); border-radius:.8rem; background:#fff; }}
-[data-testid="stForm"] {{ border:1px solid var(--line); border-radius:.8rem; background:#fff; }}
+[data-testid="stExpander"] {{ border:1px solid var(--line); border-radius:.8rem; background:var(--card); }}
+[data-testid="stForm"] {{ border:1px solid var(--line); border-radius:.8rem; background:var(--card); }}
 [data-testid="stDataFrame"], [data-testid="stImage"] img, [data-testid="stPyplot"] img {{ border-radius:.6rem; }}
-[data-testid="stSidebar"] {{ background:#f1f3f1; border-right:1px solid var(--line); }}
+[data-testid="stSidebar"] {{ background:#0e1626; border-right:1px solid var(--line); }}
 .stButton > button, .stFormSubmitButton > button {{ border-radius:.6rem; font-weight:600; }}
 
 /* helper components */
 .sl-hero {{ margin: 0 0 1.1rem 0; }}
 .sl-hero p {{ color: var(--muted); margin:.1rem 0 0 0; font-size:1.02rem; }}
-.sl-card {{ background:#fff; border:1px solid var(--line); border-radius:.9rem; padding:1rem 1.1rem; min-height:12.5rem;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04); }}
+.sl-card {{ background:var(--card); border:1px solid var(--line); border-radius:.9rem; padding:1rem 1.1rem; min-height:12.5rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,.35); }}
 .sl-card h4 {{ margin:.1rem 0 .35rem 0; font-size:1rem; }}
 .sl-card p {{ margin:0; color:var(--muted); font-size:.92rem; line-height:1.45; }}
 .sl-step {{ display:inline-flex; width:1.7rem; height:1.7rem; border-radius:50%; background:{PALETTE['accent_soft']};
   color:var(--accent); font-weight:700; align-items:center; justify-content:center; margin-right:.5rem; }}
 .sl-badge {{ display:inline-block; padding:.15rem .65rem; border-radius:999px; font-size:.82rem; font-weight:650; }}
-.sl-badge.good {{ background:#dcfce7; color:#166534; }} .sl-badge.warn {{ background:#fef3c7; color:#92400e; }}
-.sl-badge.bad {{ background:#fee2e2; color:#991b1b; }} .sl-badge.idle {{ background:#e5e7eb; color:#374151; }}
-.sl-badge.run {{ background:{PALETTE['accent_soft']}; color:#115e59; }}
+.sl-badge.good {{ background:#14532d; color:#bbf7d0; }} .sl-badge.warn {{ background:#78350f; color:#fde68a; }}
+.sl-badge.bad {{ background:#7f1d1d; color:#fecaca; }} .sl-badge.idle {{ background:#1f2937; color:#cbd5e1; }}
+.sl-badge.run {{ background:{PALETTE['accent_soft']}; color:#99f6e4; }}
 .sl-stats {{ display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:.6rem; margin:.5rem 0 .2rem 0; }}
-.sl-stat {{ background:#fff; border:1px solid var(--line); border-radius:.7rem; padding:.55rem .8rem; }}
+.sl-stat {{ background:var(--card); border:1px solid var(--line); border-radius:.7rem; padding:.55rem .8rem; }}
 .sl-stat b {{ display:block; font-size:1.35rem; letter-spacing:-0.02em; line-height:1.3; }}
 .sl-stat span {{ color:var(--muted); font-size:.8rem; }}
 .sl-mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.85rem; }}
@@ -62,20 +63,20 @@ h3 {{ margin-top: 2rem; }}
 /* ---- polish layer ---- */
 .stApp, .stMarkdown, p, label, input, textarea, button, [data-baseweb="tab"] {{ font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }}
 [data-testid="stIconMaterial"], [class*="material-symbols"], .material-icons {{ font-family: 'Material Symbols Rounded', 'Material Icons' !important; }}
-.stApp {{ background: linear-gradient(180deg, #f7faf9 0%, #fbfbf9 260px); }}
+.stApp {{ background: radial-gradient(1200px 400px at 20% -10%, #12324a 0%, rgba(11,18,32,0) 60%), #0b1220; }}
 .sl-hero {{ border-left: 5px solid var(--accent); padding: .35rem 0 .35rem 1rem; margin-bottom: 1.4rem; }}
-.sl-hero h1 {{ background: linear-gradient(90deg, #0f766e, #2563eb); -webkit-background-clip: text; background-clip: text;
+.sl-hero h1 {{ background: linear-gradient(90deg, #2dd4bf, #60a5fa); -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; }}
 [data-baseweb="tab"] {{ transition: background .15s, color .15s; }}
 [data-baseweb="tab"]:hover {{ background: {PALETTE['accent_soft']}; color: var(--accent); }}
 [data-testid="stMetric"], [data-testid="stExpander"], [data-testid="stForm"], .sl-card, .sl-stat {{
   transition: box-shadow .15s, transform .15s; }}
-[data-testid="stMetric"]:hover, .sl-card:hover {{ box-shadow: 0 6px 18px rgba(15,23,42,.08); transform: translateY(-1px); }}
+[data-testid="stMetric"]:hover, .sl-card:hover {{ box-shadow: 0 6px 18px rgba(0,0,0,.45); transform: translateY(-1px); }}
 [data-testid="stExpander"] summary {{ font-weight: 600; }}
 .stButton > button, .stFormSubmitButton > button {{ transition: box-shadow .15s, transform .15s; }}
-.stButton > button:hover, .stFormSubmitButton > button:hover {{ box-shadow: 0 4px 12px rgba(15,118,110,.25); transform: translateY(-1px); }}
+.stButton > button:hover, .stFormSubmitButton > button:hover {{ box-shadow: 0 4px 12px rgba(20,184,166,.30); transform: translateY(-1px); }}
 .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {{
-  background: linear-gradient(135deg, #0f766e, #0e7490); border: 0; }}
+  background: linear-gradient(135deg, #0f766e, #0e7490); border: 0; color: #f0fdfa; }}
 [data-testid="stAlert"] {{ border-radius: .8rem; }}
 /* compact metric cards (the headline scores were too large) */
 [data-testid="stMetric"] {{ padding: .35rem .7rem; border-radius: .6rem; }}
@@ -85,9 +86,9 @@ h3 {{ margin-top: 2rem; }}
 .stMarkdown strong {{ font-weight: 600; }}
 [data-baseweb="input"], [data-baseweb="select"] > div {{ border-radius: .55rem; }}
 [data-testid="stSidebar"] h2 {{ font-size: 1.25rem; letter-spacing: -0.01em; }}
-[data-testid="stSidebar"] [data-testid="stExpander"] {{ background: #fff; }}
+[data-testid="stSidebar"] [data-testid="stExpander"] {{ background: var(--card); }}
 .sl-intro {{ display:grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin: .2rem 0 1.2rem 0; }}
-.sl-intro > div {{ border-radius: .85rem; padding: .85rem 1.05rem; border: 1px solid var(--line); background:#fff; }}
+.sl-intro > div {{ border-radius: .85rem; padding: .85rem 1.05rem; border: 1px solid var(--line); background:var(--card); }}
 .sl-intro .what {{ border-left: 4px solid var(--accent); }}
 .sl-intro .how {{ border-left: 4px solid {PALETTE['blue']}; }}
 .sl-intro b.t {{ display:block; font-size:.74rem; letter-spacing:.08em; text-transform:uppercase; margin-bottom:.25rem; }}
@@ -95,7 +96,7 @@ h3 {{ margin-top: 2rem; }}
 .sl-intro p {{ margin:0; color: var(--ink); font-size:.93rem; line-height:1.5; }}
 @media (max-width: 900px) {{ .sl-intro {{ grid-template-columns: 1fr; }} }}
 .sl-guide {{ display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:.6rem; }}
-.sl-guide div {{ background:#fff; border:1px solid var(--line); border-radius:.75rem; padding:.6rem .8rem; font-size:.88rem;
+.sl-guide div {{ background:var(--card); border:1px solid var(--line); border-radius:.75rem; padding:.6rem .8rem; font-size:.88rem;
   line-height:1.4; color: var(--muted); }}
 .sl-guide b {{ color: var(--ink); display:block; font-size:.95rem; }}
 </style>
@@ -154,10 +155,10 @@ def apply(st) -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     fast_pyplot(st)
     mpl.rcParams.update({
-        "figure.facecolor": "white", "axes.facecolor": "white", "savefig.facecolor": "white",
-        "axes.edgecolor": PALETTE["line"], "axes.labelcolor": PALETTE["ink"], "text.color": PALETTE["ink"],
-        "xtick.color": PALETTE["muted"], "ytick.color": PALETTE["muted"],
-        "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.color": "#e8ece9",
+        "figure.facecolor": PALETTE["fig"], "axes.facecolor": PALETTE["fig"], "savefig.facecolor": PALETTE["fig"],
+        "axes.edgecolor": "#3b4a63", "axes.labelcolor": PALETTE["ink"], "text.color": PALETTE["ink"],
+        "xtick.color": PALETTE["muted"], "ytick.color": PALETTE["muted"], "legend.labelcolor": PALETTE["ink"],
+        "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.color": PALETTE["grid"],
         "grid.linewidth": 0.8, "axes.axisbelow": True, "axes.titlesize": 17, "axes.titleweight": "bold",
         "axes.titlelocation": "left", "axes.labelsize": 14, "legend.frameon": False, "font.size": 14,
         "xtick.labelsize": 13, "ytick.labelsize": 13, "legend.fontsize": 12,   # figures are ~14 in wide shown at ~70 dpi: small fonts were unreadable
@@ -180,11 +181,12 @@ GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked an
          ("🔬 New single-cell loci run (sidebar)", "Adds two coloured loci per nucleus (optional probes, MS2, 3D z-stacks and a calibration). 2 to 10 min."),
          ("🎞 Movie · 📊 Metrics · 🧭 Trajectories", "How well the tracker did, frame by frame, with the errors marked."),
          ("🔬 Cells · 📈 Scans", "Single-cell movies with their loci; sweeps over many seeds and settings."),
-         ("🔎 Spot finding", "How each locus is found (steps adapted from Bennabi et al. 2025), every intermediate image, the error per frame, and a comparison of methods."),
-         ("🖼 Images", "Every recorded image next to the ground truth behind it, in 2D or as z-slices and side views; the image built up one error at a time."),
+         ("🔎 Spot finding", "How each locus and the MS2 signal are found (Chen et al. 2025), every intermediate image, the error per frame, bleaching and illumination corrections, and a comparison of methods."),
+         ("🖼 Images", "Every recorded image next to the ground truth behind it; pick ONE error source to see what it is, how it is corrected and what it does to the results; the image built up one error at a time."),
          ("📍 Stage & fiducials", "z-piezo plane errors, the beads on the slide that track drift and focus, and what correcting with them (or the piezo's log) does."),
          ("🎯 Calibration", "Simulated dark frames, flat-field slide and bead slide: what the instrument is, estimated vs true, and how much correcting for it helps."),
          ("⚡ Transcription · 🧪 Probes", "Build and explore the models behind the MS2 spot and the locus brightness."),
+         ("🧮 MS2 → Pol II", "Turn each cell's MS2 trace into the moments Pol II started and into bursts (Chen et al. 2025 deconvolution), against the truth."),
          ("🗂 Library · 🧬 Chromatin", "The saved polymer simulations: progress, choosing them, and looking inside one.")]
 
 
@@ -227,6 +229,13 @@ GLOSSARY = {
     "Fiducial bead": "A bright tiny bead lying on the slide, visible in every image, used to measure how far the whole picture has drifted.",
     "Position log": "The piezo's own sensor reading of where each plane really was (a few nm of noise).",
     "Kymograph": "A picture with time along one axis and position along a line on the other.",
+    "Pol II": "RNA polymerase II, the enzyme that copies a gene into RNA. Each Pol II on the gene carries the MS2 loops it has made, so it glows.",
+    "Initiation (Pol II start)": "The moment one Pol II starts copying the gene. Bursts are periods in which they start often.",
+    "Deconvolution": "Working backwards from a blurred-in-time signal (the MS2 trace: the sum of every Pol II's glow) to the events that made it.",
+    "Posterior samples": "Many possible answers, each consistent with the data and its noise; where they agree the answer is certain.",
+    "Kernel": "The signal one single event produces over time (here: one Pol II's glow from start to release).",
+    "Self-calibration": "Estimating an instrument property (background, hot pixels, illumination, colour shift) from the movie itself instead of from calibration images.",
+    "Error-free reference": "The same movie rendered by a perfect microscope that still has the unavoidable blur and photon / read noise.",
 }
 
 

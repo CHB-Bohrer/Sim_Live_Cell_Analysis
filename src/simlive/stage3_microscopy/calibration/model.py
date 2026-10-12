@@ -54,6 +54,37 @@ class Calibration:
                 out = np.where(hm, median_filter(out, size=size, mode="nearest"), out)
         return out.astype(np.float32)
 
+    def restricted(self, components) -> "Calibration":
+        """A copy that corrects only `components`; the rest is neutral. Components: offset (the offset map, hot pixels' excess replaced by
+        their neighbours unless 'hot' is also chosen; otherwise a constant), hot (the hot-pixel map), flat (the SMOOTH part of the flat-field:
+        illumination), prnu (the pixel-to-pixel part: flat / its smooth version), shift (chromatic shift), crosstalk (unmixing fractions).
+        Used to correct a test movie that has only some error sources: a flat-field slide holds illumination and pixel gains together, and
+        dividing a movie that lacks one of them by both would add an error the movie does not have."""
+        import copy
+
+        from scipy.ndimage import gaussian_filter
+
+        comp = set(components)
+        maps = {}
+        for c, m in self.maps.items():
+            off = m["offset"]
+            if "offset" in comp and "hot" not in comp and m["hot"].any():
+                off = np.where(m["hot"], median_filter(off, size=3, mode="nearest"), off)
+            smooth = gaussian_filter(m["flat"].astype(np.float64), 8.0)
+            smooth = (smooth / smooth.mean()).astype(np.float32)
+            flat = (m["flat"] if {"flat", "prnu"} <= comp else smooth if "flat" in comp
+                    else (m["flat"] / np.maximum(smooth, 1e-3)).astype(np.float32) if "prnu" in comp else np.ones_like(m["flat"]))
+            maps[c] = {"offset": off if "offset" in comp else np.full_like(off, float(np.median(off))), "flat": flat,
+                       "hot": m["hot"] if "hot" in comp else np.zeros_like(m["hot"])}
+        beads = copy.deepcopy(self.beads)
+        if "shift" not in comp:
+            beads["shift_px"] = {c: [0.0, 0.0] for c in self.channels}
+            beads["shift_z_um"] = {c: 0.0 for c in self.channels}
+        values = copy.deepcopy(self.values)
+        if "crosstalk" not in comp:
+            values.pop("crosstalk", None)
+        return Calibration(self.channels, self.shape, self.run_exposure_s, self.pixel_size_um, self.ref, maps, values, beads, self.z_um)
+
     # ------------------------------------------------------------------ storage
     def save(self, directory) -> None:
         d = Path(directory)

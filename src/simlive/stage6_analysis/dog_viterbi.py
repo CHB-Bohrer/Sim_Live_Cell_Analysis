@@ -200,7 +200,7 @@ def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap
 def ellipsoid_intensity(img: np.ndarray, pos, inner=(7, 7, 5), outer=(19, 19, 7), background: str = "mean") -> tuple[float, int]:
     """Step 5: mean of the pixels inside an ellipsoid of diameters `inner` (x, y[, z] in px / planes) centred at `pos` ((y, x) or (z, y, x))
     minus the mean (Chen et al.) or median (`background="median"`: robust to a cosmic ray or another spot in the shell) of the pixels inside the
-    larger `outer` ellipsoid but outside the inner one. Returns (difference, number of inner pixels)."""
+    larger `outer` ellipsoid but outside the inner one (`background="none"`: no subtraction). Returns (difference, number of inner pixels)."""
     img = np.asarray(img, np.float32)
     nd = img.ndim
     pos = np.asarray(pos, float)
@@ -216,5 +216,7 @@ def ellipsoid_intensity(img: np.ndarray, pos, inner=(7, 7, 5), outer=(19, 19, 7)
     m_in, m_sh = ui <= 1.0, (uo <= 1.0) & (ui > 1.0)
     if not m_in.any() or not m_sh.any():
         return float("nan"), int(m_in.sum())
+    if background == "none":            # no local background: the raw mean (only to show what the shell subtraction removes)
+        return float(win[m_in].mean()), int(m_in.sum())
     bg = float(np.median(win[m_sh])) if background == "median" else float(win[m_sh].mean())
     return float(win[m_in].mean() - bg), int(m_in.sum())

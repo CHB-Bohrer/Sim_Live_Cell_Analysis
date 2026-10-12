@@ -131,9 +131,9 @@ def _flat_section(cal: Calibration) -> None:
     c = st.columns(3)
     P = np.array(v["ptc_points"])
     fig, ax = plt.subplots(figsize=(5, 4.4))
-    ax.plot(P[:, 0], P[:, 1], "o", color="#2563eb", label="measured")
+    ax.plot(P[:, 0], P[:, 1], "o", color="#60a5fa", label="measured")
     xs = np.linspace(0, P[:, 0].max(), 50)
-    ax.plot(xs, v["gain_adu_per_e"] * xs + v["ptc_intercept_adu2"], "-", color="#0f766e", label=f"fit: slope {v['gain_adu_per_e']:.3f} ADU/e⁻")
+    ax.plot(xs, v["gain_adu_per_e"] * xs + v["ptc_intercept_adu2"], "-", color="#14b8a6", label=f"fit: slope {v['gain_adu_per_e']:.3f} ADU/e⁻")
     ax.set_xlabel("mean signal (ADU)"); ax.set_ylabel("variance (ADU²)"); ax.set_title("Photon transfer curve", fontsize=11); ax.legend(fontsize=9)
     c[0].pyplot(fig, width="stretch"); plt.close(fig)
     for col, (title, img) in zip(c[1:], [("Normalised flat (illumination × pixel gain)", m["flat"]), ("One raw flat frame", m["flat_example"])]):
@@ -185,7 +185,7 @@ def _beads_section(cal: Calibration) -> None:
         c[1].pyplot(fig, width="stretch"); plt.close(fig)
     d = np.array(b["drift_px_series"])
     fig, ax = plt.subplots(figsize=(5.4, 4.6))
-    ax.plot(d[:, 1], d[:, 0], "o-", color="#b45309")
+    ax.plot(d[:, 1], d[:, 0], "o-", color="#f59e0b")
     ax.set_xlabel("x drift (px)"); ax.set_ylabel("y drift (px)"); ax.set_title("Stage drift measured from the beads", fontsize=11)
     c[2].pyplot(fig, width="stretch"); plt.close(fig)
     rows = []

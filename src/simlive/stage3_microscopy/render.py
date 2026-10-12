@@ -834,6 +834,43 @@ def cells_in_image(cells: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: floa
     return out
 
 
+def save_imaging_truth(imager: Imager, cells: pd.DataFrame, truth: pd.DataFrame | None, s3, E: ErrorSet | None = None) -> dict:
+    """Write the ground truth of the imaging into folder s3: imaging_truth.csv (drift, focus, power per frame), cells_image.csv, bleach_cells.csv
+    (per-cell bleaching, if on) and loci_truth_image.csv (locus truth in image coordinates + photons, per-cell bleaching factors, in_image).
+    E: an error-source variant to write the truth of (default: the Imager's own). Returns the static truth (imaging_errors.json content)."""
+    from pathlib import Path
+
+    s3 = Path(s3)
+    keep = imager.E
+    if E is not None:
+        imager.E = E
+    try:
+        it = imager.imaging_truth()
+        it.to_csv(s3 / "imaging_truth.csv", index=False)
+        px_um = imager.px_um
+        st_truth = imager.static_truth()
+        cells_in_image(cells, it, px_um).to_csv(s3 / "cells_image.csv", index=False)
+        bt = imager.bleach_truth()          # per-cell bleaching (each cell by its own light dose), empty unless bleaching.per_cell is on
+        if len(bt):
+            bt.to_csv(s3 / "bleach_cells.csv", index=False)
+        if truth is not None:      # + photons per spot, so scoring can tell a missed spot from a locus that had no light at all
+            tim = truth_in_image(truth, it, px_um, st_truth["channel_shift_px"], (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).merge(
+                imager.locus_photons(), on=["t", "cell_id", "locus_id"], how="left")
+            ny, nx = imager.shape                                   # cells can be partly or wholly outside the field (geometry.outside_um)
+            yd, xd = (tim[c] if c in tim else tim[c.replace("_drawn", "")] for c in ("y_drawn_um", "x_drawn_um"))
+            tim["in_image"] = (yd / px_um >= 0) & (yd / px_um <= ny - 1) & (xd / px_um >= 0) & (xd / px_um <= nx - 1)
+            if len(bt):     # the true bleaching factor of each spot (its own colour) and of its nucleus (the MS2 spot's MCP-GFP)
+                b = bt.set_index(["t", "cell_id"])
+                key = pd.MultiIndex.from_arrays([tim.t, tim.cell_id])
+                tim["bleach"] = [b[f"bleach_locus{int(k)}"].get(i, np.nan) if f"bleach_locus{int(k)}" in b else np.nan
+                                 for k, i in zip(tim.locus_id, key)]
+                tim["bleach_nucleus"] = b["bleach_nucleus"].reindex(key).to_numpy() if "bleach_nucleus" in b else np.nan
+            tim.to_csv(s3 / "loci_truth_image.csv", index=False)
+    finally:
+        imager.E = keep
+    return st_truth
+
+
 def imager_for_run(run, cfg: dict, errors: ErrorSet | None = None) -> Imager:
     """Rebuild the exact Imager of a finished run from its saved ground truth files (reproduces its images frame by frame)."""
     from pathlib import Path

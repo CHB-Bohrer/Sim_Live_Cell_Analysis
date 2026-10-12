@@ -151,6 +151,35 @@ terminal (re-runs only stage 6 on a finished run, ~1-3 min; also adds MS2 traces
 **How bright must the MS2 spot be?** `scripts\run.cmd python scripts\sweep_ms2_brightness.py` sweeps R = (one Pol II's MS2 photons) / (one nuclear GFP pixel),
 3 seeds per value, tracking skipped (`tracking.skip: true`). Results: Spot finding page, part 3d.
 
+**What each image error does, and how it is corrected (🖼 Images page, part 2).** Pick one of the 24 error sources from the list:
+- **Explanation:** what it is, what it does to the picture, and how it is corrected. There are three possible routes: by the analysis
+  itself, with calibration images (dark frames, flat-field slide, bead slide), or from the movie alone.
+- **Images:** the same frame without the error, with it, and corrected.
+- **Measured effect on the results**, with and without each correction: wrong picks, position error, distance error, intensity error
+  and drift, MS2 trace.
+
+The measurement re-renders the run's movie once per source and analyses it each way (about 30 min for all sources, in the background
+from the page, or `scripts\run.cmd python scripts\error_effects.py --run <run>`). The movie-only corrections (`stage6_analysis/selfcal.py`)
+build the same calibration object the calibration images give:
+- background, offset and hot-pixel maps from the frames in which no nucleus covers a pixel;
+- the illumination from the moving nuclei;
+- the colour shift from the mean enhancer-promoter vector, applied only when it is significant (needs many cells);
+- colour cross-talk: the bleed-through of the bright nuclear / MS2 light into a locus colour, measured and subtracted;
+- camera row offsets from the pixels next to each cell;
+- per-cell bleaching.
+
+Measured results and what they mean: [docs/ERROR_EFFECTS.md](docs/ERROR_EFFECTS.md). In short:
+- **Positions:** the colour shift dominates, and a bead slide fixes it.
+- **Spot intensities:** the bleed-through of a bright MS2 spot into the promoter's colour dominates; unmixing from the movie fixes it.
+- **Best:** use both, calibration images for what they give and the movie for what only it gives.
+
+**From the MS2 trace to Pol II starts (🧮 MS2 → Pol II page).** The Bayesian deconvolution of Chen et al. 2025 turns each cell's MS2 trace
+into the moments Pol II started on the gene (with uncertainty) and into bursts. The page explains it step by step for new users:
+units, what one Pol II looks like, noise, one cell against the truth, and the whole run. The burst rule's settings can be changed live.
+`scripts\run.cmd python scripts\deconvolve_ms2.py --run <run>`; details and measured accuracy in [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md).
+
+The dashboard is now dark. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has updated diagrams of how it all works and of what is built.
+
 **Not built yet:** using the promoter, the enhancer and the MS2 spot together to choose spots, and separating the copies of a locus on different
 chromosomes. The plan is in [docs/PLAN_three_signals_and_homologs.md](docs/PLAN_three_signals_and_homologs.md).
 

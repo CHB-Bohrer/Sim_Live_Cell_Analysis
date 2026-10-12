@@ -396,7 +396,7 @@ def _side_views(run, stamp, im, t, chans, cell, lk, cells_now, truth_img, hi, id
 
 # ----------------------------------------------------------------------------- part 2
 def _part_buildup(R, run: Path, im, ctx):
-    st.markdown("### 2. How this image was built, one error at a time")
+    st.markdown("### 3. How this image was built, one error at a time")
     st.caption("Start from the ground truth drawn with perfect optics and no noise, then add the run's error sources in the physical order "
                "in which light is degraded. Every panel adds one source to the previous panel; the last panel is the recorded image. "
                "Each panel uses the same grey scale, so brightness changes are real.")
@@ -488,11 +488,11 @@ def _profiles(stages, imgs, order, ch):
 
 # ----------------------------------------------------------------------------- part 3
 def _part_budget(R, run: Path, im, ctx):
-    st.markdown("### 3. How much each error matters on its own")
-    st.caption("For the channel and region chosen in part 2: the error-free image plus ONE source at a time, compared with the error-free "
+    st.markdown("### 4. How much each error matters on its own (in this frame)")
+    st.caption("For the channel and region chosen in part 3: the error-free image plus ONE source at a time, compared with the error-free "
                "image. Size = RMS difference in camera counts; for a locus also how far the spot's measured centre moves.")
     if "bu_ch" not in st.session_state:
-        st.caption("Choose a channel and region in part 2 first.")
+        st.caption("Choose a channel and region in part 3 first.")
         return
     t, _, cell, _, _ = ctx
     zsel = int(st.session_state.get("bu_z", -1)) if im.is3d else -1
@@ -538,7 +538,7 @@ def _part_budget(R, run: Path, im, ctx):
     prog.empty()
     df = pd.DataFrame(rows).sort_values("RMS change (ADU)", ascending=False)
     fig, ax = plt.subplots(figsize=(9, 0.38 * len(df) + 1.2))
-    ax.barh(df.source[::-1], df["RMS change (ADU)"][::-1], color="#0f766e")
+    ax.barh(df.source[::-1], df["RMS change (ADU)"][::-1], color="#14b8a6")
     ax.set_xlabel("RMS difference from the error-free image (ADU)"); ax.set_title("Which sources change this image most?")
     st.pyplot(fig, width="stretch")
     plt.close(fig)
@@ -549,7 +549,7 @@ def _part_budget(R, run: Path, im, ctx):
 
 # ----------------------------------------------------------------------------- part 4
 def _part_reference(im, cfg):
-    st.markdown("### 4. Every source of image error, explained")
+    st.markdown("### 5. Every source of image error, explained")
     E = im.E
     st.caption(f"This run: {len(E.enabled_ids())} of {len(ERR.ORDER)} sources on "
                + ("(the image-error block was switched on)." if E.master else "(only the original model; the image-error block was off)."))
@@ -606,8 +606,9 @@ def _part_reference(im, cfg):
 def render(st_, run_path: Path, R: dict):
     style.intro(st, "The recorded images next to the ground truth that produced them: where every nucleus and locus truly was, how the "
                     "imaging conditions (drift, focus, light level) varied, and how each source of image error changed the picture.",
-                "Part 1: pick a frame and see the camera images with the truth drawn on top (and the error-free version). Part 2: watch the "
-                "image being built up one error at a time. Part 3: see which error matters most. Part 4: read what each error is.")
+                "Part 1: pick a frame and see the camera images with the truth drawn on top (and the error-free version). Part 2: pick ONE error "
+                "source from the list: what it is, how it is corrected, and what it does to the results with and without correction. Part 3: "
+                "watch the image being built up one error at a time. Part 4: which error changes this frame most. Part 5: every source explained.")
     run = Path(run_path)
     st.session_state["_run_path"] = str(run)
     if not (run / "stage3_microscopy" / "imaging_truth.csv").exists():
@@ -620,6 +621,9 @@ def render(st_, run_path: Path, R: dict):
     ctx = _part_view(R, run, im, cfg)
     if ctx is None:
         return
+    import errors_view  # noqa: E402  (app/errors_view.py: one source at a time, its correction and its effect on the results)
+
+    errors_view.render_part(st, run, im, R, ctx)
     _part_buildup(R, run, im, ctx)
     _part_budget(R, run, im, ctx)
     _part_reference(im, cfg)

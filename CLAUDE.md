@@ -109,7 +109,9 @@ branch, not main": that was a misreading of the user's intent.)
 - Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
   on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
   user's server once). Pages (navigation bar, only the open one runs): Movie, Metrics, Trajectories, Scans, Cells, Spot finding, Images, Calibration, Stage & fiducials,
-  Transcription, Probes, Library, Chromatin, Config.
+  Transcription, MS2 → Pol II, Probes, Library, Chromatin, Config. DARK theme since 2026-10-12 (user asked for a darker UI): colours in
+  `.streamlit/config.toml` + `app/style.PALETTE` (matplotlib figures dark too); hard-coded plot colours were remapped to light ones, so use
+  light line colours (#e5e7eb, #2dd4bf, #60a5fa...) in new plots, never near-black.
 
 ## Status (update this section every session)
 Built: stage 2 (cell motion, collisions, division, irregular time-varying nuclear shapes, `speed_scale`), stage 3
@@ -249,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 107 CPU + 6 GPU tests at 2026-10-11. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 116 CPU + 6 GPU tests at 2026-10-12. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -347,6 +349,44 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   Result (3 seeds each, ~1 Pol II per ON frame): trace r at the promoter 0.07 / 0.15 / 0.40 / 0.76 / 0.95 / 0.99 for R = 0.25 / 0.8 / 2.5 / 8 / 25 / 80; ON called
   from the trace 1% up to R = 0.8, 64% at 8, 97% at 25; own-track MS2 finding needs ~10x more. R must be measured on real data (no published value found).
 - NOT built: using promoter + enhancer + MS2 jointly to choose spots, and separating homologous copies: plan in docs/PLAN_three_signals_and_homologs.md.
+- MS2 -> Pol II deconvolution (2026-10-12, docs/SPOT_FINDING.md "From the MS2 trace to Pol II starts"; `stage6_analysis/deconvolve.py`, numba; page 🧮 MS2 → Pol II
+  `app/ms2_tab.py`; `scripts/deconvolve_ms2.py --run`; run by the pipeline after the bleaching correction):
+  - Chen et al. 2025 V.1/V.4: step kernel (24 loops over the cassette, release at (cassette+gene)/v + mean dwell), 1 s grid, Bernoulli prior from the
+    population mean, noise sigma_b^2 + beta G from frame-to-frame differences, unit = one fully loaded Pol II computed from the microscope (unit_check vs
+    truth 0.94-0.96).
+  - DEVIATION: their adaptive block sampler (proposal floor 0.05) cannot propose sparse starts; we Gibbs-sample single steps + shift moves (same
+    posterior).
+  - Measured (R=25): placeholder gene (seed 7, 47132d) 5 true / 5.9 inferred starts, all found; denser gene (k_init 0.05/s, seed 8, f5c88d)
+    389 / 401, 57% within 30 s, 0.45 false per true, 1-min rate r 0.80; Chen's burst rule (2 starts in 50 s) catches 49% of ON frames (0% for
+    the placeholder gene).
+  - Likely limit: fixed release time vs the simulation's random dwell (untested).
+- Image errors -> results, per source (2026-10-12; `stage7_validation/error_effects.py`, `scripts/error_effects.py --run`, Images page part 2
+  `app/errors_view.py`):
+  - **What it does:** re-renders the run's movie for a reference microscope (PSF + QE + shot + read noise), the reference + ONE source, and all sources.
+    It analyses each with the source's correction off / on (FIXES: analysis countermeasure, calibration images via `Calibration.restricted(parts)`, or
+    the movie alone) and scores found / wrong / position / distance rms / intensity error / late-early / MS2 r.
+  - **Outputs:** `stage7_validation/error_effects.csv` (resumable); movie calibrations kept in `error_effects_selfcal/`. About 2 min per source.
+    Only 2D runs.
+  - **Movie-only corrections** (`stage6_analysis/selfcal.py` builds a normal `Calibration` from the movie):
+    - background/offset map = per-pixel median over nucleus-free frames;
+    - hot pixels by a per-pixel test (excess > 6 SE of the pixel's median AND > 5 x map spread, >= 10 free frames). The first version flagged
+      11,000 pixels because the MAD of integer camera values is 0; it now finds 100 of 117, 0 false;
+    - flat = nuclear self-calibration;
+    - colour shift = mean enhancer-promoter vector, applied only if > 2 SE (cell bootstrap; 8-12 cells are NOT enough: SE ~0.4-0.9 px).
+  - **Other new options:** `localize_loci(..., row_correct=True)` (row offsets from pixels away from the cell); `intensity_background: none`.
+    - cross-talk unmixing: nuclear -> locus bleed-through fraction by robust regression inside nuclei (measured 1.997% vs 2.000%), subtracted in
+      `channel_inputs` when the calibration carries values["crosstalk"].
+  - `Calibration.restricted(parts)` splits the flat-field slide into "flat" (smooth illumination) and "prnu" (pixel part) and drops the
+    hot-pixel excess from "offset" unless "hot" is chosen. Applying the whole slide to a single-source test movie added errors the movie did
+    not have.
+  - Results (docs/ERROR_EFFECTS.md, showcase run loci_demo_seed8_f5c88d, one seed):
+    - **Colour shift dominates positions:** 12 -> 43 nm, distance rms 16 -> 63 nm; beads fix it. The movie estimate is not significant with
+      12 cells (needs ~30 to reach 2 SE).
+    - **Cross-talk of the bright MS2 spot into the promoter colour dominates intensities:** r 0.95 -> 0.52. Movie unmixing gives r 0.91 but
+      positions get noisier (leaked photon noise stays).
+    - **Bleaching:** late/early 0.80 -> 0.99.
+    - **All sources:** images 28 nm / r 0.47; movie 49 nm / r 0.80; both 26 nm / r 0.80; reference 12 nm / r 0.95.
+  - Showcase runs (R = 25, cells moving): loci_demo_seed7_47132d (placeholder gene) and loci_demo_seed8_f5c88d (denser gene, error_effects run on it).
 - scripts/compare_localizers.py --run <run> also computes MS2 traces and the bleaching correction (`--ms2-only` = just those; for older runs). Variants in
   compare.py: original, default, chen_literal, no_median, dog_snr5, integer (+3D: zmed3); tables are merged, so delete method_comparison.csv after renaming variants.
 - Scores (`score_localization[_3d]`): detection over loci WITH light (`photons` in loci_truth_image.csv), `n_false_on_dark`, `frac_far` (> 0.5 um), `rms_error_near_um`,

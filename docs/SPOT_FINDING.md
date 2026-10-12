@@ -197,6 +197,54 @@ cells give nothing, and the cross-validation then falls back to even light, as i
 (one shared F) is the cheap way to make this work. A dark + flat-field slide, which the calibration simulates, is still 2x more accurate.
 The standard alternative from still images is BaSiC (Peng et al. 2017, Nat. Commun.).
 
+# From the MS2 trace to Pol II starts: deconvolution (`deconvolve.py`, built 2026-10-12)
+
+Sources: Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol.). Methods are in arXiv 2304.08770v3, read 2026-10-12:
+- IV.3: calibration to C.U.;
+- IV.4: noise;
+- V.1: deconvolution;
+- V.4: burst calling.
+
+1. **Units.** The trace is the bleaching- and illumination-corrected spot intensity at the tracked promoter (`intensity_corr`, calibrated
+   traces when available). It is divided by the intensity of one Pol II carrying all its loops.
+   - The paper calibrates this unit against smFISH. Here it is computed from the microscope: photons per loop x loops x exposure x QE x
+     gain x the PSF fraction inside the 7 px ellipse / the ellipse's pixel count.
+   - Check against the truth: the unit is 4-6% too large (`unit_check` 0.94 and 0.96).
+2. **Model** (their Eqs. 8-11): trace = kernel * starts + noise.
+   - The kernel climbs in 24 steps while Pol II copies the cassette. It is then 1 until release at (cassette + gene) / v + mean dwell.
+     The paper adds ~800 bp for retention.
+   - Starts are 0/1 per 1 s step.
+3. **Noise**: sigma^2 = sigma_b^2 + beta x signal, from half the squared frame-to-frame difference binned by level (their correlation
+   estimate).
+4. **Prior** (Eq. 15): Bernoulli with p = R(t) x 1 s, where R = population mean activity at t + tau/2, divided by tau (tau = kernel area).
+5. **Sampling.** Their adaptive block-Bernoulli Metropolis-Hastings has a proposal floor of 0.05. That suits fly genes firing ~10-20 times
+   a minute, but cannot propose the placeholder gene's ~1 start per 10 min.
+   - The same posterior is sampled with single-step Gibbs updates plus moves that shift a start in time.
+   - 500 burn-in sweeps, then 1000 samples, every 3rd sweep.
+6. **Rate and bursts** (Eq. 18, V.4): starts per frame interval for every sample.
+   - Bursts: the rate is smoothed with exp(-(2t/w)^4), w = 5 frames, and called ON where it reaches g_b / w (g_b = 2), on every sample.
+     This gives P(ON).
+   - The dashboard lets w and g_b be changed and shows the agreement with the true promoter state.
+
+Outputs: `stage6_analysis/truth/ms2_deconvolution.csv` (per cell and frame: trace in units, fit, expected starts, sd, rate per min, P(ON)),
+plus `_samples.npz` and `_info.json` (unit, noise, scores). The pipeline runs it after the bleaching correction; for an existing run use
+`scripts/deconvolve_ms2.py --run <run>`. Tests: `tests/test_deconvolve.py` (kernel, noise model, recovery of known starts). Dashboard
+page: 🧮 MS2 → Pol II.
+
+**Measured** (calibration applied, R = 25, i.e. 30x the placeholder MS2 brightness; one seed each):
+
+| Movie | Starts (true / inferred) | True starts with an inferred one within 30 s | False starts per true one | 1-minute rate correlation | Burst calls (Chen rule: agree / ON frames caught) |
+|---|---|---|---|---|---|
+| Placeholder gene: ~1.6 Pol II per 16-min burst, seed 7, 12 cells, 30 min | 5 / 5.9 | 100% | 0.2 | 0.76 | 75% / 0% (never reaches 2 starts in 50 s) |
+| Denser gene: 3 starts/min while ON, 10-min bursts, seed 8 | 389 / 401 | 57% | 0.45 | 0.80 | 81% / 49% |
+
+- **Counting is right; exact timing is weak when many Pol II overlap.** The total is within 3%, but only 57% of starts are placed within
+  30 s. The likely cause is the kernel's FIXED release time: the simulation's wait at the end of the gene is random (exponential, mean
+  116 s). A Pol II leaving early or late is then explained by moving or adding starts (not yet tested by simulating a fixed wait).
+- **The burst rule depends on the gene.** It was designed for fly genes that start Pol II every few seconds, so it misses half the ON
+  frames at 3 starts/min and all of them at the placeholder rate. Widening w or lowering g_b helps; the dashboard shows the trade-off.
+- **Below R ~ 8 (the brightness sweep) single Pol II are not visible**, and the deconvolution then fits noise. The page warns about it.
+
 # History: `median_peaks` (removed 2026-10-11)
 
 The user first asked for the approach of Bennabi et al. 2025 (*Sci. Adv.* 11, eadv7790; code github.com/gregorlab/SizeProject2024). That paper

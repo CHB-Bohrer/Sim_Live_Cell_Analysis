@@ -101,14 +101,46 @@ def detect_channel(stack, region, method: str = "dog_viterbi", centre: np.ndarra
             for f in analyse_channel(stack, region, centre, method, **kw)["fits"]]
 
 
-def channel_inputs(cell, name: str, dilate_px: int = 2, calib: str | None = None) -> dict:
-    """What the localizer works on for one colour of one cell: the crops (calibration-corrected if `calib`), the analysis region, the nucleus
-    centroid in crop pixels (the crop is centred on the ROUNDED centroid, so up to 0.5 px off the crop centre) and the chromatic shift to remove."""
+def row_offsets_removed(stack: np.ndarray, mask: np.ndarray, gap_px: int = 6) -> np.ndarray:
+    """Camera row (banding) noise from the movie itself, no dark frames: in every frame, each row's offset = the 25th percentile of its
+    pixels away from the cell (other nuclei rarely cover a quarter of a row) minus the same over the whole crop; subtracted row by row."""
+    from scipy.ndimage import binary_dilation
+
+    out = stack.astype(np.float32).copy()
+    st = np.ones((2 * gap_px + 1, 2 * gap_px + 1), bool)
+    for i in range(len(out)):
+        far = ~binary_dilation(mask[i] > 0, structure=st)
+        if far.sum() < 50:
+            continue
+        v = np.where(far, out[i], np.nan)
+        with np.errstate(all="ignore"):
+            row = np.nanpercentile(v, 25, axis=1)
+        ref = np.nanpercentile(v, 25)
+        ok = np.isfinite(row) & (far.sum(axis=1) >= 8)
+        out[i] -= np.where(ok, row - ref, 0.0)[:, None]
+    return out
+
+
+def channel_inputs(cell, name: str, dilate_px: int = 2, calib: str | None = None, row_correct: bool = False) -> dict:
+    """What the localizer works on for one colour of one cell: the crops (calibration-corrected if `calib`; camera row offsets removed if
+    `row_correct`), the analysis region, the nucleus centroid in crop pixels (the crop is centred on the ROUNDED centroid, so up to 0.5 px off
+    the crop centre) and the chromatic shift to remove."""
     cal = _load_calibration(calib) if calib else None
     fr = cell.frames.reset_index(drop=True)
     stack = cell.channels[name].astype(np.float32)
     if cal is not None:
         stack = np.stack([cal.correct(stack[i], name, int(r.crop_y0), int(r.crop_x0)) for i, r in enumerate(fr.itertuples())])
+        for src, f in ((cal.values.get("crosstalk") or {}).get(name) or {}).items():     # unmixing: remove the bleed-through of `src`
+            if src in cell.channels and f:
+                from scipy.ndimage import binary_dilation
+
+                s = np.stack([cal.correct(cell.channels[src][i].astype(np.float32), src, int(r.crop_y0), int(r.crop_x0))
+                              for i, r in enumerate(fr.itertuples())])
+                far = ~binary_dilation(cell.mask, structure=np.ones((1, 17, 17), bool))
+                bg = np.array([np.median(s[i][far[i]]) if far[i].any() else 0.0 for i in range(len(s))], np.float32)
+                stack = stack - float(f) * (s - bg[:, None, None])
+    if row_correct:
+        stack = row_offsets_removed(stack, cell.mask)
     return {"stack": stack, "region": cell.analysis_mask(dilate_px), "frames": fr, "centre": centroid_in_crop(fr, cell.crop_size),
             "shift": cal.shift_px(name) if cal is not None else (0.0, 0.0)}
 
@@ -121,10 +153,11 @@ def centroid_in_crop(fr: pd.DataFrame, S: int) -> np.ndarray:
 
 
 def localize_loci(cell, n_loci: int = 2, method: str = "dog_viterbi", dilate_px: int = 2, px_um: float = 0.13, calib: str | None = None,
-                  **kw) -> pd.DataFrame:
+                  row_correct: bool = False, **kw) -> pd.DataFrame:
     """Locate every locus (one colour channel each) in every frame of one isolated cell. One row per detection.
-    With `calib` (folder of a saved Calibration) every crop is first dark-subtracted, flat-fielded and hot-pixel-corrected, and the measured
-    chromatic shift of the colour is subtracted from the detected position. Other keywords: the method's settings (see `spots.DEFAULTS`)."""
+    With `calib` (folder of a saved Calibration, from calibration images or from the movie itself: selfcal.py) every crop is first
+    dark-subtracted, flat-fielded and hot-pixel-corrected, and the measured chromatic shift of the colour is subtracted from the detected
+    position; `row_correct` removes camera row offsets estimated in the crop. Other keywords: the method's settings (see `spots.DEFAULTS`)."""
     chans = cell.locus_channels[:n_loci]
     if not chans:
         return pd.DataFrame(columns=COLUMNS)
@@ -133,7 +166,7 @@ def localize_loci(cell, n_loci: int = 2, method: str = "dog_viterbi", dilate_px:
     theta = 0.5 * np.unwrap(2 * fr.theta_rad.to_numpy())
     rows = []
     for k, name in enumerate(chans):
-        ci = channel_inputs(cell, name, dilate_px, calib)
+        ci = channel_inputs(cell, name, dilate_px, calib, row_correct)
         (sy, sx), cen = ci["shift"], ci["centre"]
         for i, d in enumerate(detect_channel(ci["stack"], ci["region"], method, cen, **kw)):
             if d is None:

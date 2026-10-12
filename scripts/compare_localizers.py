@@ -33,6 +33,9 @@ def main() -> None:
     sj = run / "stage6_analysis" / "scores.json"         # photobleaching correction of the saved intensities (background removed first)
     scores = json.loads(sj.read_text()) if sj.exists() else {}
     scores["bleaching"] = bleach_correct_run(run)
+    from simlive.stage6_analysis.deconvolve import deconvolve_run
+
+    scores["ms2_deconvolution"] = deconvolve_run(run)          # MS2 trace -> Pol II initiation events (uses the bleaching-corrected trace)
     sj.write_text(json.dumps(scores, indent=2, default=str))
     print("bleaching:", {k: (round(v["tau_est_s"]) if isinstance(v, dict) and "tau_est_s" in v else v) for k, v in scores["bleaching"].items()})
     if a.ms2_only:

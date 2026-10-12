@@ -17,7 +17,7 @@ from simlive.stage1_chromatin import library as L
 from simlive.stage1_chromatin import transcription as T
 from simlive.stage3_microscopy.render import _spot_photons
 
-C = {"dist": "#2563eb", "contact": "#0f766e", "on": "#b45309", "ms2": "#15803d", "theory": "#1f2933", "grey": "#94a3b8"}
+C = {"dist": "#60a5fa", "contact": "#14b8a6", "on": "#f59e0b", "ms2": "#4ade80", "theory": "#e5e7eb", "grey": "#94a3b8"}
 KIND = {"contact": "Sharp contact (on / off)", "hill": "Smooth (Hill curve)", "exp": "Smooth (exponential)", "none": "None (control)"}
 RATE = {"k_on": "turning ON (k_on)", "k_init": "initiating Pol II while ON (k_init)", "k_off": "turning OFF (k_off): contact keeps it ON longer"}
 
@@ -28,24 +28,24 @@ def _set(key, default):
 
 # ----------------------------------------------------------------------------- pictures
 def overview_svg() -> str:
-    dots = "".join(f'<circle cx="{512 + i * 15}" cy="118" r="5" fill="#15803d" opacity="0.85"/>' for i in range(8))
+    dots = "".join(f'<circle cx="{512 + i * 15}" cy="118" r="5" fill="#4ade80" opacity="0.85"/>' for i in range(8))
     return f"""<svg viewBox="0 0 800 270" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:system-ui,sans-serif">
-<defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>
+<defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
 <path d="M30,160 L770,160" stroke="#94a3b8" stroke-width="3"/>
-<rect x="90" y="140" width="46" height="40" rx="8" fill="#7c3aed" fill-opacity=".85"/><text x="113" y="203" font-size="12" text-anchor="middle" fill="#334155">enhancer</text>
-<text x="113" y="218" font-size="11" text-anchor="middle" fill="#64748b">(locus 1)</text>
-<rect x="430" y="140" width="46" height="40" rx="8" fill="#b45309" fill-opacity=".9"/><text x="453" y="203" font-size="12" text-anchor="middle" fill="#334155">promoter</text>
-<text x="453" y="218" font-size="11" text-anchor="middle" fill="#64748b">(locus 0)</text>
-<path d="M113,138 C113,78 453,78 453,138" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-dasharray="6 5"/>
-<text x="283" y="34" font-size="13" text-anchor="middle" fill="#2563eb" font-weight="700">distance d  (from the polymer simulation)</text>
-<text x="283" y="54" font-size="11" text-anchor="middle" fill="#64748b">small d  →  promoter switches ON more often</text>
-<path d="M476,160 L760,160" stroke="#15803d" stroke-width="5"/>
-<text x="560" y="148" font-size="11" text-anchor="middle" fill="#15803d">MS2 cassette (loops)</text>
+<rect x="90" y="140" width="46" height="40" rx="8" fill="#a78bfa" fill-opacity=".85"/><text x="113" y="203" font-size="12" text-anchor="middle" fill="#cbd5e1">enhancer</text>
+<text x="113" y="218" font-size="11" text-anchor="middle" fill="#94a3b8">(locus 1)</text>
+<rect x="430" y="140" width="46" height="40" rx="8" fill="#f59e0b" fill-opacity=".9"/><text x="453" y="203" font-size="12" text-anchor="middle" fill="#cbd5e1">promoter</text>
+<text x="453" y="218" font-size="11" text-anchor="middle" fill="#94a3b8">(locus 0)</text>
+<path d="M113,138 C113,78 453,78 453,138" stroke="#60a5fa" stroke-width="2.4" fill="none" stroke-dasharray="6 5"/>
+<text x="283" y="34" font-size="13" text-anchor="middle" fill="#60a5fa" font-weight="700">distance d  (from the polymer simulation)</text>
+<text x="283" y="54" font-size="11" text-anchor="middle" fill="#94a3b8">small d  →  promoter switches ON more often</text>
+<path d="M476,160 L760,160" stroke="#4ade80" stroke-width="5"/>
+<text x="560" y="148" font-size="11" text-anchor="middle" fill="#4ade80">MS2 cassette (loops)</text>
 {dots}
-<text x="660" y="148" font-size="11" text-anchor="middle" fill="#475569">gene body</text>
-<g fill="#475569"><circle cx="520" cy="180" r="7"/><circle cx="600" cy="180" r="7"/><circle cx="700" cy="180" r="7"/></g>
-<text x="650" y="212" font-size="11" text-anchor="middle" fill="#64748b">Pol II travel along the gene</text>
-<text x="400" y="256" font-size="12" text-anchor="middle" fill="#334155">MS2 brightness = loops carried by all Pol II on the gene → a bright spot at the promoter</text>
+<text x="660" y="148" font-size="11" text-anchor="middle" fill="#94a3b8">gene body</text>
+<g fill="#94a3b8"><circle cx="520" cy="180" r="7"/><circle cx="600" cy="180" r="7"/><circle cx="700" cy="180" r="7"/></g>
+<text x="650" y="212" font-size="11" text-anchor="middle" fill="#94a3b8">Pol II travel along the gene</text>
+<text x="400" y="256" font-size="12" text-anchor="middle" fill="#cbd5e1">MS2 brightness = loops carried by all Pol II on the gene → a bright spot at the promoter</text>
 </svg>"""
 
 
@@ -257,7 +257,7 @@ def render(run_path: Path | None = None) -> None:
     kon, koff, kinit = T.rates_from_distance(p, xs)
     fig, ax = plt.subplots(figsize=(14, 2.6))
     for arr, nm_, col in ((1 / kon / 60, "mean OFF time (min)", C["on"]), (1 / koff / 60, "mean ON time (min)", C["contact"]),
-                          (1 / kinit / 60, "Pol II interval (min)", "#7c3aed")):
+                          (1 / kinit / 60, "Pol II interval (min)", "#a78bfa")):
         ax.plot(xs, arr, color=col, label=nm_, lw=2)
     ax.set_yscale("log"); ax.set_xlabel("distance between promoter and enhancer (nm)"); ax.legend(fontsize=8, ncol=3)
     ax.set_title("The three timescales of the promoter as the enhancer gets closer (a flat line = does not depend on distance)", fontsize=11)

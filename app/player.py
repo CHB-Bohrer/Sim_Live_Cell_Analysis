@@ -29,9 +29,9 @@ def show_player(frames: list, labels: list | None = None, fps: int = 10, column_
     speeds = sorted({2, 5, 10, 20, 40, int(fps)})
     options = "".join(f'<option value="{s}">{s} fps</option>' for s in speeds)
     html = f"""
-<div style="font-family:system-ui,sans-serif;color:#444;max-width:{column_width_px}px;margin:0 auto">
-  <div id="ld{key}" style="font-size:13px;margin-bottom:6px;color:#92400e">&#8987; Loading frames&hellip; <span id="ln{key}">0 / {len(frames)}</span>
-    <div style="height:5px;background:#e5e7eb;border-radius:3px;margin-top:3px"><div id="lbar{key}" style="height:5px;width:0%;background:#0f766e;border-radius:3px"></div></div></div>
+<div style="font-family:system-ui,sans-serif;color:#cbd5e1;max-width:{column_width_px}px;margin:0 auto">
+  <div id="ld{key}" style="font-size:13px;margin-bottom:6px;color:#fbbf24">&#8987; Loading frames&hellip; <span id="ln{key}">0 / {len(frames)}</span>
+    <div style="height:5px;background:#334155;border-radius:3px;margin-top:3px"><div id="lbar{key}" style="height:5px;width:0%;background:#14b8a6;border-radius:3px"></div></div></div>
   <img id="im{key}" style="width:100%;display:block;border-radius:4px;background:#000" />
   <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
     <button id="pp{key}" disabled style="padding:4px 14px;font-size:14px;cursor:wait;min-width:150px">&#8987; Loading&hellip;</button>

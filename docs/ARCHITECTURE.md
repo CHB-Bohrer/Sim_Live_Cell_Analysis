@@ -16,8 +16,10 @@ flowchart LR
     A["<b>1. SIMULATE</b><br/>Invent a microscope movie<br/>where we know exactly where<br/>every cell and locus is"]:::built
     B["<b>2. ANALYZE</b><br/>Treat it like real data:<br/>find the cells, follow them,<br/>locate the loci in each cell"]:::built
     C["<b>3. GRADE</b><br/>Compare what the analysis found<br/>with the known truth"]:::built
-    D["<b>4. LEARN</b><br/>How much do mistakes in following<br/>the cells change the locus results?<br/>Which imaging settings are safe?"]:::planned
-    A --> B --> C --> D
+    D1["<b>4a. LEARN: image errors</b><br/>What does each error of the microscope<br/>do to the locus and MS2 results,<br/>and how much does correcting it give back?"]:::built
+    D2["<b>4b. LEARN: tracking</b><br/>How much do mistakes in following<br/>the cells change the locus results?"]:::planned
+    A --> B --> C --> D1
+    C --> D2
 
     classDef built fill:#d9f2d9,stroke:#2e7d32,color:#111;
     classDef planned fill:#ececec,stroke:#888,stroke-dasharray: 4 3,color:#111;
@@ -39,9 +41,11 @@ flowchart TD
         direction TB
         S2["<b>Cells</b> (stage 2)<br/>Cells drift, bump into each other,<br/>change shape and sometimes divide.<br/>Each cell keeps its own ID number."]:::built
         LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>many saved polymer simulations of a<br/>chromatin region (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
-        S1["<b>Loci in each cell</b> (stage 1)<br/>Give every cell its own saved simulation<br/>and read two loci from it.<br/>NOW: still a simple toy model.<br/>NEXT: use the library (after calibration)."]:::standin
-        CAL["<b>Calibration</b><br/>Make the simulated motion match<br/>your measured MSD, in nm and seconds"]:::planned
-        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images (2D or 3D z-stacks) with 23<br/>switchable image-error sources (drift, chromatic shift,<br/>blur, defocus, haze, flicker, cross-talk, camera noise...).<br/>Nucleus in one colour, each locus in its own."]:::built
+        S1["<b>Loci in each cell</b> (stage 1)<br/>Promoter + enhancer per cell: toy motion,<br/>or one saved polymer simulation per cell<br/>(wired, not yet run with a real library).<br/>Units nm / s are still placeholders."]:::standin
+        S1B["<b>Probes and transcription</b> (stage 1b, 1c)<br/>Probe binding sets each locus' brightness;<br/>promoter bursts driven by the enhancer<br/>distance, Pol II carrying MS2 loops"]:::built
+        CAL["<b>Calibration of the motion</b><br/>Make the simulated motion match<br/>your measured MSD, in nm and seconds"]:::planned
+        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images (2D or 3D z-stacks)<br/>with 24 switchable image-error sources (drift, chromatic shift,<br/>blur, haze, per-cell bleaching, uneven light, cross-talk,<br/>camera noise...). Cells can walk in and out of the field.<br/>Nucleus + MS2 in one colour, each locus in its own."]:::built
+        ICAL["<b>Calibration images</b> (stage 3)<br/>Dark frames, flat-field slide, bead slide<br/>of the same instrument"]:::built
         TRUTH[("<b>ANSWER KEY</b><br/>true cell outlines and ID numbers<br/>true position of every locus")]:::built
         MOVIE[("<b>THE MOVIE</b><br/>nucleus images +<br/>one image per locus colour")]:::built
     end
@@ -51,27 +55,37 @@ flowchart TD
         S4A["<b>Find the cells</b> (stage 4a)<br/>Draw an outline around every nucleus<br/>in every frame (Cellpose, GPU)"]:::built
         S4B["<b>Follow each cell through time</b> (stage 4b)<br/>Decide which outline in frame 2<br/>is the same cell as in frame 1<br/>(Trackastra, GPU)"]:::built
         S5["<b>Cut out each cell</b> (stage 5)<br/>Make one small movie per cell,<br/>centred on it, so cells can be<br/>analyzed side by side in parallel"]:::built
-        S6["<b>Locate the loci</b> (stage 6)<br/>In each cell's movie, find the<br/>position of each locus in every frame.<br/>NOW: placeholder spot finder<br/>(Chen 2025 DoG + Viterbi, or Bennabi 2025<br/>steps; scored against the truth).<br/>LATER: your analysis."]:::standin
+        SC["<b>Correct the images</b> (stage 6)<br/>with the calibration images, or<br/>from the movie alone: background and<br/>hot pixels, illumination, colour shift,<br/>per-cell bleaching, camera rows"]:::built
+        S6["<b>Locate the loci</b> (stage 6)<br/>Chen et al. 2025 spot finder: difference of<br/>Gaussians + Viterbi path, one per colour.<br/>MS2 trace read at the tracked promoter.<br/>A placeholder for YOUR analysis."]:::standin
+        S6M["<b>MS2 → Pol II</b> (stage 6)<br/>Bayesian deconvolution of each trace<br/>into Pol II start times and bursts<br/>(Chen et al. 2025)"]:::built
     end
 
     subgraph GRADE["③ GRADING: compare with the answer key"]
         direction TB
         S7A["<b>Were the right cells followed?</b> (stage 7a)<br/>Standard tracking scores<br/>plus a count of identity switches"]:::built
-        S7B["<b>Did mistakes change the loci results?</b> (stage 7b)<br/>Compare locus results from<br/>true cell IDs vs the tracker's IDs"]:::planned
+        S7E["<b>What does each image error do?</b> (stage 7)<br/>Re-render the movie with one error at a time,<br/>analyse with and without its correction"]:::built
+        S7B["<b>Did tracking mistakes change the loci results?</b> (stage 7b)<br/>Compare locus results from<br/>true cell IDs vs the tracker's IDs"]:::planned
     end
 
     CAL -.-> S1
     LIB -.->|"picked per cell"| S1
     S2 --> S1
+    S1 --> S1B
     S1 --> S3
+    S1B --> S3
     S2 --> S3
     S3 --> MOVIE
+    S3 --> ICAL
     S2 --> TRUTH
     S1 --> TRUTH
-    MOVIE --> S4A --> S4B --> S5 --> S6
+    MOVIE --> S4A --> S4B --> S5 --> SC --> S6 --> S6M
+    ICAL -.-> SC
     S4B --> S7A
     S6 --> S7B
+    S6 --> S7E
+    S6M --> S7E
     TRUTH ==> S7A
+    TRUTH ==> S7E
     TRUTH ==> S7B
 
     classDef built fill:#d9f2d9,stroke:#2e7d32,color:#111;
@@ -81,8 +95,9 @@ flowchart TD
 
 Thick arrows carry the answer key. The analysis zone never sees it; only the grading zone does.
 (The chromatin library is simulated on its own, ahead of time, and checked against published Mirny-lab results
-([validation report](chromatin_validation.md)). Until each cell is wired to its own saved simulation, the movie pipeline
-still uses the toy loci, which need to know when each cell exists, which is why stage 2 feeds stage 1.)
+([validation report](chromatin_validation.md)). Each cell can already be given its own saved simulation; that path is
+tested with a small fake library but has not yet been run with a real 100-simulation library. The loci need to know when
+each cell exists, which is why stage 2 feeds stage 1.)
 
 ---
 
@@ -136,23 +151,82 @@ outlines Cellpose finds (the realistic case).
 
 ---
 
-## 4. What is built and what comes next
+## 4. How each source of image error is handled
+
+Every one of the 24 image-error sources is handled in one of four ways. The dashboard's 🖼 Images page (part 2) has a list to pick a
+source: it explains it, shows the same frame without it, with it and corrected, and shows what it does to the results with and
+without each correction. Those results are measured, not assumed: the movie is rendered again with only that error and analysed
+both ways (`scripts/error_effects.py`).
+
+```mermaid
+flowchart LR
+    ERRS["<b>An image-error source</b><br/>(one of 24)"]:::built
+    ERRS --> FUND["<b>Fundamental: cannot be removed</b><br/>blur (PSF), photon shot noise,<br/>read noise, quantum efficiency.<br/>They set the best possible result."]:::built
+    ERRS --> AN["<b>Handled by the analysis itself</b><br/>median filter (hot pixels, cosmic rays),<br/>shell background around each spot (background,<br/>haze, autofluorescence, cross-talk, offsets),<br/>Viterbi path (cosmic rays), per-cell crops (drift)"]:::built
+    ERRS --> IMG["<b>Calibration images</b><br/>dark frames (offsets, hot pixels),<br/>flat-field slide (illumination, pixel gains),<br/>bead slide (colour shift, drift)"]:::built
+    ERRS --> MOV["<b>From the movie alone</b> (no calibration images)<br/>background + hot-pixel map from frames free of nuclei,<br/>illumination from moving nuclei, colour shift from the<br/>mean enhancer-promoter vector, cross-talk<br/>unmixing, camera rows, per-cell bleaching<br/>from each cell's light dose"]:::built
+    ERRS --> NOT["<b>Not corrected yet</b><br/>defocus in 2D, flicker of the locus colours,<br/>slice skew (3D)"]:::planned
+    AN --> RES{{"<b>Measured effect on the results</b><br/>wrong picks, position error, distance error,<br/>intensity error and drift, MS2 trace"}}:::built
+    IMG --> RES
+    MOV --> RES
+
+    classDef built fill:#d9f2d9,stroke:#2e7d32,color:#111;
+    classDef planned fill:#ececec,stroke:#888,stroke-dasharray: 4 3,color:#111;
+```
+
+The movie-only estimates are checked against the truth and guarded against doing harm. The illumination map is used only if it
+predicts held-out cells better than even light. The colour shift is applied only if it is larger than twice its standard error,
+which needs many cells.
+
+---
+
+## 5. From the MS2 spot to the moments Pol II starts
+
+```mermaid
+flowchart LR
+    SPOT["<b>MS2 spot intensity</b><br/>at the tracked promoter,<br/>every frame"]:::built
+    CORR["<b>Corrected trace</b><br/>background removed,<br/>bleaching + illumination<br/>divided out"]:::built
+    UNIT["<b>In units of one Pol II</b><br/>divided by the brightness<br/>of one fully loaded Pol II"]:::built
+    KER["<b>What one Pol II looks like</b><br/>signal steps up while it copies<br/>the MS2 loops, stays while it<br/>travels, drops when released"]:::built
+    NOISE["<b>Noise model</b><br/>from frame-to-frame changes"]:::built
+    MCMC["<b>Bayesian deconvolution</b><br/>1,000 possible histories of<br/>Pol II starts that fit the trace"]:::built
+    OUT["<b>Pol II starts per minute</b><br/>with uncertainty, and the<br/>probability of a burst"]:::built
+    SPOT --> CORR --> UNIT --> MCMC
+    KER --> MCMC
+    NOISE --> MCMC
+    MCMC --> OUT
+    OUT -.->|"graded against the true starts<br/>and promoter states"| G["Answer key"]:::built
+
+    classDef built fill:#d9f2d9,stroke:#2e7d32,color:#111;
+```
+
+The method is Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol.): same model, prior and burst rule. The sampler differs so
+that it also works for genes that start Pol II only every few minutes. Dashboard page: 🧮 MS2 → Pol II.
+
+---
+
+## 6. What is built and what comes next
 
 ```mermaid
 flowchart LR
     subgraph P1["Done"]
         direction TB
-        d1["Simulated cells that move,<br/>deform and divide"]:::built
-        d2["Realistic microscope images"]:::built
+        d1["Simulated cells that move, deform,<br/>divide and walk in and out of view"]:::built
+        d2["Microscope images with 24 error<br/>sources, 2D or 3D z-stacks"]:::built
         d3["Cellpose + Trackastra,<br/>scored against the truth"]:::built
         d4["One movie per cell, analyzed<br/>in parallel"]:::built
-        d5["Dashboard with players,<br/>parameter scans"]:::built
+        d5["Chromatin engine (polychrom),<br/>validated; library wiring"]:::built
+        d6["Probe binding, distance-driven<br/>transcription and MS2"]:::built
+        d7["Spot finder (Chen 2025), MS2 trace,<br/>MS2 → Pol II deconvolution"]:::built
+        d8["Calibration from images AND<br/>from the movie; measured effect<br/>of every image error"]:::built
+        d9["Dashboard (dark theme), players,<br/>sweeps"]:::built
     end
-    subgraph P2["Next: make the loci real"]
+    subgraph P2["Next: make it real (needs your data)"]
         direction TB
-        n1["Wire the chromatin library into the movie:<br/>one saved simulation per cell"]:::planned
+        n1["Run the 100-simulation library<br/>(GPU, your go-ahead)"]:::planned
         n2["Calibrate to your measured<br/>MSD (nm and seconds)"]:::planned
-        n3["3D z-stacks,<br/>widefield / spinning-disk / lattice"]:::planned
+        n3["Measured values: MS2 brightness R,<br/>error sizes, real movie"]:::planned
+        n4["Choose spots with all three signals;<br/>separate homologous copies"]:::planned
     end
     subgraph P3["Then: the real question"]
         direction TB
@@ -173,7 +247,7 @@ flowchart LR
 
 ---
 
-## 5. Glossary
+## 7. Glossary
 
 | Term | Plain meaning |
 |---|---|
@@ -188,7 +262,7 @@ flowchart LR
 
 ---
 
-## 6. Files each stage reads and writes
+## 8. Files each stage reads and writes
 
 Every stage writes its outputs into `data/runs/<run_id>/`, one folder per stage, so any stage can be re-run or
 inspected on its own. Each folder also stores the settings used (`params.yaml`), the random seed (`seed.txt`) and the
@@ -200,21 +274,21 @@ software versions (`provenance.json`), so a run can always be reproduced.
 | 1b probe binding | `stage1_chromatin/` | `probe_occupancy.csv`: probes attached per locus per frame |
 | 1c transcription (MS2) | `stage1_chromatin/` | `transcription.csv` (distance, promoter state, Pol II, MS2 loops), `transcription_events.csv` (every Pol II) |
 | 2 cells | `stage2_cells/` | `cells.csv`: position, size, shape and ID of every cell in every frame |
-| 3 microscope | `stage3_microscopy/` | `nucleus.tif`, `locus0.tif`, `locus1.tif`, `labels.tif` (true cell IDs), `imaging_truth.csv`, `cells_image.csv`, `loci_truth_image.csv`, `imaging_errors.json` (see docs/IMAGE_ERRORS.md) |
+| 3 microscope | `stage3_microscopy/` | `nucleus.tif`, `locus0.tif`, `locus1.tif`, `labels.tif` (true cell IDs), `imaging_truth.csv`, `cells_image.csv`, `loci_truth_image.csv`, `bleach_cells.csv` (per-cell bleaching), `imaging_errors.json` (see docs/IMAGE_ERRORS.md), `calibration/` (estimated from simulated dark / flat / bead images) |
 | 4 find + follow | `stage4_segtrack/` | `tracked_gt_masks.tif`, `tracked_auto_masks.tif`, `tracks_*.csv` |
 | 5 cut out cells | `stage5_cells/<who identified them>/` | one folder per cell, plus `cell_summary.csv` |
-| 6 locate loci | `stage6_analysis/<who identified them>/` | `loci_positions.csv`, `locus_distances.csv`, `scores.json` |
-| 7 grading | `stage7_validation/` | `metrics.json`, `id_switch_events_*.csv` |
+| 6 locate loci | `stage6_analysis/<who identified them>/` | `loci_positions[_cal].csv`, `locus_distances.csv`, `ms2_traces[_cal].csv`, `ms2_deconvolution.csv` (+ samples, info), `nuclear_signals.csv`, `flatfield_est.npz`; `stage6_analysis/scores.json`, `bleach.csv` |
+| 7 grading | `stage7_validation/` | `metrics.json`, `id_switch_events_*.csv`, `error_effects.csv` + `error_effects_selfcal/` (what each image error does, with and without correction) |
 
 "Who identified them" is `truth` (the answer key's IDs), `tracked_gt_masks` or `tracked_auto_masks` (the tracker's IDs).
 
-## 7. What runs where
+## 9. What runs where
 
 | Work | Runs on |
 |---|---|
-| Polymer simulation (planned) | GPU (OpenMM) |
+| Polymer simulation (chromatin library) | GPU (OpenMM) |
 | Finding cells, following cells | GPU (Cellpose, Trackastra), each in its own process |
-| Cell motion, image rendering, scoring | CPU |
+| Cell motion, image rendering, scoring, MS2 deconvolution (numba) | CPU |
 | Analyzing each cell | CPU, one cell per worker process, all cells at once |
 | Dashboard | CPU; the movie players run in your browser |
 

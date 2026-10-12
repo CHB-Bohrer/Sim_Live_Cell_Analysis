@@ -25,7 +25,7 @@ PRESETS = {
     "Many probes (smooth signal)": {"n_probes": 200, "k_bind": 0.01},
     "Saturating locus (20 sites)": {"capacity": 20, "k_bind": 0.4, "n_probes": 60},
 }
-COL = {"free": "#94a3b8", "bound": "#2563eb", "scan": "#0f766e", "bad": "#b45309"}
+COL = {"free": "#94a3b8", "bound": "#60a5fa", "scan": "#14b8a6", "bad": "#f59e0b"}
 
 
 def _k(locus: str, name: str) -> str:
@@ -75,29 +75,29 @@ def model_svg(p: P.ProbeParams, counts: tuple[int, int, int], mean: tuple[float,
                                                                       COL["scan"], 560)]
     out = ['<svg viewBox="0 0 780 290" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:system-ui,sans-serif">',
            '<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">'
-           '<path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>']
+           '<path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>']
     for name, sub, n, m, color, x in boxes:
         out.append(f'<rect x="{x}" y="40" width="200" height="150" rx="14" fill="{color}" fill-opacity="0.10" stroke="{color}" '
                    f'stroke-width="2"/>')
         out.append(f'<text x="{x + 12}" y="62" font-size="14" font-weight="700" fill="{color}">{name}</text>')
-        out.append(f'<text x="{x + 12}" y="79" font-size="11" fill="#64748b">{sub}</text>')
-        out.append(f'<text x="{x + 188}" y="66" font-size="30" font-weight="700" text-anchor="end" fill="#1f2933">{n}</text>')
-        out.append(f'<text x="{x + 188}" y="82" font-size="11" text-anchor="end" fill="#64748b">average {m:.1f}</text>')
+        out.append(f'<text x="{x + 12}" y="79" font-size="11" fill="#94a3b8">{sub}</text>')
+        out.append(f'<text x="{x + 188}" y="66" font-size="30" font-weight="700" text-anchor="end" fill="#e5e7eb">{n}</text>')
+        out.append(f'<text x="{x + 188}" y="82" font-size="11" text-anchor="end" fill="#94a3b8">average {m:.1f}</text>')
         if p.n_probes <= 80:
             for i in range(n):
                 out.append(f'<circle cx="{x + 18 + (i % 12) * 14.5}" cy="{104 + (i // 12) * 14.5}" r="5" fill="{color}"/>')
     arrows = [("M224,100 L286,100", 255, 92, f"k_bind {p.k_bind:g}"), ("M494,100 L556,100", 525, 92, f"k_scan {p.k_scan:g}")]
     for d, x, y, t in arrows:
-        out.append(f'<path d="{d}" stroke="#475569" stroke-width="2.2" fill="none" marker-end="url(#ar)"/>')
-        out.append(f'<text x="{x}" y="{y}" font-size="11" text-anchor="middle" fill="#334155">{t}</text>')
-    out.append('<path d="M660,192 C660,262 120,262 120,194" stroke="#475569" stroke-width="2.2" fill="none" marker-end="url(#ar)"/>')
-    out.append(f'<text x="390" y="274" font-size="12" text-anchor="middle" fill="#334155">falls off: k_off {p.k_off:g} per s '
+        out.append(f'<path d="{d}" stroke="#94a3b8" stroke-width="2.2" fill="none" marker-end="url(#ar)"/>')
+        out.append(f'<text x="{x}" y="{y}" font-size="11" text-anchor="middle" fill="#cbd5e1">{t}</text>')
+    out.append('<path d="M660,192 C660,262 120,262 120,194" stroke="#94a3b8" stroke-width="2.2" fill="none" marker-end="url(#ar)"/>')
+    out.append(f'<text x="390" y="274" font-size="12" text-anchor="middle" fill="#cbd5e1">falls off: k_off {p.k_off:g} per s '
                f'(scans {1 / p.k_off:.0f} s on average)</text>')
-    out.append('<path d="M390,192 C390,222 150,222 150,194" stroke="#b45309" stroke-width="1.6" fill="none" stroke-dasharray="5 4" '
+    out.append('<path d="M390,192 C390,222 150,222 150,194" stroke="#f59e0b" stroke-width="1.6" fill="none" stroke-dasharray="5 4" '
                'marker-end="url(#ar)"/>')
-    out.append(f'<text x="390" y="236" font-size="11" text-anchor="middle" fill="#b45309">lets go again: k_unbind {p.k_unbind:g}</text>')
+    out.append(f'<text x="390" y="236" font-size="11" text-anchor="middle" fill="#f59e0b">lets go again: k_unbind {p.k_unbind:g}</text>')
     cap = f" · {p.capacity} binding sites" if p.capacity else ""
-    out.append(f'<text x="20" y="22" font-size="12" fill="#64748b">{p.n_probes} probes in the pool{cap} · counts at {html.escape(when)}</text>')
+    out.append(f'<text x="20" y="22" font-size="12" fill="#94a3b8">{p.n_probes} probes in the pool{cap} · counts at {html.escape(when)}</text>')
     out.append("</svg>")
     return "".join(out)
 
@@ -151,9 +151,9 @@ def _locus_panel(locus: str) -> P.ProbeParams | None:
     fig, ax = plt.subplots(1, 2, figsize=(14, 3.1), gridspec_kw={"width_ratios": [4, 1]})
     ax[0].fill_between(ts, 0, d.n_scanning, step="post", color=COL["scan"], alpha=0.35, label="scanning", lw=0)
     ax[0].fill_between(ts, d.n_scanning, d.n_attached, step="post", color=COL["bound"], alpha=0.35, label="bound", lw=0)
-    ax[0].step(ts, d.n_attached, where="post", color="#1f2933", lw=1.3, label="attached (what you see)")
+    ax[0].step(ts, d.n_attached, where="post", color="#e5e7eb", lw=1.3, label="attached (what you see)")
     ax[0].axhline(sm["mean_attached"], color=COL["bad"], ls="--", lw=1.2, label="theory average")
-    ax[0].axvline(when, color="#64748b", lw=1)
+    ax[0].axvline(when, color="#94a3b8", lw=1)
     ax[0].set_xlabel("time (s)"); ax[0].set_ylabel("probes at the locus"); ax[0].set_title("Probes attached through time")
     ax[0].legend(ncol=4, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.28))
     long = P.sample_trace(P.simulate_trace(p, 2000, seed + 7), np.arange(0, 2000), 1e-3).n_attached

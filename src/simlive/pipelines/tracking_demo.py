@@ -23,7 +23,7 @@ from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
 from simlive.stage1_chromatin.transcription import ms2_spots, simulate_transcription, traces_from_truth
 from simlive.stage3_microscopy.calibration.run import run_calibration
 from simlive.stage3_microscopy.fiducials import make_fiducials
-from simlive.stage3_microscopy.render import Imager, cells_in_image, entropy_for, truth_in_image
+from simlive.stage3_microscopy.render import Imager, entropy_for, save_imaging_truth
 from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
@@ -97,27 +97,7 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
         mv["labels"] = mv["labels"].max(axis=1)                              # nuclei never overlap laterally, so max over z keeps the IDs
     tifffile.imwrite(s3 / "labels.tif", mv["labels"], photometric="minisblack")
     # ground truth of the imaging itself: what drift / focus / power / blur each frame really had, and the truth in image coordinates
-    it = imager.imaging_truth()
-    it.to_csv(s3 / "imaging_truth.csv", index=False)
-    px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
-    st_truth = imager.static_truth()
-    cells_in_image(cells, it, px_um).to_csv(s3 / "cells_image.csv", index=False)
-    bt = imager.bleach_truth()          # per-cell bleaching (each cell by its own light dose), empty unless bleaching.per_cell is on
-    if len(bt):
-        bt.to_csv(s3 / "bleach_cells.csv", index=False)
-    if truth is not None:      # + photons per spot, so scoring can tell a missed spot from a locus that had no light at all
-        tim = truth_in_image(truth, it, px_um, st_truth["channel_shift_px"], (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).merge(
-            imager.locus_photons(), on=["t", "cell_id", "locus_id"], how="left")
-        ny, nx = imager.shape                                   # cells can be partly or wholly outside the field (geometry.outside_um)
-        yd, xd = (tim[c] if c in tim else tim[c.replace("_drawn", "")] for c in ("y_drawn_um", "x_drawn_um"))
-        tim["in_image"] = (yd / px_um >= 0) & (yd / px_um <= ny - 1) & (xd / px_um >= 0) & (xd / px_um <= nx - 1)
-        if len(bt):     # the true bleaching factor of each spot (its own colour) and of its nucleus (the MS2 spot's MCP-GFP)
-            b = bt.set_index(["t", "cell_id"])
-            key = pd.MultiIndex.from_arrays([tim.t, tim.cell_id])
-            tim["bleach"] = [b[f"bleach_locus{int(k)}"].get(i, np.nan) if f"bleach_locus{int(k)}" in b else np.nan
-                             for k, i in zip(tim.locus_id, key)]
-            tim["bleach_nucleus"] = b["bleach_nucleus"].reindex(key).to_numpy() if "bleach_nucleus" in b else np.nan
-        tim.to_csv(s3 / "loci_truth_image.csv", index=False)
+    st_truth = save_imaging_truth(imager, cells, truth, s3)
     if imager.is3d and imager.E.on("piezo"):               # where the planes really were, and what the piezo's position sensor logged
         imager.piezo_truth().to_csv(s3 / "piezo_truth.csv", index=False)
     (s3 / "imaging_errors.json").write_text(json.dumps(st_truth, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
@@ -298,6 +278,11 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
     from simlive.stage6_analysis.bleach import bleach_correct_run
 
     scores["bleaching"] = bleach_correct_run(run, tuple(sources))
+    if (run / "stage1_chromatin" / "transcription.csv").exists():      # MS2 trace -> Pol II initiation events and bursts (Chen et al. 2025)
+        from simlive.stage6_analysis.deconvolve import deconvolve_run
+
+        progress("Stage 6: deconvolving the MS2 traces into Pol II initiation events (Chen et al. 2025)")
+        scores["ms2_deconvolution"] = deconvolve_run(run, ("truth",), progress=lambda s: None)
     try:  # peak working set of this (main) process over the whole run, incl. segmentation/tracking input arrays
         import psutil
         scores["pipeline_main_process_peak_mb"] = round(psutil.Process().memory_info().peak_wset / 2**20, 1)

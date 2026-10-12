@@ -136,7 +136,7 @@ def trajectory_figure(R, variant):
     paths = tracked_paths(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime, variant)
     for p, pts in paths.items():
         col = color_for(V["dominant"][p]) if p in V["dominant"] else (0.5, 0.5, 0.5)
-        ax.plot(pts[:, 0], pts[:, 1], "--", color="k", lw=0.9, alpha=0.8)
+        ax.plot(pts[:, 0], pts[:, 1], "--", color="#e5e7eb", lw=0.9, alpha=0.8)
     ev = V["events"]
     for r in ev.itertuples():
         row = c[(c.cell_id == r.gt_id) & (c.t == r.t)]
@@ -429,7 +429,7 @@ for v in ("auto_masks", "gt_masks"):
 
 # Only the open page is computed. st.tabs ran the code of all 14 tabs on every rerun (~20 s with warm caches, ~40 s cold), and a full
 # rerun jumped back to the first tab; the page choice lives in session state, so it also survives reruns.
-PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
+PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'ms2': '🧮 MS2 → Pol II', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
 if st.session_state.get("page") not in PAGES.values():
     st.session_state["page"] = PAGES["movie"]
 page = st.segmented_control("Page", list(PAGES.values()), key="page", label_visibility="collapsed") or PAGES["movie"]
@@ -731,3 +731,13 @@ if page == PAGES["lib"]:
     library_tab.render()
 if page == PAGES["chrom"]:
     chrom_frag()
+
+
+@st.fragment
+def ms2_frag():
+    import ms2_tab  # noqa: E402  (app/ms2_tab.py)
+    ms2_tab.render(st, run_path, R)
+
+
+if page == PAGES["ms2"]:
+    ms2_frag()

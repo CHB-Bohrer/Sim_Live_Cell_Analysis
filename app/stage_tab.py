@@ -62,9 +62,9 @@ def _piezo_section(run: Path, cfg: dict) -> None:
     ax[0].set_xlabel("plane number (0 = lowest)"); ax[0].set_ylabel("frame"); ax[0].set_title("Error of every plane in every stack (nm)")
     fig.colorbar(im, ax=ax[0], fraction=0.03)
     up, dn = pz[pz.scan_dir > 0].groupby("k").error_um.mean() * 1000, pz[pz.scan_dir < 0].groupby("k").error_um.mean() * 1000
-    ax[1].plot(up.index, up.values, "o-", color="#b45309", label="up-scans (average)")
+    ax[1].plot(up.index, up.values, "o-", color="#f59e0b", label="up-scans (average)")
     if len(dn):
-        ax[1].plot(dn.index, dn.values, "o-", color="#2563eb", label="down-scans (average)")
+        ax[1].plot(dn.index, dn.values, "o-", color="#60a5fa", label="down-scans (average)")
     ax[1].axhline(0, color="#999", lw=0.8); ax[1].set_xlabel("plane number"); ax[1].set_ylabel("average error (nm)")
     ax[1].set_title("The systematic part: bow and hysteresis"); ax[1].legend(fontsize=9)
     st.pyplot(fig, width="stretch"); plt.close(fig)
@@ -124,7 +124,7 @@ def _fiducial_section(run: Path, R: dict) -> None:
     for a, (name, est, true, unit) in zip(ax, [("z (µm)", sh.dz_um, tz - tz[0], "µm"), ("y (px)", sh.dy_px, it.drift_y_px - it.drift_y_px[0], "px"),
                                                  ("x (px)", sh.dx_px, it.drift_x_px - it.drift_x_px[0], "px")]):
         a.plot(t, true, "-", color="#999", lw=3, label="truth (drift + focus)")
-        a.plot(t, est, "o-", color="#0f766e", ms=4, label="measured from the beads")
+        a.plot(t, est, "o-", color="#14b8a6", ms=4, label="measured from the beads")
         a.set_title(f"Displacement in {name}", fontsize=11); a.set_xlabel("frame"); a.legend(fontsize=8)
     st.pyplot(fig, width="stretch"); plt.close(fig)
     st.caption(f"Beads followed: {int(sh.n_beads.iloc[0])}. The z estimate includes the piezo error of the planes near the slide, which is why it can differ a little "
