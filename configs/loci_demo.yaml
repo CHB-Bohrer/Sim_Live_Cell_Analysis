@@ -69,9 +69,12 @@ loci:                       # STAND-IN for stage 1 (polychrom): confined diffusi
     enabled: false           # true: MS2 spots appear at the promoter, in the SAME channel as the nuclear NLS-GFP
     photons_per_loop_s: 100  # PLACEHOLDER photons per MS2 loop per second of exposure (one Pol II with all 24 loops = 24x this)
     params:                  # all rates per SECOND of real time (independent of the frame interval); see docs/PLAN_transcription.md
-      k_on: 0.000333         # OFF -> ON when the enhancer is far (1/3000 s: mean OFF 50 min; TFF1 burst period 66 min, Rodriguez 2019)
-      k_off: 0.00104         # ON -> OFF (1/960 s: bursts last 16 min, TFF1)
-      k_init: 0.00167        # Pol II initiations per second while ON (one per 600 s: ~1.6 per burst; TFF1 1.5 +/- 0.5)
+      # BURSTY PLACEHOLDER (user, 2026-10-13: "way more bursty"): short intense bursts, long silences; ~24 Pol II per burst
+      k_on: 0.00111          # OFF -> ON when the enhancer is far (1/900 s: mean OFF 15 min)
+      k_off: 0.00833         # ON -> OFF (1/120 s: bursts last 2 min)
+      k_init: 0.2            # Pol II initiations per second while ON (one every 5 s)
+      # previous, TFF1-like (literature, ~1.6 Pol II per burst, barely bursty in MS2): k_on 0.000333 (OFF 50 min), k_off 0.00104 (ON 16 min),
+      # k_init 0.00167 (one per 600 s); TFF1 burst period 66 min, ON 16 min, 1.5 transcripts per burst (Rodriguez 2019)
       coupling: contact      # contact (sharp) | hill | exp | none (control)
       coupled_rate: k_on     # which rate depends on distance: k_on | k_init | k_off
       fold: 12               # coupled rate is this many times faster at full contact

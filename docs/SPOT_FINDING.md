@@ -264,6 +264,11 @@ that piled events onto one frame and under-counted matches: it gave 57% where th
   - At 3 starts/min, an ON window of 50 s holds 2.5 starts on average, so it misses half the ON frames.
   - At the placeholder rate (1 per 10 min) it never fires. A burst of ~1.6 starts cannot be seen as a burst at all, only its starts.
   - On the denser gene, w = 30 frames (5 min) with g_b = 6 gives ON 94% / OFF 94%, against the default's ON 49% / OFF 99%.
+- **Bursty default gene** (2026-10-13; ON 2 min with a start every 5 s, OFF 15 min, ~24 Pol II per burst): run loci_demo_seed10_ebf264,
+  Vutara, 40 min, at the PLACEHOLDER MS2 brightness (R = 0.8).
+  - Starts: 691 true / 781 inferred, 86% within 30 s, 0.27 false per true; 1-min rate r 0.91.
+  - Chen's default burst rule: 92% agreement, 97% of ON frames caught.
+  - Bursts of many Pol II are measurable where single Pol II are not (brightness sweep).
 - **Per-second start probability:** `p_fine` is the fraction of samples with a start in each second. It is saved per cell
   (`fine_<cell>` in `_samples.npz`), and its area over an interval is the expected number of starts there. The page plots it over the
   trace, with a zoom.

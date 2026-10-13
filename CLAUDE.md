@@ -412,6 +412,13 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
     - burst-rule map (page step 6): on the denser gene w = 30 frames, g_b = 6 gives ON/OFF 94/94% vs Chen default 49/99%.
   - Vutara showcase: loci_demo_seed9_1c649d (sequential, tracked) and loci_demo_seed9_17363e (same movie, simultaneous: 8.6% bleed-through,
     no colour delay; tracking skipped). Error effects for both in docs/ERROR_EFFECTS.md.
+- **BURSTY DEFAULT GENE** (user 2026-10-13: "the transcription trajectory needs to be way more bursty"). Configs + transcription.DEFAULTS +
+  the Transcription page now use:
+  - k_on 1/900 s (OFF 15 min), k_off 1/120 s (ON 2 min), k_init 0.2/s → ~24 Pol II per burst, 3.5 bursts/h, ON 12%;
+  - the trace spikes and returns to zero. The old TFF1-like values (~1.6 Pol II per burst) are kept in the config comments.
+  - Showcase loci_demo_seed10_ebf264 (Vutara, 40 min, PLACEHOLDER MS2 brightness R = 0.8): bursts are measurable even at the placeholder
+    brightness. Deconvolution: 86% of starts within 30 s, rate r 0.91; Chen's default burst rule catches 97% of ON frames (92% agreement).
+  - The MS2 page now opens on a typical cell (median number of starts).
 - scripts/compare_localizers.py --run <run> also computes MS2 traces and the bleaching correction (`--ms2-only` = just those; for older runs). Variants in
   compare.py: original, default, chen_literal, no_median, dog_snr5, integer (+3D: zmed3); tables are merged, so delete method_comparison.csv after renaming variants.
 - Scores (`score_localization[_3d]`): detection over loci WITH light (`photons` in loci_truth_image.csv), `n_false_on_dark`, `frac_far` (> 0.5 um), `rms_error_near_um`,

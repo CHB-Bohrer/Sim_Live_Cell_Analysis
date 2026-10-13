@@ -201,7 +201,7 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
     cells = sorted(dec.cell_id.unique())
     T_all = int(dec.t.max()) + 1
     n_true = ev[(ev.init_s > -dt) & (ev.init_s <= T_all * dt)].groupby("cell_id").size() if ev is not None else pd.Series(dtype=int)   # during the movie
-    best = int(n_true.idxmax()) if len(n_true) else int(cells[0])
+    best = int((n_true - n_true.median()).abs().idxmin()) if len(n_true) else int(cells[0])     # a typical cell (median number of starts)
     c = st.columns([2, 2, 2, 3])
     cid = c[0].selectbox("Cell", cells, index=cells.index(best) if best in cells else 0, key="dc_cell",
                          format_func=lambda i: f"cell {i} ({int(n_true.get(i, 0))} true starts)" if len(n_true) else f"cell {i}")
