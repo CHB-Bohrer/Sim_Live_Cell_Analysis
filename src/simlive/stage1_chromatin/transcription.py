@@ -33,10 +33,10 @@ COUPLED_RATES = ("k_on", "k_init", "k_off")
 # ON ~6 min and OFF ~45 min (MCF7 cells, Cell Reports 2021 MYC paper, Larson co-author); human Pol II elongation 1-6 kb/min across
 # the literature (e.g. Darzacq 2007: ~1.9-4.3). The coupling strength, initiation rate and dwell are design choices, not literature values.
 DEFAULTS = {
-    "k_on": 1 / 900.0, "k_off": 1 / 120.0, "k_init": 0.2,      # bursty placeholder (2026-10-13); TFF1-like was 1/3000, 1/960, 1/600
+    "k_on": 1 / 1200.0, "k_off": 1 / 45.0, "k_init": 0.15,     # spiky placeholder (2026-10-13); TFF1-like was 1/3000, 1/960, 1/600
     "coupling": "contact", "coupled_rate": "k_on", "fold": 12.0,
     "d_contact_nm": 150.0, "d_half_nm": 200.0, "hill_n": 4.0, "d_decay_nm": 150.0, "f_const": 0.1,
-    "elongation_kb_min": 2.5, "cassette_kb": 1.3, "gene_kb": 5.0, "n_loops": 24, "dwell_s": 116.0, "dwell_fixed": False,
+    "elongation_kb_min": 2.5, "cassette_kb": 1.3, "gene_kb": 2.0, "n_loops": 24, "dwell_s": 20.0, "dwell_fixed": False,
 }
 HELP = {
     "k_on": "Rate (1/s) at which the OFF promoter turns ON, when the enhancer is far away. 1/k_on = mean OFF time.",

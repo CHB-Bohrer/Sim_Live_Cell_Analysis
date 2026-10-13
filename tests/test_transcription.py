@@ -90,10 +90,11 @@ def test_pipeline_table_is_reproducible():
 
 
 def test_sampling_warnings():
-    p = T.TranscriptionParams()
+    p = T.TranscriptionParams(k_off=1 / 960.0, k_init=1 / 600.0)       # 16-min bursts: 10 s frames resolve them
     assert T.check_sampling(p, 10.0, 0.1)[0][0] == "good"
     assert T.check_sampling(p, 600.0, 0.1)[0][0] in ("bad", "warn")
     assert any(l == "bad" for l, _ in T.check_sampling(p, 10.0, 20.0))
+    assert T.check_sampling(T.TranscriptionParams(), 10.0, 0.1)[0][0] == "warn"     # the spiky default: 45 s bursts, ~4-5 frames each
 
 
 # ----------------------------------------------------------------------------- integration with the polymer library and the renderer

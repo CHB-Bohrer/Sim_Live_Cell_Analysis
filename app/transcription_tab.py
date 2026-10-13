@@ -146,16 +146,16 @@ def _coupling_inputs() -> dict:
 
 def _kinetics_inputs() -> dict:
     c = st.columns(3)
-    off = c[0].number_input("Mean OFF time when the enhancer is far (min)", 0.1, 10000.0, 15.0, 5.0, key="tx_off")
-    on = c[1].number_input("Mean ON time (min)", 0.1, 1000.0, 2.0, 0.5, key="tx_on")
-    ini = c[2].number_input("While ON, a Pol II starts every (s)", 1.0, 3600.0, 5.0, 1.0, key="tx_ini")
+    off = c[0].number_input("Mean OFF time when the enhancer is far (min)", 0.1, 10000.0, 20.0, 5.0, key="tx_off")
+    on = c[1].number_input("Mean ON time (min)", 0.1, 1000.0, 0.75, 0.25, key="tx_on")
+    ini = c[2].number_input("While ON, a Pol II starts every (s)", 1.0, 3600.0, 7.0, 1.0, key="tx_ini")
     c = st.columns(5)
     out = {"k_on": 1 / (off * 60.0), "k_off": 1 / (on * 60.0), "k_init": 1 / ini}
     out["elongation_kb_min"] = float(c[0].number_input("Pol II speed (kb/min)", 0.2, 20.0, 2.5, 0.5, key="tx_v", help=T.HELP["elongation_kb_min"]))
     out["cassette_kb"] = float(c[1].number_input("MS2 cassette (kb)", 0.0, 20.0, 1.3, 0.1, key="tx_cas", help=T.HELP["cassette_kb"]))
-    out["gene_kb"] = float(c[2].number_input("Gene after cassette (kb)", 0.0, 200.0, 5.0, 0.5, key="tx_gene", help=T.HELP["gene_kb"]))
+    out["gene_kb"] = float(c[2].number_input("Gene after cassette (kb)", 0.0, 200.0, 2.0, 0.5, key="tx_gene", help=T.HELP["gene_kb"]))
     out["n_loops"] = int(c[3].number_input("MS2 loops", 1, 200, 24, 1, key="tx_loops", help=T.HELP["n_loops"]))
-    out["dwell_s"] = float(c[4].number_input("Wait at gene end (s)", 1.0, 600.0, 116.0, 5.0, key="tx_dw", help=T.HELP["dwell_s"]))
+    out["dwell_s"] = float(c[4].number_input("Wait at gene end (s)", 1.0, 600.0, 20.0, 5.0, key="tx_dw", help=T.HELP["dwell_s"]))
     return out
 
 

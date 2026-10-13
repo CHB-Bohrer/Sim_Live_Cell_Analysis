@@ -69,10 +69,11 @@ loci:                       # STAND-IN for stage 1 (polychrom): confined diffusi
     enabled: false           # true: MS2 spots appear at the promoter, in the SAME channel as the nuclear NLS-GFP
     photons_per_loop_s: 100  # PLACEHOLDER photons per MS2 loop per second of exposure (one Pol II with all 24 loops = 24x this)
     params:                  # all rates per SECOND of real time (independent of the frame interval); see docs/PLAN_transcription.md
-      # BURSTY PLACEHOLDER (user, 2026-10-13: "way more bursty"): short intense bursts, long silences; ~24 Pol II per burst
-      k_on: 0.00111          # OFF -> ON when the enhancer is far (1/900 s: mean OFF 15 min)
-      k_off: 0.00833         # ON -> OFF (1/120 s: bursts last 2 min)
-      k_init: 0.2            # Pol II initiations per second while ON (one every 5 s)
+      # SPIKY PLACEHOLDER (user, 2026-10-13: "even more bursty", little accumulated signal): brief bursts of ~7 Pol II, short residence
+      k_on: 0.000833         # OFF -> ON when the enhancer is far (1/1200 s: mean OFF 20 min)
+      k_off: 0.0222          # ON -> OFF (1/45 s: bursts last 45 s)
+      k_init: 0.15           # Pol II initiations per second while ON (one every ~7 s): ~7 Pol II per burst
+      # (first bursty version: k_on 1/900, k_off 1/120, k_init 0.2 -> 24 Pol II per 2-min burst, gene 5 kb, dwell 116 s: broad humps)
       # previous, TFF1-like (literature, ~1.6 Pol II per burst, barely bursty in MS2): k_on 0.000333 (OFF 50 min), k_off 0.00104 (ON 16 min),
       # k_init 0.00167 (one per 600 s); TFF1 burst period 66 min, ON 16 min, 1.5 transcripts per burst (Rodriguez 2019)
       coupling: contact      # contact (sharp) | hill | exp | none (control)
@@ -85,9 +86,9 @@ loci:                       # STAND-IN for stage 1 (polychrom): confined diffusi
       f_const: 0.1           # none: constant coupling (control with the same average)
       elongation_kb_min: 2.5 # Pol II speed (human genes: ~1-6 kb/min)
       cassette_kb: 1.3       # MS2 cassette at the 5' end
-      gene_kb: 5.0           # gene after the cassette
+      gene_kb: 2.0           # gene after the cassette (PLACEHOLDER short gene: a Pol II crosses cassette + gene in ~80 s)
       n_loops: 24
-      dwell_s: 116           # mean wait at the end of the gene before release (Coulon 2014: 116 s)
+      dwell_s: 20            # mean wait at the end of the gene before release (PLACEHOLDER; Coulon 2014 measured 116 s for their gene)
 
 isolation:                  # stage 5: one single-cell movie per cell ID
   sources: [truth, tracked_auto_masks]   # truth | tracked_gt_masks | tracked_auto_masks

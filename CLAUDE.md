@@ -419,6 +419,13 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   - Showcase loci_demo_seed10_ebf264 (Vutara, 40 min, PLACEHOLDER MS2 brightness R = 0.8): bursts are measurable even at the placeholder
     brightness. Deconvolution: 86% of starts within 30 s, rate r 0.91; Chen's default burst rule catches 97% of ON frames (92% agreement).
   - The MS2 page now opens on a typical cell (median number of starts).
+  - SECOND STEP, same day ("still a ton of accumulated MS2 signal, even more bursty"), now the default:
+    - k_on 1/1200 s (OFF 20 min), k_off 1/45 s (ON 45 s), k_init 0.15/s → ~7 Pol II per burst;
+    - shorter residence: gene_kb 2.0 (was 5.0), dwell_s 20 (was 116, Coulon 2014's measured value); a Pol II stays ~100 s instead of ~270 s;
+    - ~3 bursts/h. The trace is narrow spikes of 4-7 Pol II.
+    - check_sampling now WARNS at 10 s frames (only ~4-5 frames per 45 s burst): use faster frames for real data of such a gene.
+    - Showcase loci_demo_seed11_24bba2 (Vutara, placeholder MS2): trace r 0.81. Deconvolution: 200 true / 293 inferred starts, 79% within
+      30 s, 0.68 false per true (weak spikes in noise ±2 Pol II), rate r 0.88; burst calls 97% agreement, 84% of ON frames.
 - scripts/compare_localizers.py --run <run> also computes MS2 traces and the bleaching correction (`--ms2-only` = just those; for older runs). Variants in
   compare.py: original, default, chen_literal, no_median, dog_snr5, integer (+3D: zmed3); tables are merged, so delete method_comparison.csv after renaming variants.
 - Scores (`score_localization[_3d]`): detection over loci WITH light (`photons` in loci_truth_image.csv), `n_false_on_dark`, `frac_far` (> 0.5 um), `rms_error_near_um`,
