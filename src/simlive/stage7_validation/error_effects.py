@@ -45,7 +45,7 @@ BG_NONE = {"intensity_background": "none"}
 FIXES: dict[str, list[tuple[str, str, dict]]] = {
     "stage_drift": [("none", "nothing to correct here: each cell's crop follows the cell, so drift moves the cell and its loci together", {})],
     "chromatic_shift": [("none", "not corrected", {}),
-                        ("movie", "shift from the movie (mean enhancer - promoter vector; used only if > 2 standard errors)",
+                        ("movie", "shift from the movie (mean enhancer - promoter vector; used only with >= 30 cells and > 3 standard errors)",
                          {"calib": "movie", "parts": ("shift",)}),
                         ("images", "shift from the bead slide", {"calib": "images", "parts": ("shift",)})],
     "sequential_colour": [("none", "no correction possible: the loci really moved between the colour exposures (random motion)", {})],
@@ -102,7 +102,7 @@ HOW = {
     "chromatic_shift": dict(analysis="Not correctable by the spot finder: each colour is shifted by a constant amount.",
                             images="A bead slide (beads glow in every colour) gives each colour's offset; it is subtracted from every position.",
                             movie="The average enhancer - promoter vector over all cells and frames: true orientations are random, so the "
-                                  "average is the shift between the two colours. Used only when larger than 2 standard errors: it needs many "
+                                  "average is the shift between the two colours. Used only with >= 30 cells and when larger than 3 standard errors: it needs many "
                                   "cells, because with few cells the true vectors do not average out."),
     "sequential_colour": dict(analysis="Cannot be corrected afterwards: between the colour exposures the chromatin moves randomly.",
                               images="(Nothing to calibrate.)",

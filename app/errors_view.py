@@ -222,7 +222,7 @@ def _results(ee: pd.DataFrame, sid: str):
             s = rep["shift"]
             bits.append(f"colour shift from the movie ({s['n_cells']} cells, {s['n_frames']} frames): ({s['shift_px'][0]:+.2f}, {s['shift_px'][1]:+.2f}) px "
                         f"± ({s['se_px'][0]:.2f}, {s['se_px'][1]:.2f}); true ({s.get('true_px', [np.nan, np.nan])[0]:+.2f}, "
-                        f"{s.get('true_px', [np.nan, np.nan])[1]:+.2f}) px; {'applied' if s['significant'] else 'NOT applied: not larger than 2 standard errors (needs more cells)'}")
+                        f"{s.get('true_px', [np.nan, np.nan])[1]:+.2f}) px; {'applied' if s['significant'] else s.get('reason', 'NOT applied')}")
         if bits:
             st.markdown("**What the movie-only estimate found** (checked against the truth): " + " · ".join(bits))
     return True

@@ -178,6 +178,19 @@ into the moments Pol II started on the gene (with uncertainty) and into bursts. 
 units, what one Pol II looks like, noise, one cell against the truth, and the whole run. The burst rule's settings can be changed live.
 `scripts\run.cmd python scripts\deconvolve_ms2.py --run <run>`; details and measured accuracy in [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md).
 
+**Instruments.** `--set instrument=vutara_vxl` (or the sidebar's *Microscope* choice) switches from the generic placeholder optics to a
+Bruker Vutara VXL in 2D mode:
+- **Optics:** 60x / 1.3 NA silicone objective, ~100 nm pixels, Orca Fusion BT (QE 95%), flat top-hat illumination.
+- **Sequential colours:** bleed-through computed from the FPbase spectra (~0.04%), and the loci move between the colour exposures.
+
+Sources and assumptions are in [docs/INSTRUMENTS.md](docs/INSTRUMENTS.md); the measured sequential-vs-simultaneous trade-off is in
+[docs/ERROR_EFFECTS.md](docs/ERROR_EFFECTS.md).
+
+**MS2 → Pol II page:**
+- per-second probability of a Pol II start over the trace (with zoom);
+- the paper's own sampler next to the default one (they agree);
+- a step that explains the burst rule and maps how well each setting matches the truth.
+
 The dashboard is now dark. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has updated diagrams of how it all works and of what is built.
 
 **Not built yet:** using the promoter, the enhancer and the MS2 spot together to choose spots, and separating the copies of a locus on different

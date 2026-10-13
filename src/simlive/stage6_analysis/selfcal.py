@@ -13,7 +13,7 @@ applies it in exactly the same way (`localize_loci(..., calib=<folder>)`). Each 
   locus colours use the same shape (spot brightness fluctuates too much to map it from the spots).
 - chromatic shift between the two locus colours: the mean enhancer - promoter vector over all cells and frames. The true vector points in
   every direction (cells and loci are randomly oriented), so its mean is the shift between the colours. Only the shift BETWEEN colours is
-  identifiable this way (locus0 is the reference), which is what distances need. It is applied only if it is larger than 2 x its standard
+  identifiable this way (locus0 is the reference), which is what distances need. It is applied only with >= 30 cells and if larger than 3 x its standard
   error (bootstrap over cells): with few cells the true vectors do not average out and the estimate would add an error instead.
 - colour cross-talk (bleed-through) of the nuclear channel into each locus colour: inside the nuclei, a locus channel's pixels rise with the
   nuclear channel's by the bleed-through fraction (robust regression; the locus spot itself is rejected as an outlier). `channel_inputs`
@@ -89,9 +89,9 @@ def hot_pixel_map(bg: np.ndarray, se: np.ndarray | None = None, z: float = 6.0, 
     return hot
 
 
-def chromatic_shift_from_positions(pos: pd.DataFrame, n_boot: int = 400, seed: int = 0) -> dict:
+def chromatic_shift_from_positions(pos: pd.DataFrame, n_boot: int = 400, seed: int = 0, min_cells: int = 30) -> dict:
     """Mean enhancer - promoter vector (lab px) over all cells and frames where both were found, its bootstrap standard error over cells
-    (frames of one cell are correlated, cells are not) and whether it is significant (> 2 SE in either axis)."""
+    (frames of one cell are correlated, cells are not) and whether to apply it: at least min_cells cells and > 3 SE in either axis."""
     a = pos[pos.locus_id == 0].set_index(["cell_id", "t"])[["lab_y_px", "lab_x_px"]]
     b = pos[pos.locus_id == 1].set_index(["cell_id", "t"])[["lab_y_px", "lab_x_px"]]
     d = (b - a).dropna().reset_index()
@@ -106,9 +106,14 @@ def chromatic_shift_from_positions(pos: pd.DataFrame, n_boot: int = 400, seed: i
     for _ in range(n_boot):
         i = rng.integers(0, len(cnt), len(cnt))
         boots.append(sums[i].sum(0) / cnt[i].sum())
-    se = np.std(boots, axis=0)
-    return {"shift_px": [float(mean[0]), float(mean[1])], "se_px": [float(se[0]), float(se[1])],
-            "significant": bool(np.any(np.abs(mean) > 2 * se)), "n_frames": int(len(d)), "n_cells": int(len(cnt))}
+    n = len(cnt)
+    se = np.std(boots, axis=0) * np.sqrt(n / max(n - 1, 1))       # the bootstrap of a mean underestimates the SE for few cells
+    # applied only with enough cells: with 12 cells an estimate 2.4 SE off the truth was called significant at 2 SE (2026-10-13), because
+    # the cell-to-cell scatter of the enhancer-promoter direction is large and a dozen cells say little about its spread
+    ok = n >= min_cells and bool(np.any(np.abs(mean) > 3 * se))
+    return {"shift_px": [float(mean[0]), float(mean[1])], "se_px": [float(se[0]), float(se[1])], "significant": ok,
+            "reason": "applied" if ok else (f"not applied: {n} cells < {min_cells}" if n < min_cells else "not applied: < 3 standard errors"),
+            "n_frames": int(len(d)), "n_cells": int(n)}
 
 
 def crosstalk_fraction(target, source, labels, frames=None, gap_px: int = 8, erode_px: int = 2) -> dict:

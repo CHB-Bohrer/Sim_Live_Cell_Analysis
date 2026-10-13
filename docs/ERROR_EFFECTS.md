@@ -1,5 +1,64 @@
 # What each image error does to the results, and what each correction gives back
 
+Two sets of measurements:
+- **Bruker Vutara VXL** (2026-10-13, below): sequential colours vs simultaneous two-camera detection.
+- **Generic placeholder microscope** (2026-10-12, further down).
+
+## Bruker Vutara VXL: sequential colours vs simultaneous detection (2026-10-13)
+
+The instrument and its sources are in [INSTRUMENTS.md](INSTRUMENTS.md). Two versions of the same movie:
+- **Common settings:** seed 9, 12 cells, 30 min, the denser gene, MS2 R = 25, cytoplasm on.
+- **Sequential** (`loci_demo_seed9_1c649d`, as the Vutara does it): bleed-through of GFP into the promoter's colour 0.036% (from the
+  FPbase spectra); the colours are 0.15 s apart.
+- **Simultaneous** (`loci_demo_seed9_17363e`, the optional second camera): bleed-through 8.6%, no delay.
+
+| movie | analysis | wrong pick | median nm | p95 nm | distance rms nm | intensity r | intensity err % | late/early | MS2 r |
+|---|---|---|---|---|---|---|---|---|---|
+| error-free reference | | 0.0% | 10 | 23 | 13 | 0.96 | 7.2 | 1.00 | 1.00 |
+| **sequential: colour delay 0.15 s** | nothing can correct it | 0.0% | 17 | 72 | **34** | 0.96 | 7.2 | 1.00 | 1.00 |
+| sequential: bleed-through 0.036% | not corrected | 0.0% | 10 | 23 | 13 | 0.95 | 7.8 | 1.00 | 0.99 |
+| | unmixing from the movie | 0.0% | 10 | 23 | 13 | 0.96 | 7.3 | 1.00 | 1.00 |
+| **simultaneous: bleed-through 8.6%** | not corrected | **9.9%** | 7 | 23 | 11 | **0.47** | 40.8 | 0.90 | 0.98 |
+| | shell background | 9.9% | 7 | 23 | 11 | 0.46 | 47.1 | 0.89 | 1.00 |
+| | unmixing from the movie | 0.0% | 15 | 69 | **32** | 0.83 | 15.2 | 0.99 | 0.99 |
+| cytoplasm | not corrected / shell | 0.0% | 10 | 23 | 13 | 0.96 | 7.2 | 1.00 | 0.99 / 1.00 |
+| | movie map: median (naive) | 0.0% | 10 | 23 | 13 | 0.96 | 7.8 | 1.00 | 1.00 |
+| | movie map: low percentile (robust) | 0.0% | 10 | 23 | 13 | 0.96 | 7.6 | 1.00 | 1.00 |
+| colour shift | not corrected | 0.0% | 34 | 50 | 48 | 0.96 | 7.2 | 1.00 | 1.00 |
+| | bead slide | 0.0% | 10 | 23 | 13 | 0.96 | 7.2 | 1.00 | 1.00 |
+| | movie alone (12 cells: refused) | 0.0% | 34 | 50 | 48 | 0.96 | 7.2 | 1.00 | 1.00 |
+| **all sources, sequential** | not corrected | 0.2% | 38 | 96 | 60 | 0.61 | 20.3 | 0.90 | 0.99 |
+| | calibration images | 0.0% | 25 | 80 | 39 | 0.88 | 13.1 | 1.00 | 1.00 |
+| | images + movie | 0.0% | 25 | 80 | 39 | 0.88 | 13.1 | 1.00 | 1.00 |
+| **all sources, simultaneous** | not corrected | 5.1% | 28 | 64 | 40 | 0.30 | 48.2 | 0.90 | 0.98 |
+| | calibration images | 10.1% | 25 | 41 | 27 | 0.42 | 49.3 | 0.95 | 1.00 |
+| | images + movie (unmixing) | 0.0% | 23 | 66 | 34 | 0.63 | 27.6 | 1.00 | 1.00 |
+
+What this says (one seed; the colour delay and the dyes are ASSUMED):
+1. **The Vutara's sequential excitation removes the bleed-through problem.** At 0.036% it is invisible: intensity r 0.95 vs 0.96. The
+   2% of the old placeholder was 55x too pessimistic for this instrument.
+2. **Its price is time between colours.** In 0.15 s the loci move, and the promoter-enhancer distance error goes from 13 to 34 nm rms
+   (p95 72 nm). Nothing can correct it afterwards.
+   - It scales with the square root of the delay and with chromatin mobility. These stand-in loci move fast: 0.6 µm spread, 120 s
+     relaxation. Real loci, with D ~ 0.002-0.01 µm²/s, would give roughly 2D·δ ≈ 25-55 nm.
+   - **Measure your real delay and MSD.** Keep the two locus colours adjacent in the order (the preset does: promoter → enhancer → GFP).
+3. **Simultaneous two-camera detection is not better for distances.**
+   - Without unmixing, the 8.6% GFP ghost of the bright nuclei and MS2 spots makes the promoter finder pick the wrong object in 9.9% of
+     detections and loses 12% of loci; intensities are useless (r 0.47).
+   - Unmixing from the movie fixes detection and intensities (r 0.83) but leaves the leaked photons' noise: distance error 32 nm, about
+     the same as the sequential delay.
+4. **Cytoplasm:**
+   - **The bias is real:** the naive median background map sits +9.5 counts too high in the nuclear channel (median over the field; worst
+     1%: +44). The robust low-percentile map sits +1.8 (worst 1%: +36, where a cell body lingered so long that the floor was never seen).
+   - **The spots barely notice,** because the shell background around each spot already removes the local cytoplasm. The map matters for
+     the flat-field and hot-pixel steps, not for spot intensities.
+5. **Colour shift:** the movie-only estimate is now refused with fewer than 30 cells. With 12 cells it had been applied, 2.4 SE off,
+   and tripled the position error. The bead slide remains the fix.
+6. **All together on the Vutara (sequential):** calibration images bring positions to 25 nm and distances to 39 nm, intensities to
+   r 0.88. What is left is mostly the colour delay and the defocus.
+
+## Generic placeholder microscope (2026-10-12)
+
 Measured 2026-10-12 with `scripts/error_effects.py` (code: `src/simlive/stage7_validation/error_effects.py`; dashboard: 🖼 Images page,
 part 2, pick a source).
 
