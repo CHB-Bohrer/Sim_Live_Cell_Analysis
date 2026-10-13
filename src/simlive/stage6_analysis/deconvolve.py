@@ -168,6 +168,132 @@ def _log_post(A, G, I, logit_p, sb2, beta):
 
 
 @njit(cache=True)
+def _sweep(A, G, I, kern, idx, logit_p, sb2, beta, s, J0, max_shift, invT):
+    """One sweep at inverse temperature invT (the likelihood is raised to the power invT, the prior is not): single-step Gibbs updates
+    (add / remove an event at every fine step), then a Metropolis shift of every event by up to max_shift steps (max_shift < 1 = none), so an
+    event can slide in time without first disappearing. invT = 1 is the posterior."""
+    N = len(logit_p)
+    for j in range(N):
+        # log-odds of "an event at j" vs "none", given everything else: likelihood difference + prior log-odds
+        if I[j] == 0:
+            lo = invT * _delta_ll(A, G, kern, idx, j, 1.0, sb2, beta, s, J0) + logit_p[j]
+            if np.random.random() < 1.0 / (1.0 + np.exp(-lo)):
+                I[j] = 1
+                _apply(G, kern, idx, j, 1.0, s, J0)
+        else:
+            lo = -invT * _delta_ll(A, G, kern, idx, j, -1.0, sb2, beta, s, J0) + logit_p[j]
+            if np.random.random() >= 1.0 / (1.0 + np.exp(-lo)):
+                I[j] = 0
+                _apply(G, kern, idx, j, -1.0, s, J0)
+    for j in range(N):
+        if max_shift < 1 or I[j] == 0:
+            continue
+        d = np.random.randint(1, max_shift + 1) * (1 if np.random.random() < 0.5 else -1)
+        k = j + d
+        if k < 0 or k >= N or I[k] == 1:
+            continue
+        dl = _delta_ll(A, G, kern, idx, j, -1.0, sb2, beta, s, J0)
+        _apply(G, kern, idx, j, -1.0, s, J0)
+        dl = invT * (dl + _delta_ll(A, G, kern, idx, k, 1.0, sb2, beta, s, J0)) + logit_p[k] - logit_p[j]
+        if np.log(np.random.random()) < dl:
+            _apply(G, kern, idx, k, 1.0, s, J0)
+            I[j] = 0
+            I[k] = 1
+        else:
+            _apply(G, kern, idx, j, 1.0, s, J0)
+
+
+@njit(cache=True)
+def _loglik(A, G, sb2, beta):
+    ll = 0.0
+    for n in range(len(A)):
+        if A[n] == A[n]:
+            v = sb2 + beta * max(G[n], 0.0)
+            ll += -0.5 * (A[n] - G[n]) ** 2 / v - 0.5 * np.log(v)
+    return ll
+
+
+@njit(cache=True)
+def _seed(seed):
+    np.random.seed(seed)
+
+
+@njit(cache=True)
+def _pt_sweep(A, kern, logit_p, sb2, beta, s, J0, I2, G2, tix, invT, max_shift, parity, swap_try, swap_acc):
+    """Parallel tempering, one round: every replica (row of I2 / G2) does a sweep at the inverse temperature of its rank tix[r]; then
+    neighbouring ranks (parity 0: 0-1, 2-3 ...; parity 1: 1-2, 3-4 ...) swap their states with probability min(1, exp((invT_a - invT_b) (ll_b - ll_a))),
+    which keeps the product of the tempered posteriors invariant. Returns the row holding the rank-0 (invT = 1) state."""
+    R = I2.shape[0]
+    idx = J0 + np.arange(len(A)) * s
+    for r in range(R):
+        _sweep(A, G2[r], I2[r], kern, idx, logit_p, sb2, beta, s, J0, max_shift, invT[tix[r]])
+    row_of_rank = np.zeros(R, np.int64)
+    for r in range(R):
+        row_of_rank[tix[r]] = r
+    ll = np.zeros(R)
+    for r in range(R):
+        ll[r] = _loglik(A, G2[r], sb2, beta)
+    for k in range(parity, R - 1, 2):
+        ra, rb = row_of_rank[k], row_of_rank[k + 1]
+        swap_try[k] += 1
+        if np.log(np.random.random()) < (invT[k] - invT[k + 1]) * (ll[rb] - ll[ra]):
+            tix[ra], tix[rb] = k + 1, k
+            row_of_rank[k], row_of_rank[k + 1] = rb, ra
+            swap_acc[k] += 1
+    return row_of_rank[0]
+
+
+def _sample_pt(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift, seed, I0, n_replicas=16, beta_min=1e-3, target=0.3):
+    """Parallel tempering of the Gibbs + shift sampler (the likelihood at inverse temperatures 1 = invT[0] > ... > beta_min; the prior is
+    never tempered). Hot replicas move freely between arrangements of the starts and hand them down the ladder, which is what a rugged
+    posterior (a nearly noise-free trace: moving one start makes the fit much worse) needs. The ladder is adapted during the first half of the
+    burn-in (Robbins-Monro on the log-gaps towards `target` swap acceptance, ends fixed) and then frozen. Samples come from the
+    invT = 1 state only. Returns the same as `_sample` plus the mean swap acceptance (last element of the "acceptance" slot) and the ladder."""
+    N, T = len(logit_p), len(A)
+    R = int(n_replicas)
+    _seed(int(seed))
+    I2 = np.tile(I0.astype(np.int8), (R, 1))
+    G2 = np.zeros((R, T))
+    idx = J0 + np.arange(T) * s
+    for r in range(R):
+        for j in np.flatnonzero(I2[r]):
+            _apply(G2[r], kern, idx, int(j), 1.0, s, J0)
+    tix = np.arange(R, dtype=np.int64)
+    gaps = np.full(R - 1, np.log(1.0 / beta_min) / (R - 1))
+    invT = np.exp(-np.r_[0.0, np.cumsum(gaps)])
+    swap_try, swap_acc = np.zeros(R - 1), np.zeros(R - 1)
+    total = n_burn + n_keep * thin
+    adapt_until = n_burn // 2
+    counts = np.zeros((n_keep, T), np.uint8)
+    lp_kept, nst_kept, lp_sweep = np.zeros(n_keep), np.zeros(n_keep), np.zeros(total)
+    Gsum, Isum, kept, rnd = np.zeros(T), np.zeros(N), 0, 0
+    hi, lo_ = np.clip(idx + 1, 0, N), np.clip(idx - s + 1, 0, N)
+    for sweep in range(total):
+        c = _pt_sweep(A, kern, logit_p, sb2, beta, s, J0, I2, G2, tix, invT, max_shift, sweep % 2, swap_try, swap_acc)
+        I, G = I2[c], G2[c]
+        lp_sweep[sweep] = _log_post(A, G, I, logit_p, sb2, beta)
+        if sweep < adapt_until and (sweep + 1) % 25 == 0:           # ladder adaptation: widen gaps that swap too often, narrow the others
+            rnd += 1
+            acc = swap_acc / np.maximum(swap_try, 1)
+            gaps = gaps * np.exp((acc - target) / np.sqrt(rnd))
+            gaps = np.clip(gaps, 1e-3, None) * (np.log(1.0 / beta_min) / np.clip(gaps, 1e-3, None).sum())
+            invT = np.exp(-np.r_[0.0, np.cumsum(gaps)])
+            swap_try[:], swap_acc[:] = 0, 0
+        if sweep == max(adapt_until, 1) - 1:
+            swap_try[:], swap_acc[:] = 0, 0                          # report the swap rates of the frozen ladder only
+        if sweep >= n_burn and (sweep - n_burn) % thin == 0 and kept < n_keep:
+            cs = np.r_[0, np.cumsum(I, dtype=np.int64)]
+            counts[kept] = np.minimum(cs[hi] - cs[lo_], 255)
+            Gsum += G
+            Isum += I
+            lp_kept[kept] = lp_sweep[sweep]
+            nst_kept[kept] = I.sum()
+            kept += 1
+    swap = swap_acc / np.maximum(swap_try, 1)
+    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), float(swap.mean()), lp_kept, nst_kept, lp_sweep, invT, swap
+
+
+@njit(cache=True)
 def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift, seed, I0):
     """Gibbs flips + shift moves from the start configuration I0 (max_shift < 1 = flips only). Besides the samples it returns the
     log-posterior and the number of starts of every kept sample and the log-posterior after every sweep (burn-in included)."""
@@ -189,37 +315,7 @@ def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift,
     total = n_burn + n_keep * thin
     lp_sweep = np.zeros(total)
     for sweep in range(total):
-        # single-step Gibbs: add or remove an event at every fine step
-        for j in range(N):
-            # log-odds of "an event at j" vs "none", given everything else: likelihood difference + prior log-odds
-            if I[j] == 0:
-                lo = _delta_ll(A, G, kern, idx, j, 1.0, sb2, beta, s, J0) + logit_p[j]
-                if np.random.random() < 1.0 / (1.0 + np.exp(-lo)):
-                    I[j] = 1
-                    _apply(G, kern, idx, j, 1.0, s, J0)
-            else:
-                lo = -_delta_ll(A, G, kern, idx, j, -1.0, sb2, beta, s, J0) + logit_p[j]
-                if np.random.random() >= 1.0 / (1.0 + np.exp(-lo)):
-                    I[j] = 0
-                    _apply(G, kern, idx, j, -1.0, s, J0)
-        # shift moves: move every event by a few steps (Metropolis), so an event can slide in time without first disappearing
-        for j in range(N):
-            if max_shift < 1 or I[j] == 0:
-                continue
-            d = np.random.randint(1, max_shift + 1) * (1 if np.random.random() < 0.5 else -1)
-            k = j + d
-            if k < 0 or k >= N or I[k] == 1:
-                continue
-            dl = _delta_ll(A, G, kern, idx, j, -1.0, sb2, beta, s, J0)
-            _apply(G, kern, idx, j, -1.0, s, J0)
-            dl += _delta_ll(A, G, kern, idx, k, 1.0, sb2, beta, s, J0)
-            dl += logit_p[k] - logit_p[j]
-            if np.log(np.random.random()) < dl:
-                _apply(G, kern, idx, k, 1.0, s, J0)
-                I[j] = 0
-                I[k] = 1
-            else:
-                _apply(G, kern, idx, j, 1.0, s, J0)
+        _sweep(A, G, I, kern, idx, logit_p, sb2, beta, s, J0, max_shift, 1.0)
         lp_sweep[sweep] = _log_post(A, G, I, logit_p, sb2, beta)
         if sweep >= n_burn and (sweep - n_burn) % thin == 0 and kept < n_keep:
             for n in range(T):          # events in (t_n - dt, t_n]: fine steps idx[n]-s+1 .. idx[n]
@@ -321,15 +417,15 @@ def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, 
     return counts, Gsum / max(kept, 1), Isum / max(kept, 1), acc / max(total, 1), lp_kept, nst_kept, lp_sweep[: total // per_sweep]
 
 
-SAMPLERS = ("gibbs_shift", "chen_block", "gibbs")        # "gibbs" = single-step flips only (no shift moves; for the mixing comparison)
+SAMPLERS = ("gibbs_shift", "chen_block", "gibbs", "gibbs_pt")   # "gibbs" = flips only (no shifts; for the mixing comparison); "gibbs_pt" = gibbs_shift with parallel tempering
 
 
 def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_per_s: np.ndarray, sigma_b: float, beta: float,
                      n_burn: int = 500, n_keep: int = 1000, thin: int = 3, max_shift_s: float = 15.0, seed: int = 0,
-                     sampler: str = "gibbs_shift", block_s="auto", init: str = "empty") -> dict:
+                     sampler: str = "gibbs_shift", block_s="auto", init: str = "empty", n_replicas: int = 16, beta_min: float = 1e-3) -> dict:
     """Posterior over the initiation events of one trace (C.U., one value per frame). rate_prior_per_s: prior initiation rate per frame
     (per second). sampler: "gibbs_shift" (default: single-step Gibbs + shift moves) or "chen_block" (the paper's adaptive block-Bernoulli
-    Metropolis-Hastings; block_s "auto" = the largest of 360 ... 5 s with >= 10% acceptance in a pilot run, as the paper tuned it). "gibbs" = flips only. init: starting configuration (INITS). Returns counts (n_keep, T) of initiations in each frame interval per
+    Metropolis-Hastings; block_s "auto" = the largest of 360 ... 5 s with >= 10% acceptance in a pilot run, as the paper tuned it). "gibbs" = flips only; "gibbs_pt" = parallel tempering (n_replicas, beta_min; `acceptance` is then the mean swap rate, ladder and swap_rates are returned). init: starting configuration (INITS). Returns counts (n_keep, T) of initiations in each frame interval per
     sample, the posterior mean fit G (C.U.), p_fine = the probability of a start at every fine step, t_fine = their times (s, 0 = first
     frame), the acceptance rate, and for convergence checks log_post / n_starts per kept sample and log_post_sweeps (every sweep)."""
     s = int(round(frame_s / kern.dt_fine_s))
@@ -362,10 +458,15 @@ def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_
         shift = max(1, int(round(max_shift_s / kern.dt_fine_s))) if sampler == "gibbs_shift" else 0
         counts, G, pf, acc, lp_k, nst_k, lp_sw = _sample(A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0, int(n_burn), int(n_keep),
                                                          int(thin), shift, int(seed), I0)
+    elif sampler == "gibbs_pt":
+        counts, G, pf, acc, lp_k, nst_k, lp_sw, ladder, swap = _sample_pt(
+            A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0, int(n_burn), int(n_keep), int(thin),
+            max(1, int(round(max_shift_s / kern.dt_fine_s))), int(seed), I0, int(n_replicas), float(beta_min))
+        pt = {"ladder": ladder, "swap_rates": swap}
     else:
         raise ValueError(f"unknown sampler {sampler!r}; use one of {SAMPLERS}")
     return {"counts": counts, "G": G, "p_fine": pf, "t_fine": tf, "acceptance": float(acc), "block_s": block_s if sampler == "chen_block" else None,
-            "log_post": lp_k, "n_starts": nst_k, "log_post_sweeps": lp_sw}
+            "log_post": lp_k, "n_starts": nst_k, "log_post_sweeps": lp_sw, **(pt if sampler == "gibbs_pt" else {})}
 
 
 INITS = ("empty", "prior", "crowded", "rise")

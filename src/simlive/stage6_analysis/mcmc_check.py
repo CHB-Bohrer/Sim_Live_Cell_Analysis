@@ -126,12 +126,12 @@ class ChainCheck:
 def check_convergence(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_per_s: np.ndarray, sigma_b: float, beta: float,
                       sampler: str = "gibbs_shift", inits: tuple = INITS, n_burn: int = 500, n_keep: int = 1000, thin: int = 3,
                       max_shift_s: float = 15.0, seed: int = 0, rhat_max: float = RHAT_MAX, ess_min: float = ESS_MIN,
-                      block_s="auto") -> ChainCheck:
+                      block_s="auto", **sampler_kw) -> ChainCheck:
     """Run one chain per entry of `inits` (different start, different seed) and judge them together. Time is for all chains."""
     chains, t0 = [], time.perf_counter()
     for k, ini in enumerate(inits):
         chains.append(deconvolve_trace(a_cu, kern, frame_s, rate_prior_per_s, sigma_b, beta, n_burn=n_burn, n_keep=n_keep, thin=thin,
-                                       max_shift_s=max_shift_s, seed=seed + 1000 * (k + 1), sampler=sampler, block_s=block_s, init=ini))
+                                       max_shift_s=max_shift_s, seed=seed + 1000 * (k + 1), sampler=sampler, block_s=block_s, init=ini, **sampler_kw))
     secs = time.perf_counter() - t0
     lp = np.array([c["log_post"] for c in chains])
     ns = np.array([c["n_starts"] for c in chains])

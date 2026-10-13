@@ -299,17 +299,18 @@ def _step5(dec, samples, ev, tx, dt, info, run):
     with c2:
         st.dataframe(per.reset_index().round(2), hide_index=True, width="stretch")
     rows = []
-    for tg, lab in (("", "Gibbs + shift moves (default)"), ("_chen_block", "Chen et al.'s adaptive block sampler")):
+    for tg, lab in (("", "Gibbs + shift moves (default)"), ("_chen_block", "Chen et al.'s adaptive block sampler"),
+                    ("_gibbs_pt", "Gibbs + shift moves with parallel tempering")):
         fj = run / "stage6_analysis" / "truth" / f"ms2_deconvolution{tg}_info.json"
         if fj.exists():
             ij = json.loads(fj.read_text())
             sc2 = ij.get("scores") or {}
             rows.append({"sampler": lab, "starts found (posterior mean)": sc2.get("n_estimated"), "true starts": sc2.get("n_true"),
                          "true found within 30 s": sc2.get("found"), "false per true": sc2.get("false_per_true"),
-                         "1-min rate r": sc2.get("rate_r_1min"), "acceptance": ij.get("acceptance") if tg else None,
+                         "1-min rate r": sc2.get("rate_r_1min"), "acceptance (swap rate for tempering)": ij.get("acceptance") if tg else None,
                          "block (s)": (np.median(ij["block_s"]) if ij.get("block_s") else None)})
-    if len(rows) == 2:
-        st.markdown("**The two samplers side by side** (same model, same data: they should agree)")
+    if len(rows) >= 2:
+        st.markdown("**The samplers side by side** (same model, same data: they should agree)")
         st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
 
 
@@ -324,8 +325,9 @@ def _convergence(run):
     if not f.exists():
         st.info("Not run for this movie yet. In a terminal: " + f"`scripts\\run.cmd python scripts\\check_mcmc.py --run {run.name}`" + " (about 10 minutes).")
         return
-    df = pd.read_csv(f)
-    names = {"gibbs_shift": "Gibbs + shift moves (default)", "chen_block": "Chen et al. block sampler", "gibbs": "Gibbs flips only (no shifts)"}
+    df = pd.concat([pd.read_csv(x) for x in (f, f.with_name("mcmc_check_pt.csv")) if x.exists()], ignore_index=True)
+    names = {"gibbs_shift": "Gibbs + shift moves (default)", "chen_block": "Chen et al. block sampler", "gibbs": "Gibbs flips only (no shifts)",
+             "gibbs_pt": "Gibbs + shift moves with parallel tempering"}
     g = df.groupby("sampler").agg(cells=("converged", "size"), converged=("converged", "sum"), worst_rhat_logpost=("rhat_logpost", "max"),
                                   median_ess_logpost=("ess_logpost", "median"), worst_chain_difference_per_min=("max_chain_diff", "max"),
                                   seconds_per_cell=("seconds", "mean")).reset_index()
@@ -335,7 +337,8 @@ def _convergence(run):
     if len(bad):
         st.warning(f"{len(bad)} of {int((df.sampler == 'gibbs_shift').sum())} cells did NOT pass for the default sampler: their chains settle in different "
                    "local arrangements of the starts (log-posterior levels that differ by far more than the spread inside a chain). The total number "
-                   "of starts agrees better than their exact timing; see docs/MCMC_CONVERGENCE.md before trusting single-start timing for these cells.")
+                   "of starts agrees better than their exact timing. Re-run the movie's deconvolution with `--sampler gibbs_pt` (parallel tempering) and check "
+                   "it with `check_mcmc.py --samplers gibbs_pt`; see docs/MCMC_CONVERGENCE.md.")
     with st.expander("Every cell and sampler"):
         cols = ["cell", "sampler", "converged", "rhat_logpost", "rhat_nstarts", "rhat_frames_max", "ess_logpost", "ess_nstarts", "ess_frames_min",
                 "max_chain_diff", "seconds", "reasons"]
@@ -433,7 +436,9 @@ def _notes():
             "rejected (1.7% acceptance, stuck). With the tuned block both samplers give the same answer (step 5).\n\n"
             "**Convergence.** Step 5b runs four chains per cell from different starting configurations and compares them (R-hat, effective sample "
             "size). The default sampler passes on constructed traces but not on the dense, almost noise-free gene, where chains get trapped in "
-            "different arrangements of the starts; see docs/MCMC_CONVERGENCE.md.\n\n"
+            "different arrangements of the starts. **Parallel tempering** fixes this: 16 copies of the problem run at likelihood strengths from "
+            "1 down to 1/1000 and swap configurations, so the hot copies move freely and hand new arrangements down to the real one. Its chains "
+            "agree (see docs/MCMC_CONVERGENCE.md); it costs about 20-30x the time.\n\n"
             "**Rest of the method.** Model (Chen et al. Eqs. 8-11): trace = kernel ∗ starts + noise with variance sigma_b² + beta × signal; prior "
             "(Eq. 15): each second has a start with probability R(t) × 1 s, R from the average activity of all cells (activity at t + tau/2 "
             "divided by tau, the kernel's area); rate and bursts (Eq. 18, section V.4) computed on every sample. Not modelled, as in the paper: "

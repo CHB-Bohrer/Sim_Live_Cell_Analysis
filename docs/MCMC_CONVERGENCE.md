@@ -56,21 +56,48 @@ lowers the trapped level (cell 1, best chain's mean log-posterior for max shift 
 2.3 / 2.0) but does not produce agreement. The posterior is rugged because the trace is almost noise-free here (sigma_b = 0.01 of one Pol II, R = 25): moving a single start
 makes the predicted trace worse by many standard deviations, so rearranging a burst needs several starts to move together.
 
-## What this means for earlier results
-- The totals and the 1-min rates in the showcase numbers (CLAUDE.md: 389 true / 401 inferred starts; 1-min rate r 0.80) probably stand (number of
-  starts agrees between chains), but the posterior intervals and the exact start times for dense bursts were NOT sampled properly: the reported
-  uncertainty is too small, since it reflects one local mode.
-- The placeholder (sparse) gene is fine.
+## The fix: parallel tempering (`sampler="gibbs_pt"`, built 2026-10-13)
+16 replicas of the same sampler (Gibbs flips + shift moves) run at likelihood strengths ("inverse temperatures") from 1 down to 0.001; the prior is
+never tempered. After every sweep neighbouring replicas swap their configurations with probability min(1, exp((b_k - b_k+1)(loglik_k+1 - loglik_k))), which
+leaves the product of the tempered posteriors invariant. The hot replicas move freely between arrangements of the starts (at 1/1000 strength the
+noise is ~30x larger) and hand them down; only the strength-1 replica is sampled. The ladder is adapted during the first half of the burn-in towards
+30% swap acceptance (ends fixed) and then frozen. All tempered samples pass the same exact-posterior test (4 replicas on the 14-step problem).
 
-## Next step (not built; needs a decision)
-Parallel tempering (replicas at lower likelihood weight, swapping configurations) is the standard remedy. The cost is the number of replicas
-(the log-posterior range here is ~10^4 nats, so about 15-20): ~15-20x the time per chain. Cheaper first tries: moves that shift two neighbouring starts
-together, and a move that replaces a burst's start times with a random re-draw conditional on the count. Neither is built; the check is the
-yardstick for either.
+| 4 chains per cell, 500 burn-in + 1000 kept | constructed (5) | sparse run (12 cells) | dense run (12 cells) |
+|---|---|---|---|
+| gibbs_shift (default) | 5 / 5 | 9 / 12 | 3 / 12 |
+| **gibbs_pt** | **5 / 5** | **12 / 12** | **11 / 12** |
+
+- Dense run: log-posterior R-hat 1.00 in all 12 cells (was 1.0-2.9), minimum ESS 945, largest between-chain difference of the 1-min rate 0.09-0.26 starts
+  per minute (was 0.12-1.39). In cell 1 all four chains now sit at a log-posterior of -741.0 to -741.9 (they were -904 to -808), which equals
+  the best level the plain sampler reached with a 200 s shift range (-743). Swap acceptance of the frozen ladder: cell means 0.18-0.40, the weakest pair of each cell 0.10-0.30.
+- The one miss (cell 9): the largest per-frame R-hat is 1.056 against the limit 1.05, one frame; everything else passes. Reported as it is, limit not moved.
+- Sparse run 12 / 12 (minimum ESS 3156); the three cells that missed ESS with the plain sampler now pass.
+- **Cost:** 210-325 s per cell for the 4 chains (6-way parallel load) against ~11 s for the plain sampler: about 20-30x. One chain with 16 replicas and 3,500 sweeps
+  is about 1-1.5 min on its own. Not the default in the pipeline for that reason (see "Use").
+- **Do the answers change?** The headline scores against the simulation hardly move (dense run, n found 401.1 / 389 true; 30-s match 0.830 vs
+  0.823 plain; false per true 0.201 vs 0.207; 1-min rate r 0.797 vs 0.799; sparse run likewise). Per-frame posterior means do change
+  (rms 0.12 starts per frame on a mean of 0.19), about as much as the plain and the block sampler differ from each other (0.15), so for this
+  truth-scored statistics the trapped modes cost little, but any per-start timing or interval from the dense run should come from the tempered chains.
+  What tempering changes for sure is whether the chains agree, and so whether the reported posterior can be believed.
+
+## What this means for earlier results
+- Totals, matching scores and 1-min rates in the showcase numbers (CLAUDE.md: 389 true / 401 inferred; 1-min r 0.80) stand: they are the same with the
+  tempered sampler.
+- Posterior intervals and the start times of dense bursts from the plain sampler were not reliable.
+- The placeholder (sparse) gene is fine with either sampler.
 
 ## Use
 ```
-scripts\run.cmd python scripts\check_mcmc.py --run <run_id>           # every cell, 3 samplers, ~10 min
-scripts\run.cmd python scripts\check_mcmc.py --synthetic              # constructed hard cases
+scripts\run.cmd python scripts\check_mcmc.py --run <run_id> [--workers 6]                          # plain, block, flips-only
+scripts\run.cmd python scripts\check_mcmc.py --run <run_id> --samplers gibbs_pt --workers 6 --tag _pt  # tempered (mcmc_check_pt.csv)
+scripts\run.cmd python scripts\deconvolve_ms2.py --run <run_id> --sampler gibbs_pt                  # deconvolve with tempering (files _gibbs_pt)
+scripts\run.cmd python scripts\check_mcmc.py --synthetic                                             # constructed hard cases
 ```
-In code: `check_convergence(a_cu, kern, frame_s, prior, sigma_b, beta, sampler=...)` -> `ChainCheck` (`.converged`, `.reasons`, R-hats, ESS).
+In code: `deconvolve_trace(..., sampler="gibbs_pt", n_replicas=16, beta_min=1e-3)`; `check_convergence(a_cu, kern, frame_s, prior, sigma_b, beta, sampler=..., **kw)`
+-> `ChainCheck` (`.converged`, `.reasons`, R-hats, ESS).
+
+## Open
+- Make `gibbs_pt` the pipeline default for dense genes (20-30x slower)? Today `deconvolve_run` defaults to `gibbs_shift`; run the check, and re-run with tempering if it fails.
+- Fewer replicas / a warmer floor than 1e-3 might do the same job faster; not explored. R, beta_min and the 30% target are settings, not tuned.
+- Cell 9's frame R-hat 1.056 and the ESS limit 400 are borderline-sensitive to the seed; one seed per cell so far.

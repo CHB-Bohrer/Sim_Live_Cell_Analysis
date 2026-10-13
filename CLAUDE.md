@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 129 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 130 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -417,10 +417,15 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
     - All 3 samplers match the exactly enumerated posterior of a 14-step problem (test), so the target is right.
     - **FINDING: the default `gibbs_shift` does NOT converge on the dense, nearly noise-free gene** (seed 8, R = 25): 3 of 12 cells pass; chains trap in
       different local arrangements of starts (log-posterior levels ~100 nats apart), agree on the NUMBER of starts, disagree on timing (1-1.4 starts/min
-      in the 1-min rate). More burn-in does not help. Posterior intervals / start times for dense bursts from that run are NOT trustworthy; the
-      totals probably are. Sparse placeholder gene (seed 7): 9 of 12 pass, the rest only miss ESS 400 (320-353). Constructed traces: 5/5.
+      in the 1-min rate). More burn-in does not help. Sparse placeholder gene (seed 7): 9 of 12 pass, the rest only miss ESS 400 (320-353). Constructed traces: 5/5.
     - Flips only get stuck (1/5): the shift moves matter. Block sampler 2/5 (needs more samples; 5x cheaper per sample).
-    - NEXT (needs the user's go-ahead): parallel tempering or joint multi-start moves; use `check_convergence` as the yardstick.
+    - **FIX BUILT: `sampler="gibbs_pt"` (parallel tempering, 16 replicas, likelihood strength 1 -> 1e-3, adaptive ladder, `n_replicas`, `beta_min`)**:
+      constructed 5/5, sparse run 12/12, dense run 11/12 (the miss: one frame's R-hat 1.056 vs 1.05, limit not moved); chain disagreement 0.09-0.26
+      starts/min (was 0.12-1.39). ~20-30x slower than gibbs_shift, so NOT the pipeline default: `deconvolve_run` still uses gibbs_shift; for dense genes run
+      `scripts/deconvolve_ms2.py --sampler gibbs_pt` (files `_gibbs_pt`; the page's sampler table lists all three) and check with
+      `scripts/check_mcmc.py --samplers gibbs_pt --tag _pt --workers 6`. Headline scores vs the simulation are unchanged by tempering (found 0.83, false 0.20,
+      rate r 0.80; per-frame posterior means differ by about as much as the other samplers differ from each other), so earlier totals stand; intervals and
+      single-start timing of dense bursts should come from the tempered chains. Open: make tempering the default for dense genes? fewer replicas?
   - Vutara showcase: loci_demo_seed9_1c649d (sequential, tracked) and loci_demo_seed9_17363e (same movie, simultaneous: 8.6% bleed-through,
     no colour delay; tracking skipped). Error effects for both in docs/ERROR_EFFECTS.md.
 - **BURSTY DEFAULT GENE** (user 2026-10-13: "the transcription trajectory needs to be way more bursty"). Configs + transcription.DEFAULTS +

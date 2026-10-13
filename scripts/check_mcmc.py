@@ -47,34 +47,46 @@ def synthetic_cases(seed: int = 0) -> list[dict]:
     return out
 
 
+def _job(label, cid, tr, kern, dt, prior, sb, beta, extra, samplers, n_burn, n_keep, sampler_kw):
+    """All samplers for one trace (top-level so a process pool can run it). Returns (rows, burn-in rows, printed lines)."""
+    rows, burn, lines = [], [], []
+    for smp in samplers:
+        cc = check_convergence(tr, kern, dt, prior, sb, beta, sampler=smp, n_burn=n_burn, n_keep=n_keep, seed=int(cid),
+                               **(sampler_kw if smp == "gibbs_pt" else {}))
+        r = {"case": label, "cell": cid, "n_starts_mean": float(np.mean([c["n_starts"].mean() for c in cc.chains])), **(extra or {}), **cc.row()}
+        if smp == "gibbs_pt":
+            r["swap_rate_mean"] = float(np.mean([c["swap_rates"].mean() for c in cc.chains]))
+            r["swap_rate_min"] = float(np.min([c["swap_rates"].min() for c in cc.chains]))
+        rows.append(r)
+        lines.append(f"{label:34s} {smp:12s} R-hat lp {cc.rhat_logpost:5.3f} n {cc.rhat_nstarts:5.3f} frames {cc.rhat_frames_max:5.3f} | "
+                     f"ESS lp {cc.ess_logpost:6.0f} n {cc.ess_nstarts:6.0f} frames min {cc.ess_frames_min:6.0f} | diff {cc.max_chain_diff:5.2f}/min | "
+                     f"{cc.seconds:5.1f}s | {'OK' if cc.converged else 'NOT CONVERGED: ' + '; '.join(cc.reasons)}")
+        if smp == "gibbs_shift":                                    # burn-in curve: chains started at n_burn = 0 on the same trace
+            short = check_convergence(tr, kern, dt, prior, sb, beta, sampler=smp, n_burn=600, n_keep=20, seed=int(cid))
+            for b in burn_in_curve(short.chains, sweeps=(0, 5, 10, 25, 50, 100, 250, 500), window=100):
+                burn.append({"case": label, "cell": cid, **b})
+    return rows, burn, lines
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run")
     ap.add_argument("--source", default="truth")
     ap.add_argument("--synthetic", action="store_true")
-    ap.add_argument("--samplers", nargs="+", default=list(SAMPLERS), choices=SAMPLERS)
+    ap.add_argument("--samplers", nargs="+", default=["gibbs_shift", "chen_block", "gibbs"], choices=SAMPLERS)
     ap.add_argument("--n-burn", type=int, default=500)
     ap.add_argument("--n-keep", type=int, default=1000)
     ap.add_argument("--cells", type=int, default=0, help="only the first N cells (0 = all)")
+    ap.add_argument("--workers", type=int, default=1, help="cells in parallel (one process each)")
+    ap.add_argument("--replicas", type=int, default=16, help="gibbs_pt: number of temperatures")
+    ap.add_argument("--beta-min", type=float, default=1e-3, help="gibbs_pt: inverse temperature of the hottest replica")
+    ap.add_argument("--tag", default="", help="suffix of the output files (so that a second run does not overwrite the first)")
     a = ap.parse_args()
-    rows, burn = [], []
-
-    def go(label, cid, tr, kern, dt, prior, sb, beta, extra=None):
-        for smp in a.samplers:
-            cc = check_convergence(tr, kern, dt, prior, sb, beta, sampler=smp, n_burn=a.n_burn, n_keep=a.n_keep, seed=int(cid))
-            r = {"case": label, "cell": cid, "n_starts_mean": float(np.mean([c["n_starts"].mean() for c in cc.chains])), **(extra or {}), **cc.row()}
-            rows.append(r)
-            print(f"{label:34s} {smp:12s} R-hat lp {cc.rhat_logpost:5.3f} n {cc.rhat_nstarts:5.3f} frames {cc.rhat_frames_max:5.3f} | "
-                  f"ESS lp {cc.ess_logpost:6.0f} n {cc.ess_nstarts:6.0f} frames min {cc.ess_frames_min:6.0f} | diff {cc.max_chain_diff:5.2f}/min | "
-                  f"{cc.seconds:5.1f}s | {'OK' if cc.converged else 'NOT CONVERGED: ' + '; '.join(cc.reasons)}", flush=True)
-            if smp == "gibbs_shift":                                    # burn-in curve: chains started at n_burn = 0 on the same trace
-                short = check_convergence(tr, kern, dt, prior, sb, beta, sampler=smp, n_burn=600, n_keep=20, seed=int(cid))
-                for b in burn_in_curve(short.chains, sweeps=(0, 5, 10, 25, 50, 100, 250, 500), window=100):
-                    burn.append({"case": label, "cell": cid, **b})
-
+    kw = {"n_replicas": a.replicas, "beta_min": a.beta_min}
+    jobs = []
     if a.synthetic:
         for c in synthetic_cases():
-            go(c["name"], 0, c["a"], c["kern"], c["dt"], c["prior"], c["sb"], c["beta"], {"n_true": c["n_true"]})
+            jobs.append((c["name"], 0, c["a"], c["kern"], c["dt"], c["prior"], c["sb"], c["beta"], {"n_true": c["n_true"]}, a.samplers, a.n_burn, a.n_keep, kw))
         out = DATA_ROOT / "mcmc_check"
     else:
         run = Path(a.run) if Path(a.run).exists() else DATA_ROOT / "runs" / a.run
@@ -85,15 +97,29 @@ def main() -> None:
         for i, (cid, tr) in enumerate(traces.items()):
             if a.cells and i >= a.cells:
                 break
-            go(f"{run.name} cell {cid}", cid, tr, kern, dt, prior, sb, beta)
+            jobs.append((f"{run.name} cell {cid}", cid, tr, kern, dt, prior, sb, beta, None, a.samplers, a.n_burn, a.n_keep, kw))
         out = d6
+    rows, burn = [], []
+    if a.workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(a.workers) as ex:
+            results = list(ex.map(_job, *zip(*jobs)))
+    else:
+        results = (_job(*j) for j in jobs)
+    for r, b, lines in results:
+        rows += r
+        burn += b
+        print(chr(10).join(lines), flush=True)
     out.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(out / ("synthetic.csv" if a.synthetic else "mcmc_check.csv"), index=False)
-    pd.DataFrame(burn).to_csv(out / ("synthetic_burn_in.csv" if a.synthetic else "mcmc_burn_in.csv"), index=False)
+    stem = ("synthetic" if a.synthetic else "mcmc_check") + a.tag
     df = pd.DataFrame(rows)
-    print("\nconverged per sampler:\n", df.groupby("sampler").agg(cases=("converged", "size"), converged=("converged", "sum"),
+    df.to_csv(out / f"{stem}.csv", index=False)
+    if burn:
+        pd.DataFrame(burn).to_csv(out / (("synthetic_burn_in" if a.synthetic else "mcmc_burn_in") + a.tag + ".csv"), index=False)
+    print(chr(10) + "converged per sampler:" + chr(10), df.groupby("sampler").agg(cases=("converged", "size"), converged=("converged", "sum"),
           rhat_max=("rhat_frames_max", "max"), ess_min=("ess_nstarts", "min"), seconds=("seconds", "sum")).round(2))
-    print("wrote", out)
+    print("wrote", out / f"{stem}.csv")
 
 
 if __name__ == "__main__":

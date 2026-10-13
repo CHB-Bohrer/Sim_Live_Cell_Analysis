@@ -69,7 +69,7 @@ def _exact_marginals(a, sb, beta, p, N, model):
     return (w[:, None] * np.array(states)).sum(0)
 
 
-@pytest.mark.parametrize("sampler,kw", [("gibbs_shift", {}), ("gibbs", {}), ("chen_block", {"block_s": 4.0})])
+@pytest.mark.parametrize("sampler,kw", [("gibbs_shift", {}), ("gibbs", {}), ("chen_block", {"block_s": 4.0}), ("gibbs_pt", {"n_replicas": 4, "beta_min": 0.1})])
 def test_samplers_reproduce_the_exact_posterior_of_a_tiny_problem(sampler, kw):
     kern, a, sb, beta, p, s, N, model = _tiny_problem()
     exact = _exact_marginals(a, sb, beta, p, N, model)

@@ -176,7 +176,7 @@ Measured results and what they mean: [docs/ERROR_EFFECTS.md](docs/ERROR_EFFECTS.
 **From the MS2 trace to Pol II starts (🧮 MS2 → Pol II page).** The Bayesian deconvolution of Chen et al. 2025 turns each cell's MS2 trace
 into the moments Pol II started on the gene (with uncertainty) and into bursts. The page explains it step by step for new users:
 units, what one Pol II looks like, noise, one cell against the truth, and the whole run. The burst rule's settings can be changed live.
-`scripts\run.cmd python scripts\deconvolve_ms2.py --run <run>`; details and measured accuracy in [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md). Has the sampler converged? Four chains per cell, R-hat and effective sample size: `scripts\run.cmd python scripts\check_mcmc.py --run <run>`, results (it does not converge on the dense gene) in [docs/MCMC_CONVERGENCE.md](docs/MCMC_CONVERGENCE.md).
+`scripts\run.cmd python scripts\deconvolve_ms2.py --run <run>`; details and measured accuracy in [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md). Has the sampler converged? Four chains per cell, R-hat and effective sample size: `scripts\run.cmd python scripts\check_mcmc.py --run <run>`, results (the plain sampler does not converge on the dense gene; parallel tempering, `--sampler gibbs_pt`, does) in [docs/MCMC_CONVERGENCE.md](docs/MCMC_CONVERGENCE.md).
 
 **Instruments.** `--set instrument=vutara_vxl` (or the sidebar's *Microscope* choice) switches from the generic placeholder optics to a
 Bruker Vutara VXL in 2D mode:
