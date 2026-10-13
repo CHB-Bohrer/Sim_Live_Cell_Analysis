@@ -18,9 +18,9 @@ from simlive.stage3_microscopy import errors as ERR
 from simlive.stage7_validation import error_effects as EE
 
 FIX_COLOR = {"none": "#f87171", "nomedian": "#f59e0b", "global": "#f59e0b", "analysis": "#60a5fa", "movie": "#2dd4bf", "images": "#a78bfa",
-             "both": "#e879f9", "default": "#94a3b8"}
+             "both": "#e879f9", "movie_median": "#fb923c", "default": "#94a3b8"}
 FIX_SHORT = {"none": "not corrected", "nomedian": "path, no median", "global": "one curve", "analysis": "the analysis' own step",
-             "movie": "from the movie alone", "images": "calibration images", "both": "calibration images + movie", "default": "error-free reference"}
+             "movie": "from the movie alone", "images": "calibration images", "both": "calibration images + movie", "movie_median": "movie, median map (naive)", "default": "error-free reference"}
 METRIC_INFO = {   # column -> (title, unit, best value: 'low' | 'high' | 'one' | 'zero')
     "frac_far": ("wrong object picked", "% of detections", "low"), "median_err_nm": ("median position error", "nm", "low"),
     "p95_err_nm": ("95th-percentile position error", "nm", "low"), "dist_rms_nm": ("promoter-enhancer distance error (rms)", "nm", "low"),
@@ -109,7 +109,8 @@ def _images(run: Path, im, R: dict, ctx, sid: str):
         if spec.get("calib") == "images" and (run / "stage3_microscopy" / "calibration" / "calibration.json").exists():
             corr = Calibration.load(run / "stage3_microscopy" / "calibration").restricted(spec["parts"]).correct(b, ch, y0, x0)
         elif spec.get("calib") == "movie":
-            d = run / "stage7_validation" / "error_effects_selfcal" / f"{sid}__{'_'.join(spec['parts'])}"
+            d = run / "stage7_validation" / "error_effects_selfcal" / (f"{sid}__{'_'.join(spec['parts'])}"
+                                                                         + (f"_{spec['background_stat']}" if spec.get("background_stat") else ""))
             if (d / "calibration.json").exists():
                 cal = Calibration.load(d)
                 corr = cal.correct(b, ch, y0, x0)
@@ -197,9 +198,17 @@ def _results(ee: pd.DataFrame, sid: str):
     if "selfcal" in rows and rows.selfcal.notna().any():
         import json
 
-        rep = json.loads(rows.selfcal.dropna().iloc[0])
+        reps = [json.loads(x) for x in rows.selfcal.dropna()]
         bits = []
+        for rep in reps[1:]:                       # several movie-only analyses (e.g. median vs robust map): list each
+            for ch, r in rep.get("channels", {}).items():
+                if "background_bias" in r and ch == "nucleus":
+                    bits.append(f"{ch} ({rep.get('background_stat')} map): bias {r['background_bias']:+.2f}, worst 1% {r['background_max_bias']:+.2f} counts")
+        rep = reps[0]
         for ch, r in rep.get("channels", {}).items():
+            if "background_bias" in r:
+                bits.append(f"{ch}: background map vs the true object-free background: median bias {r['background_bias']:+.2f} counts, "
+                            f"worst 1% {r['background_max_bias']:+.2f} ({rep.get('background_stat', 'median')} map)")
             if "hot_true" in r:
                 bits.append(f"{ch}: found {r['hot_found_true']} of {r['hot_true']} hot pixels, {r['hot_false']} false")
             if "flat_rms_error" in r:

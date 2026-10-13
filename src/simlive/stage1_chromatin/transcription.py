@@ -36,7 +36,7 @@ DEFAULTS = {
     "k_on": 1 / 3000.0, "k_off": 1 / 960.0, "k_init": 1 / 600.0,
     "coupling": "contact", "coupled_rate": "k_on", "fold": 12.0,
     "d_contact_nm": 150.0, "d_half_nm": 200.0, "hill_n": 4.0, "d_decay_nm": 150.0, "f_const": 0.1,
-    "elongation_kb_min": 2.5, "cassette_kb": 1.3, "gene_kb": 5.0, "n_loops": 24, "dwell_s": 116.0,
+    "elongation_kb_min": 2.5, "cassette_kb": 1.3, "gene_kb": 5.0, "n_loops": 24, "dwell_s": 116.0, "dwell_fixed": False,
 }
 HELP = {
     "k_on": "Rate (1/s) at which the OFF promoter turns ON, when the enhancer is far away. 1/k_on = mean OFF time.",
@@ -49,6 +49,7 @@ HELP = {
     "gene_kb": "Length of the gene after the cassette (kb). The signal stays at full height while Pol II travels through it.",
     "n_loops": "Number of MS2 stem loops in the cassette (24 is common). Sets the signal of one Pol II.",
     "dwell_s": "Mean time (s) Pol II stays after reaching the end of the gene before it is released (random, exponential).",
+    "dwell_fixed": "If true, every Pol II waits exactly dwell_s at the end of the gene (the deconvolution kernel's assumption); false = random (exponential).",
 }
 
 
@@ -70,6 +71,7 @@ class TranscriptionParams:
     gene_kb: float = DEFAULTS["gene_kb"]
     n_loops: int = DEFAULTS["n_loops"]
     dwell_s: float = DEFAULTS["dwell_s"]
+    dwell_fixed: bool = DEFAULTS["dwell_fixed"]
 
     def __post_init__(self):
         if self.coupling not in COUPLINGS or self.coupled_rate not in COUPLED_RATES:
@@ -136,7 +138,7 @@ def _G_mean(u, p: TranscriptionParams):
     u = np.maximum(u, 0.0)
     ramp = N * np.minimum(u, tc) ** 2 / (2.0 * max(tc, 1e-12))
     mid = np.where(u > tc, N * (np.minimum(u, tg) - tc), 0.0)
-    tail = np.where(u > tg, N * tau * (1.0 - np.exp(-(u - tg) / tau)), 0.0)
+    tail = np.where(u > tg, N * (np.minimum(u - tg, tau) if p.dwell_fixed else tau * (1.0 - np.exp(-(u - tg) / tau))), 0.0)
     return ramp + mid + tail
 
 
@@ -234,7 +236,7 @@ def simulate_cell(p: TranscriptionParams, d_nm, dt_block_s: float, frame_times_s
     off = n_pre * dt_block_s
     sw_t, inits = sw_t - off, inits - off
     tc, tg, N = p.t_cassette_s, p.t_gene_s, p.n_loops
-    Te = tg + rng.exponential(p.dwell_s, len(inits))                # time from initiation to release, per Pol II
+    Te = tg + (np.full(len(inits), p.dwell_s) if p.dwell_fixed else rng.exponential(p.dwell_s, len(inits)))   # initiation -> release, per Pol II
     release = inits + Te
     # sample at the frames: instantaneous counts and the exposure-averaged MS2 signal
     on = sw_s[np.clip(np.searchsorted(sw_t, ft, side="right") - 1, 0, len(sw_t) - 1)]

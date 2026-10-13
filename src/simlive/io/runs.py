@@ -20,9 +20,33 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_ROOT = Path(os.environ.get("SIMLIVE_DATA", REPO_ROOT / "data"))
 
 
+INSTRUMENTS = Path(__file__).resolve().parents[3] / "configs" / "instruments"
+
+
+def _deep_merge(base: dict, top: dict) -> dict:
+    out = dict(base)
+    for k, v in top.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_config(path: str | Path, overrides: list[str] | None = None) -> dict:
-    """Load YAML and apply dotted overrides, e.g. ['motion.D_um2_s=0.05', 'seed=3']."""
-    cfg = yaml.safe_load(Path(path).read_text())
+    """Load YAML and apply dotted overrides, e.g. ['motion.D_um2_s=0.05', 'seed=3']. If the config (or an override) names an
+    `instrument` (a file in configs/instruments/, e.g. vutara_vxl), that instrument's settings are merged on top of the config, and the
+    overrides are applied again so that explicit --set values still win."""
+    cfg = _apply_overrides(yaml.safe_load(Path(path).read_text()), overrides)
+    inst = cfg.get("instrument")
+    if inst:
+        f = INSTRUMENTS / f"{inst}.yaml"
+        if not f.exists():
+            raise FileNotFoundError(f"unknown instrument {inst!r}: no {f}")
+        preset = yaml.safe_load(f.read_text()) or {}
+        preset.pop("instrument_info", None)
+        cfg = _apply_overrides(_deep_merge(cfg, preset), overrides)
+    return cfg
+
+
+def _apply_overrides(cfg: dict, overrides: list[str] | None) -> dict:
     for item in overrides or []:
         key, _, raw = item.partition("=")
         node = cfg

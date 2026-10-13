@@ -23,7 +23,11 @@ def main():
     a = ap.parse_args()
 
     run = run_tracking_demo(load_config(a.config, a.set), a.out)
-    metrics = json.loads((run / "stage7_validation" / "metrics.json").read_text())
+    mf = run / "stage7_validation" / "metrics.json"
+    if not mf.exists():                     # tracking.skip: no tracking scores
+        print(f"\nRun finished without tracking (tracking.skip): {run}")
+        return
+    metrics = json.loads(mf.read_text())
     print("\n=== Tracking accuracy vs ground truth ===")
     for variant, m in metrics.items():
         print(f"[{variant}]")

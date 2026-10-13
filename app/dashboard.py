@@ -212,6 +212,11 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed", help="Multiplies how fast the cells move (0.4 keeps tracking easy).")
         l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot", help="Brightness of each locus spot. A placeholder until measured.")
         l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div", help="Chance per frame that a cell divides into two.")
+        l_inst = st.radio("Microscope", ["generic", "vutara_vxl"], key="l_inst", horizontal=True,
+                          format_func={"generic": "Generic placeholder", "vutara_vxl": "Bruker Vutara VXL (2D)"}.get,
+                          help="Vutara VXL: 60x / 1.3 NA silicone objective, ~100 nm pixels, Orca Fusion BT (QE 95%), flat top-hat light, colours "
+                               "taken one after another (bleed-through from the spectra: ~0.04%; the loci move between colour exposures). "
+                               "Sources and assumptions: docs/INSTRUMENTS.md.")
         l_fov = st.slider("Field of view (µm, square)", 30, 120, 80, 5, key="l_fov",
                           help="Side length of the imaged area. A smaller field is much cheaper for z-stacks (50 µm is a good start).")
         l_out = st.slider("Room outside the field (µm)", 0, 40, 0, 5, key="l_out",
@@ -305,6 +310,8 @@ if go_loci:
               f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}",
               f"locus_analysis.method={l_meth}", f"locus_analysis.dog_snr={l_snr}",
               f"geometry.outside_um={l_out}", f"imaging_errors.bleaching.per_cell={'true' if l_pcb else 'false'}"]
+    if l_inst != "generic":
+        common.append(f"instrument={l_inst}")
     if l_conf:
         common.append("optics.modality=confocal")
     est_gb = 0.0

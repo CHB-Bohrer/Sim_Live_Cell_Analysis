@@ -28,19 +28,27 @@ def _runs_with_ms2() -> list[Path]:
     return sorted(rs, key=lambda p: (p / "stage6_analysis" / "truth" / "ms2_traces.csv").stat().st_mtime, reverse=True)
 
 
-@st.cache_data(show_spinner=False, max_entries=6)
-def _load(path: str, stamp: float):
+@st.cache_data(show_spinner=False, max_entries=8)
+def _load(path: str, stamp: float, tag: str = ""):
+    """tag "" = the default sampler (Gibbs + shift), "_chen_block" = the paper's sampler."""
     run = Path(path)
     d6 = run / "stage6_analysis" / "truth"
     cfg = yaml.safe_load((run / "stage2_cells" / "params.yaml").read_text())
-    dec = pd.read_csv(d6 / "ms2_deconvolution.csv")
-    info = json.loads((d6 / "ms2_deconvolution_info.json").read_text())
-    z = np.load(d6 / "ms2_deconvolution_samples.npz")
-    samples = {int(k): z[k] for k in z.files}
+    dec = pd.read_csv(d6 / f"ms2_deconvolution{tag}.csv")
+    info = json.loads((d6 / f"ms2_deconvolution{tag}_info.json").read_text())
+    z = np.load(d6 / f"ms2_deconvolution{tag}_samples.npz")
+    samples = {int(k): z[k] for k in z.files if not k.startswith("fine_")}
+    fine = {int(k[5:]): z[k] for k in z.files if k.startswith("fine_")}      # P(a start) at every 1 s step (newer runs)
     s1 = run / "stage1_chromatin"
     ev = pd.read_csv(s1 / "transcription_events.csv") if (s1 / "transcription_events.csv").exists() else None
     tx = pd.read_csv(s1 / "transcription.csv") if (s1 / "transcription.csv").exists() else None
-    return cfg, dec, info, samples, ev, tx
+    return cfg, dec, info, samples, fine, ev, tx
+
+
+@st.cache_data(show_spinner="Trying every burst rule against the truth…", max_entries=8)
+def _grid(path: str, stamp: float, tag: str):
+    cfg, dec, info, samples, fine, ev, tx = _load(path, stamp, tag)
+    return DC.burst_rule_grid(samples, tx, float(cfg["acquisition"]["frame_interval_s"]))
 
 
 def _deconvolve_button(run: Path):
@@ -75,7 +83,15 @@ def render(st_, run_path: Path, R: dict):
         st.info("This run has MS2 traces but no deconvolution yet.")
         _deconvolve_button(run)
         return
-    cfg, dec, info, samples, ev, tx = _load(str(run), f.stat().st_mtime)
+    other = run / "stage6_analysis" / "truth" / "ms2_deconvolution_chen_block.csv"
+    tag = ""
+    if other.exists():
+        pick = st.radio("Sampler", ["gibbs_shift", "chen_block"], horizontal=True, key="dc_sampler",
+                        format_func={"gibbs_shift": "Gibbs + shift moves (default)", "chen_block": "Chen et al.'s adaptive block sampler"}.get,
+                        help="Two ways to draw the same posterior; step 5 compares them. See 'How the sampling works' at the bottom.")
+        tag = "" if pick == "gibbs_shift" else "_chen_block"
+    ff = run / "stage6_analysis" / "truth" / f"ms2_deconvolution{tag}.csv"
+    cfg, dec, info, samples, fine, ev, tx = _load(str(run), ff.stat().st_mtime, tag)
     dt = float(cfg["acquisition"]["frame_interval_s"])
     tc = cfg["loci"]["transcription"]
     kern = DC.kernel_from_config(cfg, info.get("kernel_dt_s", 1.0))
@@ -87,8 +103,9 @@ def render(st_, run_path: Path, R: dict):
     _step1(cfg, info, R_ratio)
     _step2(kern, cfg)
     _step3(dec, info)
-    _step4(dec, samples, ev, tx, dt, n_loops, kern)
-    _step5(dec, samples, ev, tx, dt, info)
+    _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern)
+    _step5(dec, samples, ev, tx, dt, info, run)
+    _step6(run, ff, tag, dec, samples, tx, dt, info)
     _notes()
 
 
@@ -173,12 +190,14 @@ def _step3(dec, info):
         st.caption("Chen et al. estimate it the same way (variance minus the covariance between neighbouring frames, their section IV.4).")
 
 
-def _step4(dec, samples, ev, tx, dt, n_loops, kern):
+def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
     _h(4, "One cell: the trace, the Pol II starts found in it, and its bursts",
        "The deconvolution draws 1,000 possible histories of Pol II starts (posterior samples), each one consistent with the trace and its noise. "
-       "Where all of them put a start, the start is certain; where they disagree, the bars are lower and wider. Top: the measured trace, the fit "
-       "(average of the histories) and the true signal. Middle: Pol II starts per frame, true ones as white ticks. Bottom: the probability that "
-       "the gene is in a burst, from Chen et al.'s rule, with the true promoter-ON periods shaded.")
+       "Where all of them put a start, the start is certain; where they disagree, the probability is spread out. Panels, top to bottom: (1) the "
+       "measured trace, the fit (average of the histories) and the true signal; (2) the PROBABILITY OF A POL II START at every second (the "
+       "fraction of histories with a start in that second; its area over an interval = the expected number of starts there), true starts as "
+       "white ticks; (3) the same summed per frame, with its spread; (4) the probability that the gene is in a burst, from Chen et al.'s rule, "
+       "with the true promoter-ON periods shaded.")
     cells = sorted(dec.cell_id.unique())
     T_all = int(dec.t.max()) + 1
     n_true = ev[(ev.init_s > -dt) & (ev.init_s <= T_all * dt)].groupby("cell_id").size() if ev is not None else pd.Series(dtype=int)   # during the movie
@@ -196,7 +215,10 @@ def _step4(dec, samples, ev, tx, dt, n_loops, kern):
     p_on = DC.burst_calls(s, dt, w, gb)
     T = len(g)
     t_min = g.t.to_numpy() * dt / 60
-    fig, ax = plt.subplots(3, 1, figsize=(17, 8.6), sharex=True, gridspec_kw={"height_ratios": [3, 2, 1.3]})
+    pf = fine.get(int(cid))
+    t_end = float(t_min[-1]) if len(t_min) else 1.0
+    zoom = st.slider("Show minutes (zoom in to see single Pol II starts)", 0.0, t_end, (0.0, t_end), 0.5, key="dc_zoom")
+    fig, ax = plt.subplots(4, 1, figsize=(17, 10.6), sharex=True, gridspec_kw={"height_ratios": [3, 1.8, 1.8, 1.2]})
     if tx is not None:
         q = tx[tx.cell_id == cid].sort_values("t")
         ax[0].plot(q.t * dt / 60, q.ms2_loops / n_loops, color=TRUE_C, lw=1.4, ls="--", label="true signal (loops / loops per Pol II)")
@@ -207,15 +229,25 @@ def _step4(dec, samples, ev, tx, dt, n_loops, kern):
     ax[0].plot(t_min, g.trace_cu, ".", color=MEAS_C, ms=5, label="measured trace")
     ax[0].plot(t_min, g.fit_cu, color=FIT_C, lw=2, label="fit (posterior mean)")
     ax[0].set_ylabel("Pol II units"); ax[0].legend(loc="upper left", fontsize=10, ncol=3)
-    m, sd = s.mean(0), s.std(0)
-    ax[1].bar(t_min, m, width=dt / 60 * 0.9, color=FIT_C, yerr=sd, ecolor="#94a3b8", label="Pol II starts per frame (posterior mean ± sd)")
+    e = np.zeros(0)
     if ev is not None:
         e = ev[ev.cell_id == cid].init_s.to_numpy() / 60
         e = e[(e >= -dt / 60) & (e <= t_min[-1])]
-        ax[1].plot(e, np.full(len(e), max(1.0, float(m.max())) * 1.1), "|", color=TRUE_C, ms=16, mew=2, label="true starts")
-    ax[1].set_ylabel("starts"); ax[1].legend(loc="upper left", fontsize=10)
-    ax[2].fill_between(t_min, p_on, step="mid", color=FIT_C, alpha=0.8)
-    ax[2].set_ylim(0, 1.05); ax[2].set_ylabel("P(burst)"); ax[2].set_xlabel("time (min)")
+    if pf is not None:
+        tf = (info.get("fine_t0_s", 0.0) + np.arange(len(pf)) * info.get("kernel_dt_s", 1.0)) / 60
+        ax[1].fill_between(tf, pf, color="#f472b6", alpha=0.85, lw=0, label="probability of a Pol II start in each second")
+        ax[1].plot(e, np.full(len(e), 1.05), "|", color=TRUE_C, ms=14, mew=2, label="true starts")
+        ax[1].set_ylim(0, 1.15); ax[1].set_ylabel("P(start) / s")
+        ax[1].legend(loc="upper left", fontsize=10, ncol=2)
+    else:
+        ax[1].text(0.5, 0.5, "(re-run the deconvolution to get the per-second probability)", ha="center", va="center", transform=ax[1].transAxes)
+    m, sd = s.mean(0), s.std(0)
+    ax[2].bar(t_min, m, width=dt / 60 * 0.9, color=FIT_C, yerr=sd, ecolor="#94a3b8", label="Pol II starts per frame (posterior mean ± sd)")
+    ax[2].plot(e, np.full(len(e), max(1.0, float(m.max())) * 1.1), "|", color=TRUE_C, ms=14, mew=2, label="true starts")
+    ax[2].set_ylabel("starts / frame"); ax[2].legend(loc="upper left", fontsize=10)
+    ax[3].fill_between(t_min, p_on, step="mid", color=FIT_C, alpha=0.8)
+    ax[3].set_ylim(0, 1.05); ax[3].set_ylabel("P(burst)"); ax[3].set_xlabel("time (min)")
+    ax[3].set_xlim(zoom[0] - 0.05, zoom[1] + 0.05)
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)
@@ -225,7 +257,7 @@ def _step4(dec, samples, ev, tx, dt, n_loops, kern):
                + ". Yellow = the promoter is truly ON (it can be ON for a while before the first Pol II starts).")
 
 
-def _step5(dec, samples, ev, tx, dt, info):
+def _step5(dec, samples, ev, tx, dt, info, run):
     _h(5, "The whole run against the truth", "Every cell together. 'Found' = true Pol II starts with an inferred start within 3 frames; 'false' = inferred "
                                              "starts with no true one nearby, per true start; the burst rows use the window and g_b chosen in step 4.")
     sc = info.get("scores") or {}
@@ -265,24 +297,107 @@ def _step5(dec, samples, ev, tx, dt, info):
         style.cached_figure(st, ("dc_scatter", tuple(per.true), tuple(np.round(per.iloc[:, 0], 2))), draw)
     with c2:
         st.dataframe(per.reset_index().round(2), hide_index=True, width="stretch")
+    rows = []
+    for tg, lab in (("", "Gibbs + shift moves (default)"), ("_chen_block", "Chen et al.'s adaptive block sampler")):
+        fj = run / "stage6_analysis" / "truth" / f"ms2_deconvolution{tg}_info.json"
+        if fj.exists():
+            ij = json.loads(fj.read_text())
+            sc2 = ij.get("scores") or {}
+            rows.append({"sampler": lab, "starts found (posterior mean)": sc2.get("n_estimated"), "true starts": sc2.get("n_true"),
+                         "true found within 30 s": sc2.get("found"), "false per true": sc2.get("false_per_true"),
+                         "1-min rate r": sc2.get("rate_r_1min"), "acceptance": ij.get("acceptance") if tg else None,
+                         "block (s)": (np.median(ij["block_s"]) if ij.get("block_s") else None)})
+    if len(rows) == 2:
+        st.markdown("**The two samplers side by side** (same model, same data: they should agree)")
+        st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
+
+
+def _step6(run, ff, tag, dec, samples, tx, dt, info):
+    _h(6, "Choosing the burst rule: why Chen et al.'s default misses bursts of a slow gene",
+       "A burst is a period in which Pol II starts often. The rule calls 'ON' where the number of starts within a window of w frames reaches "
+       "g_b, i.e. where the start RATE is at least g_b / (w x frame interval).")
+    rate_thr = 60 * 2 / (5 * dt)
+    st.markdown(
+        f"- **Chen et al.'s default**: w = 5 frames (here {5 * dt:.0f} s), g_b = 2 starts → ON needs at least {rate_thr:.1f} starts per minute. "
+        "Their fly genes start Pol II every few seconds while ON (~10-20 per minute), so an ON period always passes and an OFF period "
+        "(no starts) never does.\n"
+        "- **A gene that starts Pol II more slowly does not pass, even while ON.** Starts are random (Poisson): with rate λ while ON, the number in "
+        "a window of w frames is Poisson with mean λ·w·Δt. With the denser test gene (3 per minute) the mean in 50 s is 2.5, and the chance of "
+        "≥ 2 is ~0.7 at any moment, less after smoothing: about half the ON time is missed. With the placeholder gene (one start per 10 minutes "
+        "while ON) the mean in 50 s is 0.08: practically never 2, so no burst is ever called.\n"
+        "- **The fix is to match the window to the gene**: enough starts must fall in the window while ON (several λ·w·Δt), and the window must "
+        "still be shorter than a typical ON and OFF period, or bursts blur together. If one burst holds only one or two starts (the placeholder "
+        "gene: ~1.6), its ON period cannot be seen in the MS2 signal at all: only the starts themselves can.\n"
+        "- The calculator below gives the expected agreement for a gene you describe; the map uses this run's truth.")
+    c = st.columns(4)
+    lam = c[0].number_input("Starts per minute while ON (λ)", 0.01, 60.0, 3.0 if dt >= 1 else 3.0, 0.5, key="dc_lam")
+    w = c[1].number_input("Window w (frames)", 1, 60, 5, 1, key="dc_wcalc")
+    gb = c[2].number_input("Starts needed (g_b)", 1, 20, 2, 1, key="dc_gbcalc")
+    from scipy.stats import poisson
+
+    mu = lam / 60 * w * dt
+    c[3].metric("Chance an ON window reaches g_b", f"{100 * poisson.sf(gb - 1, mu):.0f} %", help=f"Poisson with mean λ·w·Δt = {mu:.2f} starts")
+    st.caption(f"With λ = {lam:g}/min and w = {w} frames ({w * dt:.0f} s), an ON window holds {mu:.2f} starts on average. An OFF window holds none, "
+               "so false calls come only from false starts of the deconvolution. The smoothing kernel (exp(-(2t/w)^4)) makes the real numbers a "
+               "little lower than this simple count.")
+    if tx is None:
+        return
+    g = _grid(str(run), ff.stat().st_mtime, tag)
+
+    def draw():
+        fig, axes = plt.subplots(1, 3, figsize=(17, 4.2))
+        for ax, m, title in zip(axes, ("accuracy", "sensitivity", "specificity"),
+                                ("all frames right", "ON frames called ON", "OFF frames called OFF")):
+            piv = g.pivot(index="g_b", columns="w_frames", values=m)
+            h = ax.imshow(piv.to_numpy(), origin="lower", cmap="viridis", vmin=0, vmax=1, aspect="auto")
+            ax.set_xticks(range(len(piv.columns))); ax.set_xticklabels([f"{v:g}" for v in piv.columns])
+            ax.set_yticks(range(len(piv.index))); ax.set_yticklabels([f"{v:g}" for v in piv.index])
+            ax.set_xlabel("window w (frames)"); ax.set_ylabel("starts needed g_b"); ax.set_title(title, fontsize=13)
+            for i, gv in enumerate(piv.index):
+                for j, wv in enumerate(piv.columns):
+                    ax.text(j, i, f"{100 * piv.iloc[i, j]:.0f}", ha="center", va="center", fontsize=8,
+                            color="black" if piv.iloc[i, j] > 0.6 else "white")
+            if 5 in list(piv.columns) and 2 in list(piv.index):
+                ax.add_patch(plt.Rectangle((list(piv.columns).index(5) - 0.5, list(piv.index).index(2) - 0.5), 1, 1, fill=False,
+                                           ec="#f472b6", lw=2.5))
+            fig.colorbar(h, ax=ax, fraction=0.046)
+        fig.tight_layout()
+        return fig
+
+    style.cached_figure(st, ("dc_grid", str(ff), ff.stat().st_mtime), draw)
+    best = g.assign(bal=(g.sensitivity + g.specificity) / 2).sort_values("bal", ascending=False).iloc[0]
+    d = g[(g.w_frames == 5) & (g.g_b == 2)]
+    st.caption("Pink box = Chen et al.'s default (w = 5 frames, g_b = 2). Numbers are % of frames. For this run the best balance of ON and OFF "
+               f"frames is w = {best.w_frames:g} frames ({best.w_frames * dt:.0f} s), g_b = {best.g_b:g}: ON {100 * best.sensitivity:.0f}% / OFF "
+               f"{100 * best.specificity:.0f}%" + (f", against the default's ON {100 * d.sensitivity.iloc[0]:.0f}% / OFF {100 * d.specificity.iloc[0]:.0f}%."
+                                                   if len(d) else ".") + " With real data there is no truth: pick w from the gene's start rate (calculator).")
 
 
 def _notes():
-    with st.expander("Method details and how this differs from the paper"):
+    with st.expander("How the sampling works (and why there are two samplers)"):
         st.markdown(
-            "- **Model** (Chen et al. Eqs. 8-11): trace = kernel ∗ starts + noise with variance sigma_b² + beta × signal; starts live on a 1 s grid "
-            "(the shortest time between two Pol II, footprint / speed), 0 or 1 per step.\n"
-            "- **Prior** (Eq. 15): each 1 s step has a start with probability R(t) × 1 s, R from the average activity of all cells "
-            "(activity at t + tau/2 divided by tau, tau = the kernel's area).\n"
-            "- **Sampling**: the paper uses an adaptive block-Bernoulli Metropolis-Hastings sampler with a floor of 0.05 on the proposal probabilities, "
-            "right for genes that start Pol II every few seconds. It cannot propose the sparse starts of a gene that fires every few minutes "
-            "(a 6-minute block would propose ~18 starts). The same posterior is sampled here with single-step Gibbs updates (add / remove a start "
-            "at each step) and moves that slide a start in time. 500 burn-in sweeps, then 1,000 samples (every 3rd sweep), as in the paper.\n"
-            "- **Rate and bursts** (Eq. 18, section V.4): r(t) = starts in the frame / frame interval; bursts = r smoothed with exp(-(2t/w)^4) "
-            "≥ g_b / w, on every sample, so P(burst) carries the uncertainty.\n"
-            "- **Not modelled** (as in the paper): pausing, variable speed, random release time (the simulation has a random wait), two sister "
-            "chromatids (the paper's factor 2 in the grid step).\n"
-            "- Code: `src/simlive/stage6_analysis/deconvolve.py`; command line: `scripts\\run.cmd python scripts\\deconvolve_ms2.py --run <run>`.")
+            "**What is being sampled.** The unknown is a list of 0/1 values, one per second of the movie (plus the few minutes before it): 1 = a "
+            "Pol II started in that second. Every list predicts a trace (each start adds one kernel shape). The posterior probability of a list "
+            "= how well its predicted trace matches the measured one (given the noise model) × the prior (few starts unless the activity says "
+            "otherwise). A sampler produces many lists, each drawn with that probability; averages over them give the expected number of starts, "
+            "the probability of a start in each second, and the burst probability, all with their uncertainty.\n\n"
+            "**Gibbs + shift moves (default).** Go through every second in turn and ask: given all other starts, how likely is a start here? That "
+            "is exactly computable (the trace with and without a start at this second, times the prior odds), so the start is added or removed "
+            "with exactly that probability (a Gibbs update). Then every existing start is offered a small move in time (up to 15 s earlier or "
+            "later), accepted by the Metropolis rule; this lets a start slide to a better place without first having to disappear. Both steps "
+            "leave the posterior unchanged, so the samples come from the same posterior as the paper's. 500 sweeps are discarded (burn-in), then "
+            "every 3rd of 3,000 sweeps is kept (1,000 samples), as in the paper.\n\n"
+            "**Chen et al.'s adaptive block sampler.** Pick a random block of consecutive seconds, redraw the whole block from proposal "
+            "probabilities q (one per second, learnt from the chain as it runs, never below 0.05 or above 0.95), and accept or reject the new "
+            "block with the Metropolis-Hastings ratio. The paper tuned the block length (~6 min for their genes) so that 10-70% of proposals are "
+            "accepted. Here the block length is tuned the same way, automatically (largest block with ≥ 10% acceptance in a short pilot run): "
+            "for these traces that is ~20 s, because a 6-minute block filled with q ≥ 0.05 proposes ~18 starts at once and is almost always "
+            "rejected (1.7% acceptance, stuck). With the tuned block both samplers give the same answer (step 5).\n\n"
+            "**Rest of the method.** Model (Chen et al. Eqs. 8-11): trace = kernel ∗ starts + noise with variance sigma_b² + beta × signal; prior "
+            "(Eq. 15): each second has a start with probability R(t) × 1 s, R from the average activity of all cells (activity at t + tau/2 "
+            "divided by tau, the kernel's area); rate and bursts (Eq. 18, section V.4) computed on every sample. Not modelled, as in the paper: "
+            "pausing, variable speed, a random release time (the kernel assumes a fixed wait at the gene end), two sister chromatids.\n\n"
+            "Code: `src/simlive/stage6_analysis/deconvolve.py`; `scripts\\run.cmd python scripts\\deconvolve_ms2.py --run <run> [--sampler chen_block]`.")
 
 
 def _runs(t: np.ndarray, on: np.ndarray):

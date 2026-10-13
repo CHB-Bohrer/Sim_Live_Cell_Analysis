@@ -164,6 +164,7 @@ imaging_errors:
   # ---- Background
   background: {enabled: true}          # Constant background light
   autofluorescence: {enabled: true, photons: 6.0, cv: 0.3, correlation_um: 10.0}
+  cytoplasm: {enabled: false}        # cell bodies: 2D only for now
   crosstalk: {enabled: true, pairs: [["nucleus", "locus0", 0.02], ["locus0", "locus1", 0.02]]}
   # ---- Detection
   qe: {enabled: true}          # Quantum efficiency

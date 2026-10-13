@@ -217,10 +217,17 @@ Sources: Chen, Levo, Zoller & Gregor 2025 (Nat. Struct. Mol. Biol.). Methods are
 3. **Noise**: sigma^2 = sigma_b^2 + beta x signal, from half the squared frame-to-frame difference binned by level (their correlation
    estimate).
 4. **Prior** (Eq. 15): Bernoulli with p = R(t) x 1 s, where R = population mean activity at t + tau/2, divided by tau (tau = kernel area).
-5. **Sampling.** Their adaptive block-Bernoulli Metropolis-Hastings has a proposal floor of 0.05. That suits fly genes firing ~10-20 times
-   a minute, but cannot propose the placeholder gene's ~1 start per 10 min.
-   - The same posterior is sampled with single-step Gibbs updates plus moves that shift a start in time.
-   - 500 burn-in sweeps, then 1000 samples, every 3rd sweep.
+5. **Sampling** (both samplers are built; `sampler=` / `--sampler`):
+   - **Default, `gibbs_shift`:** for every 1 s step, add or remove a start with its exact conditional probability (a Gibbs update), then
+     offer every start a small shift (up to 15 s) by Metropolis. Both moves keep the posterior unchanged. 500 burn-in sweeps, then
+     1000 samples, every 3rd sweep.
+   - **`chen_block`:** the paper's adaptive block-Bernoulli Metropolis-Hastings (Eqs. 16-17). A random block of w steps is redrawn from
+     q, with q <- q(1 - l) + l I, l = 1/sqrt(3j), and q kept within [0.05, 0.95].
+   - **Block length for `chen_block`:** the paper tuned w (~6 min for their fly genes) to 10-70% acceptance. Here it is tuned the same
+     way, automatically: the largest of 360 ... 5 s with >= 10% acceptance in a pilot run.
+   - **Why it must be tuned:** with a 6-min block and these traces, acceptance is 1.7% and the chain stays stuck at ~245 starts where
+     35 are true. With the tuned ~20 s block, acceptance is 28% and it finds 35.3.
+   - **The two samplers agree** on every run (table below), so neither is driving the results.
 6. **Rate and bursts** (Eq. 18, V.4): starts per frame interval for every sample.
    - Bursts: the rate is smoothed with exp(-(2t/w)^4), w = 5 frames, and called ON where it reaches g_b / w (g_b = 2), on every sample.
      This gives P(ON).
@@ -231,18 +238,35 @@ plus `_samples.npz` and `_info.json` (unit, noise, scores). The pipeline runs it
 `scripts/deconvolve_ms2.py --run <run>`. Tests: `tests/test_deconvolve.py` (kernel, noise model, recovery of known starts). Dashboard
 page: 🧮 MS2 → Pol II.
 
-**Measured** (calibration applied, R = 25, i.e. 30x the placeholder MS2 brightness; one seed each):
+**Measured** (calibration applied, R = 25, i.e. 30x the placeholder MS2 brightness; one seed each).
 
-| Movie | Starts (true / inferred) | True starts with an inferred one within 30 s | False starts per true one | 1-minute rate correlation | Burst calls (Chen rule: agree / ON frames caught) |
-|---|---|---|---|---|---|
-| Placeholder gene: ~1.6 Pol II per 16-min burst, seed 7, 12 cells, 30 min | 5 / 5.9 | 100% | 0.2 | 0.76 | 75% / 0% (never reaches 2 starts in 50 s) |
-| Denser gene: 3 starts/min while ON, 10-min bursts, seed 8 | 389 / 401 | 57% | 0.45 | 0.80 | 81% / 49% |
+Scoring is per posterior sample: each history's starts are matched one-to-one to the true starts within the tolerance, then averaged
+over histories. The first version instead turned clusters of expected starts into events at each cluster's peak frame. For a dense gene
+that piled events onto one frame and under-counted matches: it gave 57% where the per-sample score is 82%.
 
-- **Counting is right; exact timing is weak when many Pol II overlap.** The total is within 3%, but only 57% of starts are placed within
-  30 s. The likely cause is the kernel's FIXED release time: the simulation's wait at the end of the gene is random (exponential, mean
-  116 s). A Pol II leaving early or late is then explained by moving or adding starts (not yet tested by simulating a fixed wait).
-- **The burst rule depends on the gene.** It was designed for fly genes that start Pol II every few seconds, so it misses half the ON
-  frames at 3 starts/min and all of them at the placeholder rate. Widening w or lowering g_b helps; the dashboard shows the trade-off.
+| Movie | Sampler | Starts (true / inferred) | Within 10 / 30 / 60 s | False per true (30 s) | 1-min rate r | Chen burst rule: agree / ON caught |
+|---|---|---|---|---|---|---|
+| Placeholder gene (~1.6 Pol II per burst), seed 7 | Gibbs + shift | 5 / 5.9 | 60 / 100 / 100% | 0.17 | 0.76 | 75% / 0% |
+| | Chen block | 5 / 5.9 | 60 / 100 / 100% | 0.19 | 0.76 | 75% / 0% |
+| Denser gene (3 starts/min while ON), random wait at the gene end, seed 8 | Gibbs + shift | 389 / 401 | 68 / 82 / 90% | 0.21 | 0.80 | 81% / 49% |
+| | Chen block (auto 20 s) | 389 / 402 | 68 / 83 / 91% | 0.20 | 0.80 | 82% / 50% |
+| Same gene and seed, FIXED wait at the gene end (`dwell_fixed: true`) | Gibbs + shift | 389 / 396 | 83 / 93 / 94% | 0.09 | **0.95** | 83% / 52% |
+
+- **The kernel's fixed release time is a real limit.** The paper assumes a fixed release time; the simulation's wait is random
+  (exponential, mean 116 s). Simulating a fixed wait gives 93% of starts within 30 s instead of 82%, false starts 0.09 instead of 0.21,
+  and a rate correlation of 0.95 instead of 0.80.
+  - A kernel averaged over a random wait would be the next improvement, but it needs the wait's distribution, which the movie alone
+    does not give.
+  - Whether real Pol II release is closer to fixed or exponential is a question for the data.
+- **The burst rule must match the gene** (page step 6).
+  - ON is called where the start rate is at least g_b / (w x frame interval). Chen's default (w = 5 frames, g_b = 2) needs >= 2.4
+    starts/min; their fly genes fire ~10-20/min while ON.
+  - At 3 starts/min, an ON window of 50 s holds 2.5 starts on average, so it misses half the ON frames.
+  - At the placeholder rate (1 per 10 min) it never fires. A burst of ~1.6 starts cannot be seen as a burst at all, only its starts.
+  - On the denser gene, w = 30 frames (5 min) with g_b = 6 gives ON 94% / OFF 94%, against the default's ON 49% / OFF 99%.
+- **Per-second start probability:** `p_fine` is the fraction of samples with a start in each second. It is saved per cell
+  (`fine_<cell>` in `_samples.npz`), and its area over an interval is the expected number of starts there. The page plots it over the
+  trace, with a zoom.
 - **Below R ~ 8 (the brightness sweep) single Pol II are not visible**, and the deconvolution then fits noise. The page warns about it.
 
 # History: `median_peaks` (removed 2026-10-11)

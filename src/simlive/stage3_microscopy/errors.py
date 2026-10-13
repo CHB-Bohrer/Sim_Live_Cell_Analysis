@@ -43,6 +43,15 @@ SOURCES: dict[str, dict] = {
         params={"shift_px": ({"locus0": [0.25, -0.15], "locus1": [-0.30, 0.20]}, "px (y, x)",
                              "offset of each locus channel relative to the nuclear channel"),
                 "shift_z_um": ({"locus0": 0.15, "locus1": -0.20}, "um", "z-stacks only: axial offset of each locus channel")}),
+    "sequential_colour": dict(
+        group="Sample position", title="Colours taken one after another (sequential excitation)", baseline=False,
+        what="With sequential excitation each colour is exposed in turn (e.g. 488 nm, then 555 nm, then 638 nm), which removes most bleed-through "
+             "between colours, but the loci keep moving between the exposures.",
+        effect="Each locus colour shows its locus where it was a fraction of a second later than the first colour. The extra displacement is "
+               "random (chromatin motion; the whole cell's slow drift is interpolated), so it adds a random error to every promoter-enhancer "
+               "distance that no calibration can remove. Putting the two locus colours next to each other in the order halves the gap between them.",
+        params={"order": (["nucleus", "locus0", "locus1"], "", "the order in which the colours are exposed within a frame"),
+                "delay_s": (0.15, "s", "time between the starts of consecutive colour exposures (exposure + switching)")}),
     "slice_skew": dict(
         group="Sample position", title="Time skew within a z-stack", baseline=False,
         what="The slices of a stack are recorded one after the other, so the last slice is recorded a fraction of a second after the first "
@@ -123,6 +132,15 @@ SOURCES: dict[str, dict] = {
         params={"photons": (6.0, "photons/px", "mean extra background per pixel"),
                 "cv": (0.3, "", "how much it varies across the field (relative)"),
                 "correlation_um": (10.0, "um", "size of the patches")}),
+    "cytoplasm": dict(
+        group="Background", title="Cytoplasm (cell body around each nucleus)", baseline=False,
+        what="Each nucleus sits in a cell body that also glows a little: the nuclear label (NLS-GFP, MCP-GFP) is not perfectly kept in the "
+             "nucleus, and free probes or dyes fill the cytoplasm of the locus colours.",
+        effect="A dim halo around every nucleus that moves with the cell. It raises the local background next to nuclei and can be mistaken "
+               "for background by methods that look at the pixels outside the nuclei. 2D only.",
+        params={"radius_factor": (1.8, "", "cell body radius / nuclear radius"),
+                "nucleus_fraction": (0.08, "", "cytoplasm brightness in the nuclear channel, relative to that cell's nucleus"),
+                "locus_photons": (2.0, "photons/px", "cytoplasm level in each locus colour (free probes, dyes), per exposure")}),
     "crosstalk": dict(
         group="Background", title="Colour cross-talk (bleed-through)", baseline=False,
         what="A fluorophore's emission is not confined to its own channel: some of its light leaks into a neighbouring colour.",
@@ -184,8 +202,8 @@ SOURCES: dict[str, dict] = {
 }
 
 # physical order in which a frame is degraded (used for the cumulative build-up in the dashboard)
-ORDER = ["stage_drift", "chromatic_shift", "slice_skew", "piezo", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
-         "background", "autofluorescence", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
+ORDER = ["stage_drift", "chromatic_shift", "sequential_colour", "slice_skew", "piezo", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
+         "background", "autofluorescence", "cytoplasm", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
          "read_noise", "row_noise", "dsnu", "adc"]
 assert set(ORDER) == set(SOURCES)
 
@@ -193,6 +211,7 @@ assert set(ORDER) == set(SOURCES)
 BRIEF = {
     "stage_drift": "The whole sample slowly slides and shakes, so everything moves together between frames.",
     "chromatic_shift": "Each colour is imaged slightly offset, which biases distances between differently coloured loci.",
+    "sequential_colour": "Colours are exposed one after another, so the loci move a little between the colour images.",
     "slice_skew": "Planes of a z-stack are taken one after another, so a moving locus is smeared in z.",
     "piezo": "The focus motor puts each plane slightly off its intended height.",
     "psf_blur": "Diffraction turns every point of light into a blob ~0.2 um wide.",
@@ -204,6 +223,7 @@ BRIEF = {
     "flicker": "The lamp or laser power changes a little from frame to frame.",
     "background": "Stray light adds a constant level (and its noise) to every pixel.",
     "autofluorescence": "Cells and medium glow faintly and unevenly on their own.",
+    "cytoplasm": "A dim cell body around each nucleus (leaky nuclear label, free probes) that moves with the cell.",
     "crosstalk": "Light from one colour leaks into another, e.g. a faint copy of the nucleus in the locus channels.",
     "qe": "The camera detects only a fraction of the photons that reach it.",
     "shot_noise": "Photon counts fluctuate randomly (Poisson), the main noise for faint spots.",
@@ -219,8 +239,10 @@ BRIEF = {
 assert set(BRIEF) == set(SOURCES)
 # Random-stream numbers. Frozen: a source keeps its number when others are inserted into ORDER, so images made before a new source existed are
 # still reproduced bit for bit. New sources get the next free number.
-INDEX = {s: i + 1 for i, s in enumerate([x for x in ORDER if x != "piezo"])}
-INDEX["piezo"] = len(INDEX) + 1
+_LATER = ["piezo", "cytoplasm", "sequential_colour"]          # added after the first version, in this order: they get the next numbers
+INDEX = {s: i + 1 for i, s in enumerate([x for x in ORDER if x not in _LATER])}
+for _s in _LATER:
+    INDEX[_s] = len(INDEX) + 1
 BASELINE = [s for s in ORDER if SOURCES[s]["baseline"]]
 # values of baseline parameters that reproduce the original model when imaging_errors is off
 LEGACY = {("read_noise", "pixel_cv"): 0.0, ("shot_noise", "excess_noise_factor"): 1.0}

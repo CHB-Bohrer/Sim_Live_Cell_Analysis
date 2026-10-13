@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 116 CPU + 6 GPU tests at 2026-10-12. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 122 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -387,6 +387,31 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
     - **Bleaching:** late/early 0.80 -> 0.99.
     - **All sources:** images 28 nm / r 0.47; movie 49 nm / r 0.80; both 26 nm / r 0.80; reference 12 nm / r 0.95.
   - Showcase runs (R = 25, cells moving): loci_demo_seed7_47132d (placeholder gene) and loci_demo_seed8_f5c88d (denser gene, error_effects run on it).
+- 2026-10-13 round (user's questions: which optics? cytoplasm? how is the posterior sampled? start probability? burst rule?):
+  - **Instrument presets:** `configs/instruments/<name>.yaml`, applied with `instrument: <name>` / `--set instrument=...` (deep-merged by
+    `io.runs.load_config`, --set still wins; sidebar "Microscope" radio). `vutara_vxl` = Bruker Vutara VXL in 2D bypass mode. Every value is
+    sourced or ASSUMED (docs/INSTRUMENTS.md):
+    - 60x/1.3 NA silicone, ~100 nm px, Orca Fusion BT QE 0.95, top-hat (vignette 3% ASSUMED), active focus (defocus 30 nm), sequential colours;
+    - bleed-through FROM SPECTRA (FPbase EGFP: 0.0042 cross-excitation at 555 nm x 0.062/0.717 in-band emission = 0.036%, vs ~8.6% if excited
+      simultaneously);
+    - biplane (2 planes 600 nm apart, 50:50) NOT built.
+  - **New error sources** (errors.INDEX frozen; `_LATER` list gives new sources the next numbers):
+    - `sequential_colour`: later colours drawn at t + delay by interpolation + a Brownian bridge of the locus motion RELATIVE to its nucleus;
+      `Imager.locus_positions_at_exposure`, 2D only;
+    - `cytoplasm`: cell body = nucleus outline x radius_factor, nuclear channel fraction + locus-colour photons; 2D only; ON in loci_demo/library.
+  - **Movie background map:** default `stat="low"` = 20th percentile of nucleus-free frames + 0.84 x the pixel's frame-to-frame noise. The
+    median is raised wherever a cell body lingers. Pixels a cell body covers almost always cannot be recovered (the shell background still
+    handles spots). `error_effects.true_background()` scores maps against the object-free truth.
+  - **Deconvolution:**
+    - `sampler="chen_block"` (the paper's adaptive block MH, block auto-tuned to >= 10% acceptance: ~20 s here; the paper's 6 min gives 1.7%
+      acceptance and a stuck chain) agrees with gibbs_shift;
+    - per-second start probability `p_fine` saved;
+    - SCORING FIXED: per posterior sample, one-to-one matching. The old cluster-peak scorer gave 57%; the true value is 82% within 30 s;
+    - `dwell_fixed` transcription option: a fixed wait gives 93% / rate r 0.95 vs 82% / 0.80 with the random wait, so the kernel's fixed
+      release time is a real limit;
+    - burst-rule map (page step 6): on the denser gene w = 30 frames, g_b = 6 gives ON/OFF 94/94% vs Chen default 49/99%.
+  - Vutara showcase: loci_demo_seed9_1c649d (sequential, tracked) and loci_demo_seed9_17363e (same movie, simultaneous: 8.6% bleed-through,
+    no colour delay; tracking skipped). Error effects for both in docs/ERROR_EFFECTS.md.
 - scripts/compare_localizers.py --run <run> also computes MS2 traces and the bleaching correction (`--ms2-only` = just those; for older runs). Variants in
   compare.py: original, default, chen_literal, no_median, dog_snr5, integer (+3D: zmed3); tables are merged, so delete method_comparison.csv after renaming variants.
 - Scores (`score_localization[_3d]`): detection over loci WITH light (`photons` in loci_truth_image.csv), `n_false_on_dark`, `frac_far` (> 0.5 um), `rms_error_near_um`,

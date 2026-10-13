@@ -46,6 +46,17 @@ Different wavelengths focus at slightly different places (lateral and axial chro
 | `shift_px` | `{'locus0': [0.25, -0.15], 'locus1': [-0.3, 0.2]}` | px (y, x) | offset of each locus channel relative to the nuclear channel |
 | `shift_z_um` | `{'locus0': 0.15, 'locus1': -0.2}` | um | z-stacks only: axial offset of each locus channel |
 
+### Colours taken one after another (sequential excitation)  (`sequential_colour`)
+
+With sequential excitation each colour is exposed in turn (e.g. 488 nm, then 555 nm, then 638 nm), which removes most bleed-through between colours, but the loci keep moving between the exposures.
+
+**Effect:** Each locus colour shows its locus where it was a fraction of a second later than the first colour. The extra displacement is random (chromatin motion; the whole cell's slow drift is interpolated), so it adds a random error to every promoter-enhancer distance that no calibration can remove. Putting the two locus colours next to each other in the order halves the gap between them.
+
+| parameter | default | unit | meaning |
+|---|---|---|---|
+| `order` | `['nucleus', 'locus0', 'locus1']` |  | the order in which the colours are exposed within a frame |
+| `delay_s` | `0.15` | s | time between the starts of consecutive colour exposures (exposure + switching) |
+
 ### Time skew within a z-stack  (`slice_skew`)
 
 The slices of a stack are recorded one after the other, so the last slice is recorded a fraction of a second after the first while the loci keep moving.
@@ -165,6 +176,18 @@ Cells, medium and plastic fluoresce a little on their own, unevenly across the f
 | `photons` | `6.0` | photons/px | mean extra background per pixel |
 | `cv` | `0.3` |  | how much it varies across the field (relative) |
 | `correlation_um` | `10.0` | um | size of the patches |
+
+### Cytoplasm (cell body around each nucleus)  (`cytoplasm`)
+
+Each nucleus sits in a cell body that also glows a little: the nuclear label (NLS-GFP, MCP-GFP) is not perfectly kept in the nucleus, and free probes or dyes fill the cytoplasm of the locus colours.
+
+**Effect:** A dim halo around every nucleus that moves with the cell. It raises the local background next to nuclei and can be mistaken for background by methods that look at the pixels outside the nuclei. 2D only.
+
+| parameter | default | unit | meaning |
+|---|---|---|---|
+| `radius_factor` | `1.8` |  | cell body radius / nuclear radius |
+| `nucleus_fraction` | `0.08` |  | cytoplasm brightness in the nuclear channel, relative to that cell's nucleus |
+| `locus_photons` | `2.0` | photons/px | cytoplasm level in each locus colour (free probes, dyes), per exposure |
 
 ### Colour cross-talk (bleed-through)  (`crosstalk`)
 

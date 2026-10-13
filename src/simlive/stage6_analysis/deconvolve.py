@@ -163,6 +163,7 @@ def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift,
     G = np.zeros(T)
     counts = np.zeros((n_keep, T), np.uint8)
     Gsum = np.zeros(T)
+    Isum = np.zeros(N)
     kept = 0
     total = n_burn + n_keep * thin
     for sweep in range(total):
@@ -205,14 +206,94 @@ def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift,
                         c += I[q]
                 counts[kept, n] = min(c, 255)
             Gsum += G
+            Isum += I
             kept += 1
-    return counts, Gsum / max(kept, 1)
+    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), 1.0
+
+
+@njit(cache=True)
+def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, q0, seed):
+    """Chen et al. 2025 (V.1, Eqs. 16-17): Metropolis-Hastings in which a random block of w consecutive steps is redrawn from independent
+    Bernoulli(q) proposals; q learns from the chain, q <- q (1 - l) + l I with l = 1 / sqrt(3 j), kept within [0.05, 0.95]. Burn-in
+    n_burn_sweeps x N / w iterations, then n_keep samples ~3 sweeps apart."""
+    np.random.seed(seed)
+    N = len(logit_p)
+    T = len(A)
+    K = len(kern)
+    idx = J0 + np.arange(T) * s
+    I = np.zeros(N, np.int8)
+    G = np.zeros(T)
+    q = q0.copy()
+    lp1 = np.log(1.0 / (1.0 + np.exp(-logit_p)))          # log p
+    lp0 = np.log(1.0 / (1.0 + np.exp(logit_p)))           # log (1 - p)
+    counts = np.zeros((n_keep, T), np.uint8)
+    Gsum = np.zeros(T)
+    Isum = np.zeros(N)
+    iters_burn = max(1, n_burn_sweeps * N // w)
+    per_keep = max(1, 3 * N // w)
+    total = iters_burn + n_keep * per_keep
+    kept = 0
+    acc = 0
+    Inew = np.zeros(w, np.int8)
+    for it in range(total):
+        b = np.random.randint(0, max(1, N - w + 1))
+        e = min(N, b + w)
+        for j in range(b, e):
+            Inew[j - b] = 1 if np.random.random() < q[j] else 0
+        n_lo = max(0, (b + 1 - J0 + s - 1) // s)
+        n_hi = min(T - 1, (e - 1 + K - 1 - J0) // s)
+        ll_old = 0.0
+        for n in range(n_lo, n_hi + 1):
+            if A[n] == A[n]:
+                v = sb2 + beta * max(G[n], 0.0)
+                ll_old += -0.5 * (A[n] - G[n]) ** 2 / v - 0.5 * np.log(v)
+        prior = 0.0
+        logq_ratio = 0.0
+        for j in range(b, e):
+            if Inew[j - b] != I[j]:
+                _apply(G, kern, idx, j, float(Inew[j - b] - I[j]), s, J0)
+            prior += (lp1[j] if Inew[j - b] else lp0[j]) - (lp1[j] if I[j] else lp0[j])
+            qj = q[j]
+            logq_ratio += (np.log(qj) if I[j] else np.log(1 - qj)) - (np.log(qj) if Inew[j - b] else np.log(1 - qj))
+        ll_new = 0.0
+        for n in range(n_lo, n_hi + 1):
+            if A[n] == A[n]:
+                v = sb2 + beta * max(G[n], 0.0)
+                ll_new += -0.5 * (A[n] - G[n]) ** 2 / v - 0.5 * np.log(v)
+        if np.log(np.random.random()) < ll_new - ll_old + prior + logq_ratio:
+            for j in range(b, e):
+                I[j] = Inew[j - b]
+            acc += 1
+        else:                                            # undo the change to G
+            for j in range(b, e):
+                if Inew[j - b] != I[j]:
+                    _apply(G, kern, idx, j, float(I[j] - Inew[j - b]), s, J0)
+        lr = 1.0 / np.sqrt(3.0 * (it + 1))
+        for j in range(b, e):
+            q[j] = min(0.95, max(0.05, q[j] * (1 - lr) + lr * I[j]))
+        if it >= iters_burn and (it - iters_burn) % per_keep == 0 and kept < n_keep:
+            for n in range(T):
+                c = 0
+                for qq in range(idx[n] - s + 1, idx[n] + 1):
+                    if 0 <= qq < N:
+                        c += I[qq]
+                counts[kept, n] = min(c, 255)
+            Gsum += G
+            Isum += I
+            kept += 1
+    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), acc / max(total, 1)
+
+
+SAMPLERS = ("gibbs_shift", "chen_block")
 
 
 def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_per_s: np.ndarray, sigma_b: float, beta: float,
-                     n_burn: int = 500, n_keep: int = 1000, thin: int = 3, max_shift_s: float = 15.0, seed: int = 0) -> dict:
+                     n_burn: int = 500, n_keep: int = 1000, thin: int = 3, max_shift_s: float = 15.0, seed: int = 0,
+                     sampler: str = "gibbs_shift", block_s="auto") -> dict:
     """Posterior over the initiation events of one trace (C.U., one value per frame). rate_prior_per_s: prior initiation rate per frame
-    (per second). Returns counts (n_keep, T) of initiations in each frame interval per sample and the posterior mean fit G (C.U.)."""
+    (per second). sampler: "gibbs_shift" (default: single-step Gibbs + shift moves) or "chen_block" (the paper's adaptive block-Bernoulli
+    Metropolis-Hastings; block_s "auto" = the largest of 360 ... 5 s with >= 10% acceptance in a pilot run, as the paper tuned it). Returns counts (n_keep, T) of initiations in each frame interval per sample, the posterior mean fit
+    G (C.U.), p_fine = the probability of a start at every fine step, t_fine = their times (s, 0 = first frame), and the acceptance rate."""
     s = int(round(frame_s / kern.dt_fine_s))
     if abs(s * kern.dt_fine_s - frame_s) > 1e-6:
         raise ValueError("the frame interval must be a whole number of fine steps")
@@ -223,24 +304,64 @@ def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_
     tf = (np.arange(N) - J0) * kern.dt_fine_s   # time of each fine step (s; 0 = first frame)
     r = np.interp(tf, np.arange(T) * frame_s, np.asarray(rate_prior_per_s, float))
     p = np.clip(r * kern.dt_fine_s, 1e-6, 0.5)
-    counts, G = _sample(np.asarray(a_cu, np.float64), kern.values, np.log(p / (1 - p)), float(sigma_b) ** 2, float(beta), s, J0,
-                        int(n_burn), int(n_keep), int(thin), max(1, int(round(max_shift_s / kern.dt_fine_s))), int(seed))
-    return {"counts": counts, "G": G}
+    lo = np.log(p / (1 - p))
+    A = np.asarray(a_cu, np.float64)
+    if sampler == "chen_block":
+        rise = np.clip(np.r_[np.diff(np.nan_to_num(A)), 0.0], 0, None)       # q starts high where the trace rises (the paper: smoothed activity)
+        q0 = np.clip(np.interp(tf, np.arange(T) * frame_s, rise), 0.05, 0.95)
+        args = (A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0)
+        if block_s == "auto":            # the paper tuned the block for an acceptance rate of 10-70%: largest block with >= 10% in a pilot run
+            for cand in (360.0, 180.0, 90.0, 45.0, 20.0, 10.0, 5.0):
+                w = max(2, int(round(cand / kern.dt_fine_s)))
+                if _sample_block(*args, 100, 20, w, q0, int(seed))[3] >= 0.10:
+                    break
+            block_s = cand
+        w = max(2, int(round(float(block_s) / kern.dt_fine_s)))
+        counts, G, pf, acc = _sample_block(*args, int(n_burn), int(n_keep), w, q0, int(seed))
+    elif sampler == "gibbs_shift":
+        counts, G, pf, acc = _sample(A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0, int(n_burn), int(n_keep), int(thin),
+                                     max(1, int(round(max_shift_s / kern.dt_fine_s))), int(seed))
+    else:
+        raise ValueError(f"unknown sampler {sampler!r}; use one of {SAMPLERS}")
+    return {"counts": counts, "G": G, "p_fine": pf, "t_fine": tf, "acceptance": float(acc), "block_s": block_s if sampler == "chen_block" else None}
 
 
 def burst_calls(counts: np.ndarray, frame_s: float, w_frames: float = 5.0, g_b: float = 2.0) -> np.ndarray:
     """Chen et al. V.4 on every sample: smooth the per-frame initiation counts with exp(-(2 t / w)^4) (normalised) and call ON where the
     smoothed count per frame >= g_b / w. Returns P(ON) per frame (fraction of samples)."""
+    from scipy.ndimage import convolve1d
+
     h = int(np.ceil(w_frames))
     t = np.arange(-h, h + 1, dtype=float)
     k = np.exp(-(2 * t / w_frames) ** 4)
     k /= k.sum()
-    sm = np.array([np.convolve(c.astype(float), k, mode="same") for c in counts])
-    return (sm >= g_b / w_frames).mean(axis=0)
+    sm = convolve1d(np.asarray(counts, float), k, axis=-1, mode="constant")
+    return (sm >= g_b / w_frames - 1e-9).mean(axis=0)
+
+
+def burst_rule_grid(samples: dict, tx: pd.DataFrame, frame_s: float, ws=(1, 2, 3, 5, 8, 12, 18, 30),
+                    gbs=(0.5, 1, 1.5, 2, 3, 4, 6)) -> pd.DataFrame:
+    """Agreement of the burst calls with the true promoter state for a grid of windows w (frames) and thresholds g_b (starts in the window):
+    accuracy, sensitivity (ON frames called ON) and specificity (OFF frames called OFF), over all cells. Simulation only (needs the truth)."""
+    truth = {int(c): g.sort_values("t").promoter_on.to_numpy().astype(bool) for c, g in tx.groupby("cell_id")}
+    rows = []
+    for w in ws:
+        for gb in gbs:
+            calls, tru = [], []
+            for cid, s in samples.items():
+                if cid not in truth:
+                    continue
+                c = burst_calls(s, frame_s, w, gb) >= 0.5
+                n = min(len(c), len(truth[cid]))
+                calls.append(c[:n]); tru.append(truth[cid][:n])
+            c, t = np.concatenate(calls), np.concatenate(tru)
+            rows.append({"w_frames": w, "g_b": gb, "accuracy": float((c == t).mean()), "sensitivity": float(c[t].mean()) if t.any() else np.nan,
+                         "specificity": float((~c[~t]).mean()) if (~t).any() else np.nan})
+    return pd.DataFrame(rows)
 
 
 def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None, n_keep: int = 1000,
-                          seed: int = 0, progress=None) -> tuple[pd.DataFrame, dict, dict]:
+                          seed: int = 0, progress=None, sampler: str = "gibbs_shift") -> tuple[pd.DataFrame, dict, dict]:
     """Deconvolve every cell's MS2 trace (table with cell_id, t, and the intensity column). Returns (per-frame table, per-cell samples
     {cell_id: counts}, info: unit, noise model, kernel)."""
     col = col if col in tr else "intensity"
@@ -256,23 +377,29 @@ def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_cor
     tau = kern.area_s
     shift = int(round(tau / 2 / dt))
     prior = np.clip(np.r_[pop[shift:], np.full(shift, pop[-1] if len(pop) else 0)] / tau, 1e-5, 0.5)   # R(t) = mu(t + tau/2) / tau, per s
-    rows, samples = [], {}
+    rows, samples, acc, blocks = [], {}, [], []
     for i, (cid, a) in enumerate(traces.items()):
-        res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid)
+        res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid, sampler=sampler)
         c = res["counts"]
         samples[cid] = c
+        samples[f"fine_{cid}"] = res["p_fine"].astype(np.float32)          # probability of a start at every fine step
+        acc.append(res["acceptance"])
+        blocks.append(res["block_s"])
         p_on = burst_calls(c, dt)
+        p_any = (c > 0).mean(axis=0)
         for n in range(len(a)):
-            rows.append((cid, n, a[n], res["G"][n], c[:, n].mean(), c[:, n].std(), 60.0 * c[:, n].mean() / dt, p_on[n]))
+            rows.append((cid, n, a[n], res["G"][n], c[:, n].mean(), c[:, n].std(), 60.0 * c[:, n].mean() / dt, p_on[n], p_any[n]))
         if progress:
             progress(f"  cell {cid}: {c.sum(1).mean():.1f} initiations (posterior mean) [{i + 1}/{len(traces)}]")
-    out = pd.DataFrame(rows, columns=["cell_id", "t", "trace_cu", "fit_cu", "n_init_mean", "n_init_sd", "rate_per_min", "p_on"])
+    out = pd.DataFrame(rows, columns=["cell_id", "t", "trace_cu", "fit_cu", "n_init_mean", "n_init_sd", "rate_per_min", "p_on", "p_start"])
     info = {"unit": unit, "sigma_b_cu": sb, "beta_cu": beta, "kernel_dt_s": kern.dt_fine_s, "kernel_s": len(kern.values) * kern.dt_fine_s,
-            "kernel_area_s": tau, "column": col, "n_samples": int(n_keep)}
+            "kernel_area_s": tau, "column": col, "n_samples": int(n_keep), "sampler": sampler,
+            "acceptance": float(np.mean(acc)) if acc else None, "block_s": [b for b in blocks if b is not None] or None,
+            "fine_t0_s": -len(kern.values) * kern.dt_fine_s}          # time of the first fine step (starts before the movie are allowed)
     return out, samples, info
 
 
-def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int = 1000) -> dict:
+def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int = 1000, sampler: str = "gibbs_shift", tag: str = "") -> dict:
     """Deconvolve the MS2 traces of a finished run (the calibrated traces if there are any, bleaching-corrected column if present).
     Writes stage6_analysis/<src>/ms2_deconvolution.csv (+ _samples.npz, _info.json) and returns the scores of the truth source."""
     import json
@@ -291,14 +418,15 @@ def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int
         if f is None:
             continue
         progress(f"MS2 deconvolution ({src}, {f.name})")
-        dec, samples, info = deconvolve_run_traces(pd.read_csv(f), cfg, n_keep=n_keep, progress=progress)
+        dec, samples, info = deconvolve_run_traces(pd.read_csv(f), cfg, n_keep=n_keep, progress=progress, sampler=sampler)
         info["trace_file"] = f.name
-        dec.to_csv(d6 / "ms2_deconvolution.csv", index=False)
-        np.savez_compressed(d6 / "ms2_deconvolution_samples.npz", **{str(c): v for c, v in samples.items()})
+        dec.to_csv(d6 / f"ms2_deconvolution{tag}.csv", index=False)
+        np.savez_compressed(d6 / f"ms2_deconvolution{tag}_samples.npz", **{str(c): v for c, v in samples.items()})
         if src == "truth":
             ev = pd.read_csv(run / "stage1_chromatin" / "transcription_events.csv")
             tx = pd.read_csv(run / "stage1_chromatin" / "transcription.csv")
-            info["scores"] = out = score_deconvolution(dec, samples, ev, tx, float(cfg["acquisition"]["frame_interval_s"]))
+            info["scores"] = out = score_deconvolution(dec, {k: v for k, v in samples.items() if isinstance(k, int)}, ev, tx,
+                                                       float(cfg["acquisition"]["frame_interval_s"]))
             # how far the microscope-based unit is from the truth (regression of the trace on the true loops / n_loops, through zero)
             n_loops = int((cfg["loci"]["transcription"].get("params") or {}).get("n_loops", 24))
             j = dec.merge(tx[["cell_id", "t", "ms2_loops"]], on=["cell_id", "t"])
@@ -306,7 +434,7 @@ def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int
             ok = np.isfinite(j.trace_cu)
             if (g[ok] ** 2).sum() > 0:
                 info["unit_check"] = float((j.trace_cu[ok] * g[ok]).sum() / (g[ok] ** 2).sum())   # 1 = unit right; 0.8 = trace 20% too low
-        (d6 / "ms2_deconvolution_info.json").write_text(json.dumps(info, indent=1, default=float))
+        (d6 / f"ms2_deconvolution{tag}_info.json").write_text(json.dumps(info, indent=1, default=float))
     return out
 
 
@@ -321,49 +449,49 @@ def true_initiations(events: pd.DataFrame, cells: list[int], T: int, frame_s: fl
     return pd.DataFrame(rows, columns=["cell_id", "t", "n_init_true"])
 
 
+def _match(est: np.ndarray, tru: np.ndarray, tol: int) -> int:
+    """Number of one-to-one matches between two sorted lists of event frames within +-tol frames (greedy in time order)."""
+    i = j = m = 0
+    while i < len(est) and j < len(tru):
+        d = est[i] - tru[j]
+        if abs(d) <= tol:
+            m += 1; i += 1; j += 1
+        elif d < 0:
+            i += 1
+        else:
+            j += 1
+    return m
+
+
 def score_deconvolution(dec: pd.DataFrame, samples: dict, events: pd.DataFrame, tx: pd.DataFrame, frame_s: float,
-                        tol_frames: int = 3) -> dict:
-    """Against the simulation: total initiations (posterior mean vs true), events found (a true initiation with a called event within
-    +-tol_frames: called = frames where the posterior expects >= 0.5 initiations, merged with their neighbours), false events, the
-    correlation of the 1-minute rate with the true one, and P(ON) against the true promoter state."""
+                        tol_frames: int = 3, n_eval: int = 200) -> dict:
+    """Against the simulation, per posterior sample then averaged (so the uncertainty is respected and nothing is 'called'): every
+    history's starts are matched one-to-one to the true starts within +-tol_frames. found = matched / true, false_per_true = unmatched
+    inferred / true; also the total (posterior mean vs true), the correlation of the 1-minute rate with the true one, and P(ON) against
+    the true promoter state. n_eval samples per cell are used."""
     T = int(dec.t.max()) + 1
     tru = true_initiations(events, sorted(dec.cell_id.unique()), T, frame_s)
     j = dec.merge(tru, on=["cell_id", "t"]).merge(tx[["cell_id", "t", "promoter_on"]], on=["cell_id", "t"], how="left")
-    found = called = false = n_true = 0
+    matched = inferred = 0.0
+    n_true = 0
     for cid, g in j.groupby("cell_id"):
         g = g.sort_values("t")
-        exp = g.n_init_mean.to_numpy()
-        # called events: local groups of expected count; each group of consecutive frames with expected count >= 0.15 holding >= 0.5 events
-        ev = []
-        m = exp >= 0.15
-        i = 0
-        while i < len(m):
-            if m[i]:
-                k = i
-                while k + 1 < len(m) and m[k + 1]:
-                    k += 1
-                mass = exp[i:k + 1].sum()
-                for _ in range(int(np.floor(mass + 0.5))):
-                    ev.append(i + int(np.argmax(exp[i:k + 1])))
-                i = k + 1
-            else:
-                i += 1
         te = np.repeat(np.arange(len(g)), g.n_init_true.to_numpy())
-        used = np.zeros(len(ev), bool)
-        for t0 in te:
-            d = [abs(t0 - e) if not used[q] else 1e9 for q, e in enumerate(ev)]
-            if d and min(d) <= tol_frames:
-                used[int(np.argmin(d))] = True
-                found += 1
         n_true += len(te)
-        called += len(ev)
-        false += int((~used).sum())
+        smp = samples.get(int(cid))
+        if smp is None:
+            continue
+        pick = smp[np.linspace(0, len(smp) - 1, min(n_eval, len(smp))).astype(int)]
+        for c in pick:
+            ee = np.repeat(np.arange(len(c)), c.astype(int))
+            matched += _match(ee, te, tol_frames) / len(pick)
+            inferred += len(ee) / len(pick)
     k = max(1, int(round(60 / frame_s)))
     sm = lambda v: pd.Series(v).rolling(k, center=True, min_periods=1).sum().to_numpy()  # noqa: E731
     r_est = np.concatenate([sm(g.sort_values("t").n_init_mean.to_numpy()) for _, g in j.groupby("cell_id")])
     r_true = np.concatenate([sm(g.sort_values("t").n_init_true.to_numpy()) for _, g in j.groupby("cell_id")])
-    out = {"n_true": int(n_true), "n_estimated": float(j.n_init_mean.sum()), "n_called": int(called), "found": found / max(n_true, 1),
-           "false_per_true": false / max(n_true, 1), "rate_r_1min": float(np.corrcoef(r_est, r_true)[0, 1]) if r_true.std() > 0 and r_est.std() > 0 else np.nan}
+    out = {"n_true": int(n_true), "n_estimated": float(j.n_init_mean.sum()), "found": matched / max(n_true, 1),
+           "false_per_true": (inferred - matched) / max(n_true, 1), "tolerance_s": tol_frames * frame_s, "rate_r_1min": float(np.corrcoef(r_est, r_true)[0, 1]) if r_true.std() > 0 and r_est.std() > 0 else np.nan}
     if "promoter_on" in j and j.promoter_on.notna().any():
         on = j.promoter_on.fillna(0).astype(bool).to_numpy()
         call = j.p_on.to_numpy() >= 0.5

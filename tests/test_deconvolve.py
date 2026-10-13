@@ -46,3 +46,33 @@ def test_deconvolution_finds_known_initiations():
     tx = pd.DataFrame({"cell_id": 1, "t": np.arange(T), "promoter_on": 0})
     sc = score_deconvolution(dec, {1: res["counts"]}, events, tx, dt)
     assert sc["found"] >= 5 / 6 and sc["false_per_true"] <= 0.34
+
+
+def test_chen_block_sampler_and_gibbs_shift_sample_the_same_posterior():
+    """Dense gene (the regime the paper's sampler was built for): both samplers give the same answer."""
+    rng = np.random.default_rng(7)
+    k = make_kernel(24, 1.3, 5.0, 2.5, 116.0, 1.0)
+    T, dt = 120, 10.0
+    inits = np.sort(np.r_[rng.uniform(100, 500, 20), rng.uniform(800, 1100, 15)])      # two bursts, ~3 starts / min
+    a, G = _trace(k, inits, T, dt, 0.1, 0.02, rng)
+    prior = np.full(T, len(inits) / (T * dt))
+    g = deconvolve_trace(a, k, dt, prior, 0.1, 0.02, n_burn=200, n_keep=300, thin=2)
+    b = deconvolve_trace(a, k, dt, prior, 0.1, 0.02, n_burn=200, n_keep=300, sampler="chen_block", seed=1)
+    assert abs(g["counts"].sum(1).mean() - len(inits)) < 4 and abs(b["counts"].sum(1).mean() - len(inits)) < 4
+    sm = lambda c: np.convolve(c.mean(0), np.ones(6) / 6, mode="same")   # noqa: E731  (1-minute rate)
+    assert np.corrcoef(sm(g["counts"]), sm(b["counts"]))[0, 1] > 0.9
+    assert 0.0 < b["acceptance"] < 1.0
+
+
+def test_start_probability_peaks_at_the_true_starts():
+    rng = np.random.default_rng(8)
+    k = make_kernel(24, 1.3, 5.0, 2.5, 116.0, 1.0)
+    T, dt = 120, 10.0
+    inits = np.array([203.0, 640.0, 905.0])
+    a, _ = _trace(k, inits, T, dt, 0.1, 0.02, rng)
+    res = deconvolve_trace(a, k, dt, np.full(T, 3 / (T * dt)), 0.1, 0.02, n_burn=200, n_keep=300, thin=2)
+    pf, tf = res["p_fine"], res["t_fine"]
+    for s0 in inits:
+        near = np.abs(tf - s0) <= 15
+        assert pf[near].sum() > 0.7                       # ~one start within 15 s of each true one
+    assert pf[np.min(np.abs(tf[:, None] - inits[None]), axis=1) > 60].sum() < 0.5     # little probability far from any true start

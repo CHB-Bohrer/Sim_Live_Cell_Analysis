@@ -48,6 +48,7 @@ FIXES: dict[str, list[tuple[str, str, dict]]] = {
                         ("movie", "shift from the movie (mean enhancer - promoter vector; used only if > 2 standard errors)",
                          {"calib": "movie", "parts": ("shift",)}),
                         ("images", "shift from the bead slide", {"calib": "images", "parts": ("shift",)})],
+    "sequential_colour": [("none", "no correction possible: the loci really moved between the colour exposures (random motion)", {})],
     "defocus": [("none", "no correction exists in 2D (the Gaussian fit's width follows the blur)", {})],
     "exposure_motion": [("none", "no correction exists (the spot is wider; the fit follows it)", {})],
     "haze": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background around each spot (Chen et al.)", {})],
@@ -59,6 +60,11 @@ FIXES: dict[str, list[tuple[str, str, dict]]] = {
     "background": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {})],
     "autofluorescence": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {}),
                          ("movie", "background map from the movie + shell", {"calib": "movie", "parts": ("offset",)})],
+    "cytoplasm": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {}),
+                  ("movie_median", "background map from the movie: MEDIAN of nucleus-free frames (biased by cell bodies) + shell",
+                   {"calib": "movie", "parts": ("offset", "flat"), "background_stat": "median"}),
+                  ("movie", "background map from the movie: low percentile, noise-corrected (robust to cell bodies) + shell",
+                   {"calib": "movie", "parts": ("offset", "flat")})],
     "crosstalk": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {}),
                   ("movie", "bleed-through fraction measured in the movie and subtracted (unmixing) + shell", {"calib": "movie", "parts": ("crosstalk",)})],
     "dark_current": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {})],
@@ -98,6 +104,10 @@ HOW = {
                             movie="The average enhancer - promoter vector over all cells and frames: true orientations are random, so the "
                                   "average is the shift between the two colours. Used only when larger than 2 standard errors: it needs many "
                                   "cells, because with few cells the true vectors do not average out."),
+    "sequential_colour": dict(analysis="Cannot be corrected afterwards: between the colour exposures the chromatin moves randomly.",
+                              images="(Nothing to calibrate.)",
+                              movie="Only the acquisition can reduce it: shorter exposures / faster switching, the two locus colours next to each "
+                                    "other in the order, or simultaneous two-colour detection (a second camera), which brings back some bleed-through."),
     "psf_blur": dict(analysis="Cannot be removed, only modelled: the difference of Gaussians is matched to the blur and the Gaussian fit finds the "
                               "spot's centre to a small fraction of its width. With the photon noise it sets the best possible precision.",
                      images="A bead slide measures the blur (used to check the PSF width).", movie=""),
@@ -121,6 +131,12 @@ HOW = {
                        movie="Background map from the frames in which no nucleus covers a pixel."),
     "autofluorescence": dict(analysis="The shell around each spot subtracts the local level.", images="(Not in dark frames: it is sample light.)",
                              movie="Background map: per-pixel median over the frames free of nuclei (cells move, so most pixels are free some of the time)."),
+    "cytoplasm": dict(analysis="The shell around each spot subtracts the local level, cytoplasm included (spots sit inside the nucleus).",
+                      images="(Not in dark frames or a flat slide: it is sample light.)",
+                      movie="Careful: 'pixels away from the nuclei' are not empty, a cell body may be there. The movie's background map uses the "
+                            "LOW end of each pixel's nucleus-free frames (20th percentile, corrected for the pixel's own noise), i.e. the level the "
+                            "pixel returns to when no cell is there, instead of the median, which a passing cell body raises. The illumination "
+                            "fit subtracts each nucleus' local surroundings, so the cytoplasm there is removed with the background."),
     "crosstalk": dict(analysis="The shell subtracts the smooth ghost of the nucleus under each spot, but NOT a bright MS2 spot leaking into the "
                                  "promoter's colour: it sits exactly on the promoter.",
                       images="Single-colour samples would give the bleed-through fractions (not simulated here).",
@@ -150,7 +166,7 @@ HOW = {
 }
 assert set(HOW) == set(ERR.SOURCES) - set(ONLY_3D)
 # what each source mainly damages (the dashboard highlights these columns)
-KEY_METRIC = {"chromatic_shift": "dist_rms_nm", "hot_pixels": "frac_far", "cosmic_rays": "frac_far", "bleaching": "late_early",
+KEY_METRIC = {"sequential_colour": "dist_rms_nm", "cytoplasm": "intensity_err_pct", "chromatic_shift": "dist_rms_nm", "hot_pixels": "frac_far", "cosmic_rays": "frac_far", "bleaching": "late_early",
               "flat_field": "intensity_err_pct", "prnu": "intensity_err_pct", "flicker": "intensity_err_pct", "haze": "intensity_err_pct",
               "background": "intensity_err_pct", "autofluorescence": "intensity_err_pct", "crosstalk": "intensity_err_pct",
               "dark_current": "intensity_err_pct", "dsnu": "intensity_err_pct", "row_noise": "median_err_nm", "defocus": "median_err_nm",
@@ -246,9 +262,34 @@ def _ms2_r(tr: pd.DataFrame, mt: pd.DataFrame, col: str) -> float:
     return float(np.corrcoef(j[col], j.photons)[0, 1]) if len(j) > 20 and j.photons.std() > 0 else np.nan
 
 
+def true_background(im, E, ch: str, t: int = 0) -> np.ndarray:
+    """The camera image of channel ch in frame t with NO objects (no nuclei, cytoplasm, loci, spots or beads) and no random noise: the true
+    background the movie-only map should find (camera offset + offset pattern + hot pixels + background light + autofluorescence)."""
+    import copy
+
+    im2 = copy.copy(im)
+    if im.nucleus is not None:
+        im2.nucleus = copy.copy(im.nucleus)
+        im2.nucleus.by_t, im2.nucleus.spots_by_t = {}, {}
+    im2.loci = []
+    for L in im.loci:
+        L2 = copy.copy(L)
+        L2.by_t = {}
+        im2.loci.append(L2)
+    im2.fid = None
+    E2 = E.with_enabled([x for x in E.enabled_ids() if x not in ("shot_noise", "read_noise", "row_noise", "cosmic_rays", "dark_current")])
+    return im2.frame(t, E2, [ch])["images"][ch].astype(np.float64)
+
+
 def _compare_selfcal(rep: dict, cal, im, E, cdir: Path) -> None:
-    """Add the truth to a movie-only calibration report: hot pixels found / missed / false, the illumination map's error, the true shift."""
+    """Add the truth to a movie-only calibration report: hot pixels found / missed / false, the illumination map's error, the true shift,
+    and (offset part) the error of the background map against the true object-free background."""
     for ch, r in rep["channels"].items():
+        if "offset" in rep["components"]:
+            tb = true_background(im, E, ch)
+            d = cal.maps[ch]["offset"].astype(np.float64) - tb
+            r.update(background_bias=float(np.median(d)), background_p95_abs=float(np.percentile(np.abs(d - np.median(d)), 95)),
+                     background_max_bias=float(np.percentile(d, 99)))
         cam = im._camera(ch, E)
         if "hot" in rep["components"] and cam.hot is not None:
             true, found = cam.hot > 0, cal.maps[ch]["hot"]
@@ -349,7 +390,7 @@ def run_error_effects(run: Path, sources: list[str] | None = None, n_workers: in
         first_pass = None
         for key, label, spec in todo:
             t1 = time.time()
-            kw = {**ana, **{k: v for k, v in spec.items() if k not in ("calib", "parts", "post")}}
+            kw = {**ana, **{k: v for k, v in spec.items() if k not in ("calib", "parts", "post", "movie_parts", "background_stat")}}
             cdir = None
             if spec.get("calib") == "images":
                 if cal_run is None:
@@ -363,11 +404,11 @@ def run_error_effects(run: Path, sources: list[str] | None = None, n_workers: in
                     cal.values.update(Calibration.load(mdir).values)
                 cal.save(cdir)
             elif spec.get("calib") == "movie":       # kept (small) so the dashboard can show the corrected images
-                cdir = s7 / "error_effects_selfcal" / f"{name.lstrip('+')}__{'_'.join(spec['parts'])}"
+                cdir = s7 / "error_effects_selfcal" / f"{name.lstrip('+')}__{'_'.join(spec['parts'])}{'_' + spec['background_stat'] if spec.get('background_stat') else ''}"
                 if first_pass is None and "shift" in spec["parts"]:
                     first_pass = map_cells(localize_loci, mini.s5, n_workers=n_workers, px_um=px_um, n_loci=n_loci, **ana)
                 rep = build_selfcal(mini.images(chans), mini.s3 / "labels.tif", cdir, dt, spec["parts"], first_pass,
-                                    float(cfg["acquisition"]["exposure_s"]), px_um)
+                                    float(cfg["acquisition"]["exposure_s"]), px_um, spec.get("background_stat", "low"))
                 _compare_selfcal(rep, Calibration.load(cdir), im, E, cdir)
             pos = map_cells(localize_loci, mini.s5, n_workers=n_workers, px_um=px_um, n_loci=n_loci,
                             calib=str(cdir) if cdir else None, **kw)

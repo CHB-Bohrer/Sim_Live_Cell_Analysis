@@ -33,9 +33,16 @@ from scipy.ndimage import binary_dilation, gaussian_filter, median_filter
 COMPONENTS = ("offset", "hot", "flat", "shift", "crosstalk")
 
 
-def background_map(movie: np.ndarray, labels: np.ndarray, gap_px: int = 8, min_free: int = 5, fill_sigma: float = 8.0):
-    """Per-pixel median over the frames in which the pixel is more than gap_px from any nucleus. Returns (map, number of free frames,
-    standard error of each pixel's median: 1.25 x its robust frame-to-frame spread / sqrt(free frames))."""
+def background_map(movie: np.ndarray, labels: np.ndarray, gap_px: int = 8, min_free: int = 5, fill_sigma: float = 8.0, stat: str = "low",
+                   q: float = 20.0):
+    """Per-pixel background from the frames in which the pixel is more than gap_px from any nucleus. Returns (map, number of free frames,
+    standard error of each pixel's median: 1.25 x its robust frame-to-frame spread / sqrt(free frames)).
+
+    stat "median": the median of those frames. Biased upwards wherever a CELL BODY (cytoplasm) sits next to a nucleus in some of them: the
+    nuclei are excluded, their cytoplasm is not. stat "low" (default): the q-th percentile of those frames plus z_q x the pixel's own
+    frame-to-frame noise (measured on differences of consecutive free frames, which a slowly passing cell body barely changes): the
+    background is the floor that the pixel returns to whenever nothing is there, so cytoplasm present in fewer than ~(100 - q)% of the
+    free frames does not bias it (the percentile of pure noise is corrected back to its centre)."""
     import warnings
 
     T = len(movie)
@@ -49,6 +56,15 @@ def background_map(movie: np.ndarray, labels: np.ndarray, gap_px: int = 8, min_f
         warnings.simplefilter("ignore", RuntimeWarning)          # pixels never free of nuclei: filled below
         m = np.nanmedian(stack, axis=0)
         spread = 1.4826 * np.nanmedian(np.abs(stack - m), axis=0)
+        if stat == "low":
+            from scipy.stats import norm
+
+            d = np.diff(stack, axis=0)                               # NaN unless both frames are free
+            sd_t = 1.4826 * np.nanmedian(np.abs(d - np.nanmedian(d, axis=0)), axis=0) / np.sqrt(2)
+            sd_t = np.where(np.isfinite(sd_t), sd_t, spread)
+            low = np.nanpercentile(stack, q, axis=0) - norm.ppf(q / 100.0) * sd_t
+            m_med = m
+            m = np.where(np.isfinite(low), low, m_med)
     spread = np.maximum(spread, np.nanmedian(spread))            # integer camera values: a pixel's MAD can be 0; use at least the typical spread
     se = np.where(n_free >= 10, 1.25 * spread / np.sqrt(np.maximum(n_free, 1)), np.inf)     # too few free frames: not tested for hot pixels
     ok = n_free >= min_free
@@ -132,7 +148,7 @@ def crosstalk_fraction(target, source, labels, frames=None, gap_px: int = 8, ero
 
 
 def build_selfcal(images: dict, labels, out_dir, dt_s: float, components=COMPONENTS, positions: pd.DataFrame | None = None,
-                  exposure_s: float = 0.1, px_um: float = 0.13) -> dict:
+                  exposure_s: float = 0.1, px_um: float = 0.13, background_stat: str = "low") -> dict:
     """Estimate the parts in `components` from the movie (images: {channel: path}, labels: label-stack path) and save a Calibration in
     out_dir (parts not estimated are neutral: constant offset, flat 1, no hot pixels, no shift). positions: a first-pass loci_positions table
     (no calibration) for the chromatic shift. Returns a report (what was estimated, sizes, standard errors)."""
@@ -142,7 +158,7 @@ def build_selfcal(images: dict, labels, out_dir, dt_s: float, components=COMPONE
     out_dir = Path(out_dir)
     lab = tifffile.imread(str(labels))
     chans = list(images)
-    report = {"components": list(components), "channels": {}}
+    report = {"components": list(components), "channels": {}, "background_stat": background_stat}
     maps = {}
     shape = lab.shape[-2:]
     flat = np.ones(shape, np.float32)
@@ -154,7 +170,7 @@ def build_selfcal(images: dict, labels, out_dir, dt_s: float, components=COMPONE
                           "range": [float(flat.min()), float(flat.max())]}
     for ch in chans:
         mov = tifffile.imread(str(images[ch]))
-        bg, n_free, se = background_map(mov, lab)
+        bg, n_free, se = background_map(mov, lab, stat=background_stat)
         del mov
         hot = hot_pixel_map(bg, se) if "hot" in components else np.zeros(shape, bool)
         if "offset" in components:

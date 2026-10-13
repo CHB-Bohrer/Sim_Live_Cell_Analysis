@@ -114,3 +114,48 @@ def test_crosstalk_fraction_is_measured_inside_the_nuclei():
     ct = crosstalk_fraction(loc, nuc, lab)
     assert abs(ct["fraction"] - 0.02) < 0.004 and ct["fraction"] > 2 * ct["se"]
     assert abs(crosstalk_fraction(rng.poisson(50 + 0 * nuc).astype(np.float32), nuc, lab)["fraction"]) < 0.004    # no leak -> ~0
+
+
+def test_background_map_is_not_raised_by_passing_cell_bodies():
+    """Cytoplasm around moving nuclei: the median of the nucleus-free frames is pulled up, the noise-corrected low percentile is not."""
+    rng = np.random.default_rng(6)
+    T, n = 80, 100
+    yy, xx = np.mgrid[:n, :n]
+    mov = np.empty((T, n, n), np.float32)
+    lab = np.zeros((T, n, n), np.uint16)
+    cover = np.zeros((n, n))
+    free = np.zeros((n, n))
+    for t in range(T):
+        cy, cx = 50, 10 + t                                   # one cell crossing the field
+        r2 = (yy - cy) ** 2 + (xx - cx) ** 2
+        nuc, body = r2 < 8 ** 2, (r2 >= 8 ** 2) & (r2 < 30 ** 2)
+        mov[t] = np.rint(100 + rng.normal(0, 2.0, (n, n)) + 300 * nuc + 25 * body)
+        lab[t][nuc] = 1
+        far = r2 > 16 ** 2                                    # what background_map counts as nucleus-free (8 px gap)
+        free += far
+        cover += far & body
+    med, _, _ = background_map(mov, lab, stat="median")
+    low, _, _ = background_map(mov, lab, stat="low")
+    frac = cover / np.maximum(free, 1)                        # how often the cell body sat on a pixel in its "free" frames
+    mid = (frac > 0.5) & (frac <= 0.7) & (free > 20)
+    assert mid.sum() > 50
+    assert np.median(med[mid]) - 100 > 15                    # the median map keeps the cell body (25 counts)
+    assert abs(np.median(low[mid]) - 100) < 2.0               # the low map finds the floor (integer rounding: ~1 count)
+
+
+def test_cytoplasm_is_drawn_around_the_nucleus_only():
+    from simlive.stage3_microscopy.errors import ErrorSet
+    from simlive.stage3_microscopy.render import Imager
+
+    cfg = {"optics": {"pixel_size_nm": 250, "photons_per_px_s": 1000, "NA": 1.2, "wavelength_nm": 509, "brightness_cv": 0.0,
+                      "background_photons": 0, "quantum_efficiency": 1, "read_noise_e": 0, "gain_adu_per_e": 1, "offset_adu": 0},
+           "acquisition": {"n_frames": 1, "frame_interval_s": 10, "exposure_s": 0.1}, "geometry": {"fov_um": [40, 40]},
+           "imaging_errors": {"enabled": True, **{s: {"enabled": False} for s in ("stage_drift", "flicker", "flat_field", "shot_noise", "read_noise",
+                                                                                     "bleaching", "haze", "psf_blur")},
+                              "cytoplasm": {"enabled": True, "radius_factor": 2.0, "nucleus_fraction": 0.1}}}
+    cells = pd.DataFrame([(0, 1, 20.0, 20.0, 4.0, 1.0, 0.0, 4.0, 0)],
+                         columns=["t", "cell_id", "y_um", "x_um", "radius_um", "aspect", "angle_rad", "bound_radius_um", "parent_id"])
+    im = Imager(cfg, cells, errors=ErrorSet(cfg))
+    img = im.frame(0)["images"]["nucleus"]
+    c = 80                                                    # centre pixel (20 um / 0.25 um)
+    assert img[c, c] > 50 and 5 < img[c, c + 24] < 15 and img[c, c + 40] < 1     # nucleus 100, cytoplasm 10 at 6 um, nothing at 10 um

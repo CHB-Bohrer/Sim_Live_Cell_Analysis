@@ -234,6 +234,28 @@ class _NucleusModel:
             clean[y0:y1, x0:x1][inside] = val[inside]
         return clean, lab
 
+    def cytoplasm(self, t: int, shift, radius_factor: float, factor: dict | None = None, rel_bright: bool = True) -> np.ndarray:
+        """Cell bodies of frame t: each nucleus' own deformed outline scaled by radius_factor (centred on the nucleus), minus the nucleus
+        itself; value = that cell's brightness (x factor, e.g. its bleaching) if rel_bright, else 1. Overlapping bodies: the larger value."""
+        ny, nx = self.shape
+        out = np.zeros((ny, nx), np.float32)
+        grp = self.by_t.get(int(t))
+        if grp is None:
+            return out
+        for r in grp.itertuples():
+            cy, cx = r.y_um / self.px_um + shift[0], r.x_um / self.px_um + shift[1]
+            half = int(np.ceil(radius_factor * r.bound_radius_um / self.px_um)) + 2
+            y0, y1 = max(int(cy) - half, 0), min(int(cy) + half + 1, ny)
+            x0, x1 = max(int(cx) - half, 0), min(int(cx) + half + 1, nx)
+            if y1 <= y0 or x1 <= x0:
+                continue
+            q, _, _ = _nucleus_q(self.yy[y0:y1, x0:x1] - cy, self.xx[y0:y1, x0:x1] - cx, r, self.px_um, self.harm)
+            body = (q > 1.0) & (q <= radius_factor)
+            v = (self._bright(r.cell_id) if rel_bright else 1.0) * (1.0 if factor is None else factor.get(int(r.cell_id), 1.0))
+            sub = out[y0:y1, x0:x1]
+            sub[body] = np.maximum(sub[body], v)
+        return out
+
     def volume(self, t: int, shift, dz: float, zf: np.ndarray, zk: np.ndarray, factor: dict | None = None):
         """3D version of `clean`: (relative intensity on the fine z grid `zf`, label stack on the slice positions `zk`). Each nucleus is a flattened
         ellipsoid: at lateral position with relative radius q its half thickness is z_semi * sqrt(1 - q^2). Objects are moved by `shift` (px)
@@ -553,6 +575,58 @@ class Imager:
         d = self.cell_bleach(channel, E)
         return np.array([d.get((int(t), int(c)), (1.0, False))[0] for c in ids])
 
+    def colour_delay_s(self, channel: str, E: ErrorSet | None = None) -> float:
+        """When channel is exposed relative to the first colour of the frame (sequential excitation), in seconds; 0 if off."""
+        E = E or self.E
+        if not E.on("sequential_colour"):
+            return 0.0
+        order = list(E.par("sequential_colour", "order"))
+        return float(order.index(channel)) * float(E.par("sequential_colour", "delay_s")) if channel in order else 0.0
+
+    def _rel_increment_var(self, k: int) -> float:
+        """Per-axis variance (px^2) of one frame's change of locus k's position RELATIVE to its nucleus' centre (chromatin motion only)."""
+        key = ("relvar", k)
+        if key not in self.__dict__.setdefault("_memo", {}):
+            L, cells = self.loci[k], self.nucleus.by_t if self.nucleus is not None else {}
+            rel = {}
+            for t, d in L.by_t.items():
+                g = cells.get(int(t))
+                if g is None:
+                    continue
+                cy = dict(zip(g.cell_id.to_numpy(), g.y_um.to_numpy() / self.px_um))
+                cx = dict(zip(g.cell_id.to_numpy(), g.x_um.to_numpy() / self.px_um))
+                for i, y, x in zip(d["ids"], d["y"], d["x"]):
+                    if int(i) in cy:
+                        rel[(int(t), int(i))] = (y - cy[int(i)], x - cx[int(i)])
+            inc = [np.subtract(rel[(t + 1, i)], v) for (t, i), v in rel.items() if (t + 1, i) in rel]
+            self._memo[key] = float(np.mean(np.square(inc))) if inc else 0.0
+        return self._memo[key]
+
+    def locus_positions_at_exposure(self, channel: str, t: int, E: ErrorSet | None = None):
+        """(y, x) in px of the loci of `channel` at the moment that colour is exposed. Without sequential colours: the frame's positions.
+        With them, at time t + delay: linear interpolation towards the next frame (the cell's slow motion) plus a Brownian-bridge sample of
+        the chromatin's own motion, variance = (per-frame variance of the locus relative to its nucleus) x f (1 - f), f = delay / frame
+        interval. Deterministic per (session, frame, channel)."""
+        E = E or self.E
+        k = int(channel[5:])
+        d = self.loci[k].by_t[int(t)]
+        dl = self.colour_delay_s(channel, E)
+        if dl <= 0:
+            return d["y"], d["x"]
+        f = min(dl / float(self.acq["frame_interval_s"]), 1.0)
+        y, x = d["y"].astype(float).copy(), d["x"].astype(float).copy()
+        nxt = self.loci[k].by_t.get(int(t) + 1)
+        if nxt is not None:
+            pos = {int(i): j for j, i in enumerate(nxt["ids"])}
+            for j, i in enumerate(d["ids"]):
+                q = pos.get(int(i))
+                if q is not None:
+                    y[j] += f * (nxt["y"][q] - y[j])
+                    x[j] += f * (nxt["x"][q] - x[j])
+        sd = np.sqrt(self._rel_increment_var(k) * f * (1 - f))
+        z = ERR.rng_for(self.session, t, "sequential_colour", self.channel_index[channel]).normal(0, 1, (len(y), 2))
+        return y + sd * z[:, 0], x + sd * z[:, 1]
+
     def _factor_dict(self, channel: str, t: int, E: ErrorSet) -> dict:
         d = self.cell_bleach(channel, E)
         g = self.nucleus.by_t.get(int(t))
@@ -631,6 +705,10 @@ class Imager:
             fac = self._factor_dict(channel, t, E) if per_cell else None
             clean, lab = self.nucleus.clean(t, (dy, dx), fac)
             ph = (gaussian_filter(clean, sig) if sig > 0 else clean) * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach
+            if E.on("cytoplasm"):               # leaky nuclear label in the cell body (bleaches with its cell)
+                cyto = self.nucleus.cytoplasm(t, (dy, dx), float(E.par("cytoplasm", "radius_factor")), fac)
+                ph = ph + float(E.par("cytoplasm", "nucleus_fraction")) * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach * \
+                    (gaussian_filter(cyto, sig) if sig > 0 else cyto)
             s = self.nucleus.spots_by_t.get(int(t))
             if s is not None:     # MS2 spots: MCP-GFP comes from the nuclear pool, so it bleaches with its nucleus
                 if per_cell:
@@ -643,7 +721,11 @@ class Imager:
                 ph = np.zeros(self.shape, np.float32)
             else:
                 w = self.bleach_of(channel, t, d["ids"], E) if per_cell else bleach
-                ph = _spots_from_arrays(self.shape, d["y"] + dy + cy, d["x"] + dx + cx, d["ph"] * w, sig)
+                ly, lx = self.locus_positions_at_exposure(channel, t, E)
+                ph = _spots_from_arrays(self.shape, ly + dy + cy, lx + dx + cx, d["ph"] * w, sig)
+            if E.on("cytoplasm") and self.nucleus is not None:     # free probes / dye in the cell bodies of this colour
+                cyto = self.nucleus.cytoplasm(t, (dy + cy, dx + cx), float(E.par("cytoplasm", "radius_factor")), None, rel_bright=False)
+                ph = ph + float(E.par("cytoplasm", "locus_photons")) * (gaussian_filter(cyto, sig) if sig > 0 else cyto)
         if self.fid is not None:
             ph = ph + _spots_from_arrays(self.shape, self.fid["y"] + dy + cy, self.fid["x"] + dx + cx, self.fid["ph"], sig)
         if E.on("haze"):
@@ -790,6 +872,7 @@ class Imager:
     def static_truth(self) -> dict:
         """Constant imaging properties: per-channel shift and blur, pixel size, z-stack geometry, which sources were on and their parameters."""
         out = {"pixel_size_um": self.px_um, "exposure_s": self.exposure_s,
+               "colour_delay_s": {c: self.colour_delay_s(c) for c in self.channels},
                "channel_shift_px": {c: self.channel_shift_px(c) for c in self.channels},
                "sources": self.E.summary(), "master_switch": self.E.master}
         if self.nz:
