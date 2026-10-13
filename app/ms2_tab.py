@@ -105,6 +105,7 @@ def render(st_, run_path: Path, R: dict):
     _step3(dec, info)
     _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern)
     _step5(dec, samples, ev, tx, dt, info, run)
+    _convergence(run)
     _step6(run, ff, tag, dec, samples, tx, dt, info)
     _notes()
 
@@ -312,6 +313,43 @@ def _step5(dec, samples, ev, tx, dt, info, run):
         st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
 
 
+def _convergence(run):
+    """Has the sampler converged? Four chains from different starts per cell (scripts/check_mcmc.py), R-hat and effective sample size."""
+    _h("5b", "Has the sampler converged?",
+       "Four chains per cell start from different configurations (no starts, a draw from the prior, 10x too many starts, starts where the "
+       "trace rises). If the sampler works, they end up telling the same story. R-hat compares the spread between chains with the spread inside "
+       "them (1.00 = same; the limit here is 1.05, fixed in advance); the effective sample size (ESS) says how many independent samples the "
+       "1,000 correlated ones are worth (limit 400).")
+    f = run / "stage6_analysis" / "truth" / "mcmc_check.csv"
+    if not f.exists():
+        st.info("Not run for this movie yet. In a terminal: " + f"`scripts\\run.cmd python scripts\\check_mcmc.py --run {run.name}`" + " (about 10 minutes).")
+        return
+    df = pd.read_csv(f)
+    names = {"gibbs_shift": "Gibbs + shift moves (default)", "chen_block": "Chen et al. block sampler", "gibbs": "Gibbs flips only (no shifts)"}
+    g = df.groupby("sampler").agg(cells=("converged", "size"), converged=("converged", "sum"), worst_rhat_logpost=("rhat_logpost", "max"),
+                                  median_ess_logpost=("ess_logpost", "median"), worst_chain_difference_per_min=("max_chain_diff", "max"),
+                                  seconds_per_cell=("seconds", "mean")).reset_index()
+    g["sampler"] = g["sampler"].map(names).fillna(g["sampler"])
+    st.dataframe(g.round(2), hide_index=True, width="stretch")
+    bad = df[(df.sampler == "gibbs_shift") & ~df.converged]
+    if len(bad):
+        st.warning(f"{len(bad)} of {int((df.sampler == 'gibbs_shift').sum())} cells did NOT pass for the default sampler: their chains settle in different "
+                   "local arrangements of the starts (log-posterior levels that differ by far more than the spread inside a chain). The total number "
+                   "of starts agrees better than their exact timing; see docs/MCMC_CONVERGENCE.md before trusting single-start timing for these cells.")
+    with st.expander("Every cell and sampler"):
+        cols = ["cell", "sampler", "converged", "rhat_logpost", "rhat_nstarts", "rhat_frames_max", "ess_logpost", "ess_nstarts", "ess_frames_min",
+                "max_chain_diff", "seconds", "reasons"]
+        st.dataframe(df[[c for c in cols if c in df]].round(3), hide_index=True, width="stretch")
+    fb = run / "stage6_analysis" / "truth" / "mcmc_burn_in.csv"
+    if fb.exists():
+        b = pd.read_csv(fb)
+        b = b.groupby("burn_in_sweeps").agg(median_rhat=("rhat_logpost", "median"), worst_rhat=("rhat_logpost", "max"),
+                                            spread_of_chain_means=("spread_of_chain_means", "median")).reset_index()
+        st.markdown("**How much burn-in?** R-hat of the log-posterior over the 100 sweeps after discarding the first n sweeps (all cells; the "
+                    "paper and our default use 500):")
+        st.dataframe(b.round(2), hide_index=True, width="stretch")
+
+
 def _step6(run, ff, tag, dec, samples, tx, dt, info):
     _h(6, "Choosing the burst rule: why Chen et al.'s default misses bursts of a slow gene",
        "A burst is a period in which Pol II starts often. The rule calls 'ON' where the number of starts within a window of w frames reaches "
@@ -393,6 +431,9 @@ def _notes():
             "accepted. Here the block length is tuned the same way, automatically (largest block with ≥ 10% acceptance in a short pilot run): "
             "for these traces that is ~20 s, because a 6-minute block filled with q ≥ 0.05 proposes ~18 starts at once and is almost always "
             "rejected (1.7% acceptance, stuck). With the tuned block both samplers give the same answer (step 5).\n\n"
+            "**Convergence.** Step 5b runs four chains per cell from different starting configurations and compares them (R-hat, effective sample "
+            "size). The default sampler passes on constructed traces but not on the dense, almost noise-free gene, where chains get trapped in "
+            "different arrangements of the starts; see docs/MCMC_CONVERGENCE.md.\n\n"
             "**Rest of the method.** Model (Chen et al. Eqs. 8-11): trace = kernel ∗ starts + noise with variance sigma_b² + beta × signal; prior "
             "(Eq. 15): each second has a start with probability R(t) × 1 s, R from the average activity of all cells (activity at t + tau/2 "
             "divided by tau, the kernel's area); rate and bursts (Eq. 18, section V.4) computed on every sample. Not modelled, as in the paper: "

@@ -154,18 +154,40 @@ def _apply(G, kern, idx, j, sign, s, J0):
 
 
 @njit(cache=True)
-def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift, seed):
+def _log_post(A, G, I, logit_p, sb2, beta):
+    """Log-posterior of the current configuration up to a constant: Gaussian log-likelihood of the trace + the prior log-odds of the starts."""
+    lp = 0.0
+    for n in range(len(A)):
+        if A[n] == A[n]:
+            v = sb2 + beta * max(G[n], 0.0)
+            lp += -0.5 * (A[n] - G[n]) ** 2 / v - 0.5 * np.log(v)
+    for j in range(len(I)):
+        if I[j]:
+            lp += logit_p[j]
+    return lp
+
+
+@njit(cache=True)
+def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift, seed, I0):
+    """Gibbs flips + shift moves from the start configuration I0 (max_shift < 1 = flips only). Besides the samples it returns the
+    log-posterior and the number of starts of every kept sample and the log-posterior after every sweep (burn-in included)."""
     np.random.seed(seed)
     N = len(logit_p)
     T = len(A)
     idx = J0 + np.arange(T) * s
-    I = np.zeros(N, np.int8)
+    I = I0.copy()
     G = np.zeros(T)
+    for j in range(N):
+        if I[j]:
+            _apply(G, kern, idx, j, 1.0, s, J0)
+    lp_kept = np.zeros(n_keep)
+    nst_kept = np.zeros(n_keep)
     counts = np.zeros((n_keep, T), np.uint8)
     Gsum = np.zeros(T)
     Isum = np.zeros(N)
     kept = 0
     total = n_burn + n_keep * thin
+    lp_sweep = np.zeros(total)
     for sweep in range(total):
         # single-step Gibbs: add or remove an event at every fine step
         for j in range(N):
@@ -182,7 +204,7 @@ def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift,
                     _apply(G, kern, idx, j, -1.0, s, J0)
         # shift moves: move every event by a few steps (Metropolis), so an event can slide in time without first disappearing
         for j in range(N):
-            if I[j] == 0:
+            if max_shift < 1 or I[j] == 0:
                 continue
             d = np.random.randint(1, max_shift + 1) * (1 if np.random.random() < 0.5 else -1)
             k = j + d
@@ -198,6 +220,7 @@ def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift,
                 I[k] = 1
             else:
                 _apply(G, kern, idx, j, 1.0, s, J0)
+        lp_sweep[sweep] = _log_post(A, G, I, logit_p, sb2, beta)
         if sweep >= n_burn and (sweep - n_burn) % thin == 0 and kept < n_keep:
             for n in range(T):          # events in (t_n - dt, t_n]: fine steps idx[n]-s+1 .. idx[n]
                 c = 0
@@ -207,22 +230,30 @@ def _sample(A, kern, logit_p, sb2, beta, s, J0, n_burn, n_keep, thin, max_shift,
                 counts[kept, n] = min(c, 255)
             Gsum += G
             Isum += I
+            lp_kept[kept] = lp_sweep[sweep]
+            nst_kept[kept] = I.sum()
             kept += 1
-    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), 1.0
+    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), 1.0, lp_kept, nst_kept, lp_sweep
 
 
 @njit(cache=True)
-def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, q0, seed):
+def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, q0, seed, I0):
     """Chen et al. 2025 (V.1, Eqs. 16-17): Metropolis-Hastings in which a random block of w consecutive steps is redrawn from independent
     Bernoulli(q) proposals; q learns from the chain, q <- q (1 - l) + l I with l = 1 / sqrt(3 j), kept within [0.05, 0.95]. Burn-in
-    n_burn_sweeps x N / w iterations, then n_keep samples ~3 sweeps apart."""
+    n_burn_sweeps x N / w iterations, then n_keep samples ~3 sweeps apart. Starts from I0; also returns the log-posterior and the number of
+    starts of the kept samples and the log-posterior after every sweep (N / w iterations)."""
     np.random.seed(seed)
     N = len(logit_p)
     T = len(A)
     K = len(kern)
     idx = J0 + np.arange(T) * s
-    I = np.zeros(N, np.int8)
+    I = I0.copy()
     G = np.zeros(T)
+    for j in range(N):
+        if I[j]:
+            _apply(G, kern, idx, j, 1.0, s, J0)
+    lp_kept = np.zeros(n_keep)
+    nst_kept = np.zeros(n_keep)
     q = q0.copy()
     lp1 = np.log(1.0 / (1.0 + np.exp(-logit_p)))          # log p
     lp0 = np.log(1.0 / (1.0 + np.exp(logit_p)))           # log (1 - p)
@@ -232,6 +263,8 @@ def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, 
     iters_burn = max(1, n_burn_sweeps * N // w)
     per_keep = max(1, 3 * N // w)
     total = iters_burn + n_keep * per_keep
+    per_sweep = max(1, N // w)
+    lp_sweep = np.zeros(total // per_sweep + 1)
     kept = 0
     acc = 0
     Inew = np.zeros(w, np.int8)
@@ -271,6 +304,8 @@ def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, 
         lr = 1.0 / np.sqrt(3.0 * (it + 1))
         for j in range(b, e):
             q[j] = min(0.95, max(0.05, q[j] * (1 - lr) + lr * I[j]))
+        if (it + 1) % per_sweep == 0:
+            lp_sweep[(it + 1) // per_sweep - 1] = _log_post(A, G, I, logit_p, sb2, beta)
         if it >= iters_burn and (it - iters_burn) % per_keep == 0 and kept < n_keep:
             for n in range(T):
                 c = 0
@@ -280,20 +315,23 @@ def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, 
                 counts[kept, n] = min(c, 255)
             Gsum += G
             Isum += I
+            lp_kept[kept] = _log_post(A, G, I, logit_p, sb2, beta)
+            nst_kept[kept] = I.sum()
             kept += 1
-    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), acc / max(total, 1)
+    return counts, Gsum / max(kept, 1), Isum / max(kept, 1), acc / max(total, 1), lp_kept, nst_kept, lp_sweep[: total // per_sweep]
 
 
-SAMPLERS = ("gibbs_shift", "chen_block")
+SAMPLERS = ("gibbs_shift", "chen_block", "gibbs")        # "gibbs" = single-step flips only (no shift moves; for the mixing comparison)
 
 
 def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_per_s: np.ndarray, sigma_b: float, beta: float,
                      n_burn: int = 500, n_keep: int = 1000, thin: int = 3, max_shift_s: float = 15.0, seed: int = 0,
-                     sampler: str = "gibbs_shift", block_s="auto") -> dict:
+                     sampler: str = "gibbs_shift", block_s="auto", init: str = "empty") -> dict:
     """Posterior over the initiation events of one trace (C.U., one value per frame). rate_prior_per_s: prior initiation rate per frame
     (per second). sampler: "gibbs_shift" (default: single-step Gibbs + shift moves) or "chen_block" (the paper's adaptive block-Bernoulli
-    Metropolis-Hastings; block_s "auto" = the largest of 360 ... 5 s with >= 10% acceptance in a pilot run, as the paper tuned it). Returns counts (n_keep, T) of initiations in each frame interval per sample, the posterior mean fit
-    G (C.U.), p_fine = the probability of a start at every fine step, t_fine = their times (s, 0 = first frame), and the acceptance rate."""
+    Metropolis-Hastings; block_s "auto" = the largest of 360 ... 5 s with >= 10% acceptance in a pilot run, as the paper tuned it). "gibbs" = flips only. init: starting configuration (INITS). Returns counts (n_keep, T) of initiations in each frame interval per
+    sample, the posterior mean fit G (C.U.), p_fine = the probability of a start at every fine step, t_fine = their times (s, 0 = first
+    frame), the acceptance rate, and for convergence checks log_post / n_starts per kept sample and log_post_sweeps (every sweep)."""
     s = int(round(frame_s / kern.dt_fine_s))
     if abs(s * kern.dt_fine_s - frame_s) > 1e-6:
         raise ValueError("the frame interval must be a whole number of fine steps")
@@ -306,24 +344,48 @@ def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_
     p = np.clip(r * kern.dt_fine_s, 1e-6, 0.5)
     lo = np.log(p / (1 - p))
     A = np.asarray(a_cu, np.float64)
+    rise = np.clip(np.r_[np.diff(np.nan_to_num(A)), 0.0], 0, None)           # where the trace rises (the paper: smoothed activity)
+    rise_f = np.interp(tf, np.arange(T) * frame_s, rise)
+    I0 = initial_state(init, p, rise_f, kern, np.random.default_rng(int(seed) + 7919))
     if sampler == "chen_block":
-        rise = np.clip(np.r_[np.diff(np.nan_to_num(A)), 0.0], 0, None)       # q starts high where the trace rises (the paper: smoothed activity)
-        q0 = np.clip(np.interp(tf, np.arange(T) * frame_s, rise), 0.05, 0.95)
+        q0 = np.clip(rise_f, 0.05, 0.95)         # q starts high where the trace rises
         args = (A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0)
         if block_s == "auto":            # the paper tuned the block for an acceptance rate of 10-70%: largest block with >= 10% in a pilot run
             for cand in (360.0, 180.0, 90.0, 45.0, 20.0, 10.0, 5.0):
                 w = max(2, int(round(cand / kern.dt_fine_s)))
-                if _sample_block(*args, 100, 20, w, q0, int(seed))[3] >= 0.10:
+                if _sample_block(*args, 100, 20, w, q0, int(seed), I0)[3] >= 0.10:
                     break
             block_s = cand
         w = max(2, int(round(float(block_s) / kern.dt_fine_s)))
-        counts, G, pf, acc = _sample_block(*args, int(n_burn), int(n_keep), w, q0, int(seed))
-    elif sampler == "gibbs_shift":
-        counts, G, pf, acc = _sample(A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0, int(n_burn), int(n_keep), int(thin),
-                                     max(1, int(round(max_shift_s / kern.dt_fine_s))), int(seed))
+        counts, G, pf, acc, lp_k, nst_k, lp_sw = _sample_block(*args, int(n_burn), int(n_keep), w, q0, int(seed), I0)
+    elif sampler in ("gibbs_shift", "gibbs"):
+        shift = max(1, int(round(max_shift_s / kern.dt_fine_s))) if sampler == "gibbs_shift" else 0
+        counts, G, pf, acc, lp_k, nst_k, lp_sw = _sample(A, kern.values, lo, float(sigma_b) ** 2, float(beta), s, J0, int(n_burn), int(n_keep),
+                                                         int(thin), shift, int(seed), I0)
     else:
         raise ValueError(f"unknown sampler {sampler!r}; use one of {SAMPLERS}")
-    return {"counts": counts, "G": G, "p_fine": pf, "t_fine": tf, "acceptance": float(acc), "block_s": block_s if sampler == "chen_block" else None}
+    return {"counts": counts, "G": G, "p_fine": pf, "t_fine": tf, "acceptance": float(acc), "block_s": block_s if sampler == "chen_block" else None,
+            "log_post": lp_k, "n_starts": nst_k, "log_post_sweeps": lp_sw}
+
+
+INITS = ("empty", "prior", "crowded", "rise")
+
+
+def initial_state(kind: str, p: np.ndarray, rise: np.ndarray, kern: Kernel, rng: np.random.Generator) -> np.ndarray:
+    """Starting configuration of a chain (0/1 per fine step). "empty": no starts; "prior": each step with its prior probability; "crowded": 10x
+    the prior probability (a start every few dozen seconds where the prior is high, far too many); "rise": starts where the trace rises
+    fastest (a data-driven guess). The chains of a convergence check start from different ones on purpose (over-dispersed)."""
+    N = len(p)
+    if kind == "empty":
+        return np.zeros(N, np.int8)
+    if kind == "prior":
+        return (rng.random(N) < p).astype(np.int8)
+    if kind == "crowded":
+        return (rng.random(N) < np.clip(10 * p, 0, 0.5)).astype(np.int8)
+    if kind == "rise":
+        r = np.asarray(rise, float)
+        return (rng.random(N) < np.clip(r / max(r.max(), 1e-9) * 0.2, 0, 0.5)).astype(np.int8)
+    raise ValueError(f"unknown init {kind!r}; use one of {INITS}")
 
 
 def burst_calls(counts: np.ndarray, frame_s: float, w_frames: float = 5.0, g_b: float = 2.0) -> np.ndarray:
@@ -360,10 +422,9 @@ def burst_rule_grid(samples: dict, tx: pd.DataFrame, frame_s: float, ws=(1, 2, 3
     return pd.DataFrame(rows)
 
 
-def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None, n_keep: int = 1000,
-                          seed: int = 0, progress=None, sampler: str = "gibbs_shift") -> tuple[pd.DataFrame, dict, dict]:
-    """Deconvolve every cell's MS2 trace (table with cell_id, t, and the intensity column). Returns (per-frame table, per-cell samples
-    {cell_id: counts}, info: unit, noise model, kernel)."""
+def prepare_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None):
+    """Everything the samplers need from a run's MS2 table: per-cell traces in C.U. {cell_id: array}, the kernel, the frame interval, the
+    prior rate per frame (per s), the noise model (sigma_b, beta) and the unit."""
     col = col if col in tr else "intensity"
     dt = float(cfg["acquisition"]["frame_interval_s"])
     kern = kernel_from_config(cfg, 1.0 if dt >= 1 else dt / 4)
@@ -377,6 +438,15 @@ def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_cor
     tau = kern.area_s
     shift = int(round(tau / 2 / dt))
     prior = np.clip(np.r_[pop[shift:], np.full(shift, pop[-1] if len(pop) else 0)] / tau, 1e-5, 0.5)   # R(t) = mu(t + tau/2) / tau, per s
+    return traces, kern, dt, prior, sb, beta, unit, col
+
+
+def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None, n_keep: int = 1000,
+                          seed: int = 0, progress=None, sampler: str = "gibbs_shift") -> tuple[pd.DataFrame, dict, dict]:
+    """Deconvolve every cell's MS2 trace (table with cell_id, t, and the intensity column). Returns (per-frame table, per-cell samples
+    {cell_id: counts}, info: unit, noise model, kernel)."""
+    traces, kern, dt, prior, sb, beta, unit, col = prepare_traces(tr, cfg, col, unit)
+    tau = kern.area_s
     rows, samples, acc, blocks = [], {}, [], []
     for i, (cid, a) in enumerate(traces.items()):
         res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid, sampler=sampler)

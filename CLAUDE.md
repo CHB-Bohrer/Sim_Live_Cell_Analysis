@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 122 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 129 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -410,6 +410,17 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
     - `dwell_fixed` transcription option: a fixed wait gives 93% / rate r 0.95 vs 82% / 0.80 with the random wait, so the kernel's fixed
       release time is a real limit;
     - burst-rule map (page step 6): on the denser gene w = 30 frames, g_b = 6 gives ON/OFF 94/94% vs Chen default 49/99%.
+  - **Sampler convergence (2026-10-13; docs/MCMC_CONVERGENCE.md; `stage6_analysis/mcmc_check.py`, `scripts/check_mcmc.py`, page step 5b):**
+    - 4 chains per trace from different starts (`deconvolve.INITS`), rank-normalised split R-hat + bulk ESS on log-posterior, number of starts and
+      per-frame counts; limits R-hat < 1.05, ESS >= 400 fixed in advance (do not tune). New sampler `gibbs` = flips only; `deconvolve_trace(init=)`
+      returns `log_post`, `n_starts`, `log_post_sweeps`; `prepare_traces()` split out of `deconvolve_run_traces`.
+    - All 3 samplers match the exactly enumerated posterior of a 14-step problem (test), so the target is right.
+    - **FINDING: the default `gibbs_shift` does NOT converge on the dense, nearly noise-free gene** (seed 8, R = 25): 3 of 12 cells pass; chains trap in
+      different local arrangements of starts (log-posterior levels ~100 nats apart), agree on the NUMBER of starts, disagree on timing (1-1.4 starts/min
+      in the 1-min rate). More burn-in does not help. Posterior intervals / start times for dense bursts from that run are NOT trustworthy; the
+      totals probably are. Sparse placeholder gene (seed 7): 9 of 12 pass, the rest only miss ESS 400 (320-353). Constructed traces: 5/5.
+    - Flips only get stuck (1/5): the shift moves matter. Block sampler 2/5 (needs more samples; 5x cheaper per sample).
+    - NEXT (needs the user's go-ahead): parallel tempering or joint multi-start moves; use `check_convergence` as the yardstick.
   - Vutara showcase: loci_demo_seed9_1c649d (sequential, tracked) and loci_demo_seed9_17363e (same movie, simultaneous: 8.6% bleed-through,
     no colour delay; tracking skipped). Error effects for both in docs/ERROR_EFFECTS.md.
 - **BURSTY DEFAULT GENE** (user 2026-10-13: "the transcription trajectory needs to be way more bursty"). Configs + transcription.DEFAULTS +
