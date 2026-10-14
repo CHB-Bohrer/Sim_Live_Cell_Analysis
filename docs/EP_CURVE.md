@@ -103,3 +103,82 @@ Widen them by ~1.3 for honest 95%; not corrected in the code.
   quantities are simulated at the level of the distance vector. The earlier spot-finding scores (22-84 nm median error, 98% found) put the baseline in the right range.
 - One gibbs_shift chain per cell for the ON estimate (no convergence check), 200 samples; a single gene (placeholder kinetics). MS2 noise, burst rule, frame interval grids are small (4 populations per setting).
 - Homologous copies / sister chromatids, a shared probe pool and transcription feeding back on the polymer are not modelled.
+
+---
+
+# Update 2026-10-14 (b): E-P distances from the polymer, three microscope modes
+
+(The sections above describe the first version: an invented distance process, 2D noise only. They stay as they are; the comparison is in "What changed".)
+
+## Where the numbers come from
+- **Literature (checked, not used for a scale).** Jusuf, Grosse-Holz, Gabriele, Mach, Flyamer, Zechner, Giorgetti, Mirny, Hansen, "Genome-wide absolute quantification of chromatin looping" (bioRxiv 2025.01.13.632736, v1 of 15 Jan 2025).
+  I read the main text; its Methods and supplement were not in the file, and the journal version (Nat Struct Mol Biol 2026) could not be opened. Mouse ES cells; deep Micro-C calibrated against earlier BILD live-imaging of two loops
+  (Fbn2 505 kb, synthetic Npr3 164 kb); DNA FISH for four E-P pairs. "Looping probability" = the average fraction of alleles in which the loop exists, or the fraction of time looped at one allele, counting only interactions
+  ABOVE the background of random polymer encounters. No nm threshold is given in the main text; the capture / interaction radii of its simulations are in the unread supplement. Reported: mean 2.3%, median 1.6%, max 26% over 36,804
+  loops; CTCF-CTCF 3.2% vs cis-regulatory 1.1%; DNA FISH E-P: Sox2 19.8%, Mycn 12.7%, Klf4 5.8%, Nanog 5.3%; calibration slope k = 0.186 +- 0.047; CTCF loop lifetime ~20 min (cited from earlier work). **No distances in nm,
+  no distance distribution at 100 kb, no diffusion coefficient.** So the length scale is NOT from the paper. (Search-summary numbers for the later version, 65,929 loops / mean 1.2%, are unverified.)
+- **Length (nm per polymer unit) = 55.4**, chosen so that the E-P pair (100 kb apart) is within the 400 nm working distance 10% of the time (the user's contact fraction). With it the pooled E-P distance has median 792 nm, mean 827 nm, 5-95%:
+  315-1458 nm. These distances cannot be checked against the paper. Its "looped" fraction (excess above background, 1-2% for a typical E-P pair) is a different quantity from "within 400 nm" (10%), which includes random encounters.
+- **Time (seconds per saved block) = 0.461 s**: the single-locus MSD (3D, centre of mass removed) at 60 s is matched to 6 D t with D = 0.002 um^2/s (user: one locus, lag 1 min, assumed corrected for nucleus motion and drift). The simulated MSD exponent
+  is 0.50 above one block (0.57 below it). If D referred to the E-P distance instead, a block would be 1.94 s. The choice of lag matters a lot (seconds per block at 10 / 30 / 60 / 120 s lag: 3.2 / 1.1 / 0.46 / 0.30 s).
+- **Checks before the scans:** contact fraction of the pooled polymer pairs 0.1000 (population of 3000 cells 0.100); the distance autocorrelation falls to 1/e in 20 blocks = **9.2 s** (frame-to-frame correlation at 10 s: 0.41).
+  Consequence of the 1-min lag: the loop extruder in the saved simulations steps once per block, i.e. a loop of 200 kb processivity lives ~100 blocks = 46 s, against ~20 min quoted in the paper for CTCF loops (from earlier work). The polymer
+  dynamics at this block time are therefore too fast for loop extrusion; the plain-polymer part of the E-P distance does not depend on it.
+
+## The main consequence: the instantaneous curve is almost flat
+The promoter responds to the E-P distance over minutes (a burst starts at rate k_on(d) and lasts ~45 s), but with these dynamics the distance changes within ~9 s. P(burst ON | distance NOW) is therefore nearly flat (contrast P(ON at 150 nm) / P(ON at 1000 nm) =
+**1.36**, against 4.1 with the invented process whose visits lasted 240 s). What can be recovered is P(ON) for a distance that is HELD, estimated from the distance HISTORY (`ep_history.py`: P(ON at t) = a + b H_t with H_t the exponentially weighted
+history of h(d), tau and d_half fitted, errors in variables integrated out). With true distances and true ON states of 3000 cells it finds tau = 45 s (= 1/k_off, the burst length: correct), d_half = 528 nm and a contrast of **4.19** (4.1 for the instantaneous
+fit of the invented process; 6.2 for the same history fit of the invented process, close to the 6.7 expected for a distance held fixed).
+
+## The three microscopes (`ep_acquisition.py`): a vector-level model, NOT a rendered movie
+Errors per axis of the measured E-P difference vector (medians; baseline settings: 6000 photons/s per locus, 0.1 s exposure, 0.15 s between the two colours, plane spacing 0.8 um / biplane 0.6 um, focus scatter 0.3 um):
+
+| error (nm per axis) | 2D widefield | z-stack (17 planes, 0.3 s per plane) | biplane (2 planes at once, half the photons each) |
+|---|---|---|---|
+| localization, in plane | 8 | 6 | 9 |
+| localization, z | not measured | 27 | 51 |
+| motion during the exposure / plane window | 38 | 62 | 38 |
+| the two colours 0.15 s apart (sequential excitation) | 120 | 125 | 120 |
+| piezo repeatability (30 nm per plane) | | 12 | |
+| mean delay between frame start and the measurement | 0.07 s | 2.5 s | 0.07 s |
+| both loci seen | 97% | 100% | 99% |
+| total per axis (xy / z) | 126 | 140 / 144 | 126 / 136 |
+
+The error is dominated by MOTION, not photons: at D = 0.002 um^2/s at 1 min and an MSD exponent 0.5 (extrapolated below one block, 0.46 s), a locus moves ~110 nm per axis in the 0.15 s between the two colours. Removing that delay (both colours at once, e.g. a second camera) is the single biggest improvement.
+
+## Results: 12-20 populations per setting, polymer distances. contrast = P(ON at 150 nm) / P(ON at 1000 nm) for a distance held; reference 4.19 (3000 cells, true distance and true ON state)
+
+| setting | 2D | z-stack | biplane | truth (true distance, true ON) |
+|---|---|---|---|---|
+| 600 cells x 1 h, contrast (mean +- sd over 20 populations) | 4.77 +- 1.00 | 4.25 +- 0.72 | 4.45 +- 0.80 | 3.80 +- 0.54 |
+| width of the 95% interval | 5.1 | 3.9 | 3.1 | 2.3 |
+| interval contains the reference | 95% | 95% | 100% | 100% |
+| no coupling: contrast; interval wrongly excludes 1 in (60 populations each) | 1.10; 6.7% | 1.33; 3.3% | 1.23; 3.3% | |
+
+- **2D vs 3D:** 3D narrows the interval by 25-40% and removes the projection bias; biplane is slightly better than the z-stack (interval 3.1 vs 3.9), but the standard deviations of the contrast (0.80 vs 0.72) cannot be separated with 20 populations.
+- **Wrong picks (contrast at 0 / 5 / 10 / 20%; reference 4.19):** 2D 4.73 / 4.67 / 4.37 / 3.68; z-stack 4.31 / 4.38 / 3.88 / 3.10; biplane 4.49 / 3.88 / 3.63 / 3.26. At 20% the contrast falls by 22-28%.
+- **Number of cells (contrast sd over populations; biplane / z-stack / truth):** 100: 2.5 / 2.1 / 1.1; 200: 1.4 / 1.5 / 1.0; 400: 0.89 / 0.80 / 0.71; 800: 0.69 / 0.64 / 0.53; 1600: 0.73 / 0.61 / 0.49; 3200: 0.57 / 0.52 / 0.42. Interval width at 3200 cells: 1.6 / 1.9 / 1.3.
+  Roughly 10x more cells than with the invented process are needed for the same precision (invented: sd 0.77 at 50 cells, 0.055 at 3200, an easier problem because the distance stayed in contact for minutes).
+- **Contact fraction 0.03 / 0.10 / 0.20 (reference 4.64 / 4.19 / 3.18):** biplane 5.44 / 4.49 / 3.25; z-stack 6.52 / 4.31 / 3.62; truth 5.63 / 3.80 / 3.01. Rare contact gives a noisy, biased-high estimate (interval contains the reference 67-75% of the time).
+- **Frame interval 10 / 20 / 40 / 80 s (reference contrast 4.19 / 2.56 / 2.38 / 1.78):** the reference itself falls: the distance changes within 10 s, so sparse frames cannot follow the history. Biplane 4.49 / 3.38 / 2.19 / 1.68. With these dynamics, frames every ~10 s or faster are needed.
+- **Delay between the colours 0 / 0.05 / 0.15 / 0.30 s (contrast sd; biplane):** 0.63 / 0.71 / 0.77 / 0.93; z-stack 0.67 / 0.74 / 0.80 / 1.78; 2D 1.18 / 1.14 / 0.99 / 1.43. Simultaneous colours remove ~20% of the scatter of the 3D modes.
+- **Photons (x 6000 per locus per s; detection of both loci / z precision):** biplane 0.3: 92% / 124 nm; 1: 99% / 51 nm; 3: 100% / 26 nm; below 0.3 the biplane loses the loci (0% at 0.1). Z-stack 0.1: 100% / 154 nm; 1: 27 nm; 3: 14 nm. The contrast barely changes with photons (4.3-4.8) while
+  detection holds: localization is not the limit.
+- **Focus scatter (um) 0 / 0.3 / 0.6 / 1.0 / 1.5 (both loci seen):** 2D 100 / 97 / 78 / 55 / 39%; biplane 100 / 99 / 86 / 64 / 46%. A single plane or a biplane has to be re-focused on the pair; the z-stack does not (it spans the nucleus).
+- **Which lag the D refers to (reference contrast at 10 / 30 / 60 / 120 s: 5.48 / 5.16 / 4.19 / 2.90; D for the pair at 60 s: 5.32):** the biology you can see depends strongly on this assumption.
+- **Invented vs polymer, same measurement (57 nm noise in 3D, no acquisition model):** invented: instantaneous 4.11, history 6.50 (reference 6.19); polymer: instantaneous **1.36**, history 3.73 (reference 4.19).
+- **ON state from the MS2 trace (300 cells, burst rule (3 frames, 3 starts) fixed in advance; median contrast over 4 populations, reference 4.19 at 10 s frames, 2.56 at 20 s):** biplane 10 s: 4.6-5.5; z-stack 10 s: 7.8-7.9; biplane 20 s: 3.4-3.5; z-stack
+  20 s: 3.6-3.9; the MS2 noise (0.05-2.0 x one Pol II) changes little. The call's sensitivity is 0.4-0.5 (10 s) and its false-positive rate 0.004; the calls are biased HIGH because sensitivity rises where bursts cluster (near the enhancer) and the far level collapses
+  (a = 0.006 against 0.041). The simple attenuation correction makes it worse (6-10). 4 populations per setting, ratio statistics heavy-tailed: treat as a warning, not a measurement.
+
+## What changed relative to the invented-process results above
+- The effect of the enhancer on P(ON | distance now) shrinks from contrast 4.1 to 1.4 once the distance fluctuates as fast as the polymer (with D = 0.002 um^2/s at 1 min) does; the effect is still there in the history of the distance (4.2).
+- Many more cells are needed (precision at 800 cells is what the invented process gave at ~50-100), and frames must be fast.
+- The wrong-pick sensitivity is similar (20% wrong: -22 to -28%).
+- The microscope matters through MOTION: the 0.15 s colour delay costs 120 nm per axis. The choice between 2D, z-stack and biplane matters less than that and than the cell number.
+- Null control still good; interval coverage fine for the true-ON analyses; the MS2-based ON estimate is the weak link.
+
+## Placeholders (not measured)
+Photons 6000 / s per locus, background 5 photons per pixel, z spread 2 um, focus scatter 0.3 um, 17 planes 0.8 um / 0.3 s per plane, biplane planes 0.6 um apart, piezo 30 nm, 0.15 s colour delay (Vutara preset: assumed), the gene (k_on 1/1200 s,
+k_off 1/45 s, k_init 0.15 /s), coupling = k_on x (1 + 11 h(d)) with h a Hill curve (d_half 400 nm, n = 4); the MSD below one block is extrapolated with the simulated exponent; the motion of a locus within an exposure is Gaussian; the errors of the two loci are independent.

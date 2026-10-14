@@ -13,7 +13,10 @@ import streamlit as st
 
 import style
 from simlive.io.runs import DATA_ROOT
+from simlive.stage7_validation import ep_acquisition as aq
 from simlive.stage7_validation import ep_curve as ep
+from simlive.stage7_validation import ep_history as eh
+from simlive.stage7_validation import ep_polymer as pp
 
 SWEEPS = DATA_ROOT / "sweeps"
 
@@ -35,13 +38,100 @@ def render(st_=st) -> None:
                     "simulated population) against the curve an analysis can recover from a realistic number of cells with measurement errors.",
                 "Choose the biology and the measurement errors, press Simulate, and compare the curves. The scans below show the same thing over many "
                 "populations and many error sizes.")
+    _live_polymer()
+    st.divider()
     _live()
     st.divider()
     _scans()
 
 
+@st.cache_resource(show_spinner=False)
+def _pool():
+    return pp.load_pool()
+
+
+@st.cache_resource(show_spinner=False, max_entries=4)
+def _poly_reference(lag_s: float, applies_to: str):
+    cal = pp.calibrate(_pool(), lag_s=lag_s, applies_to=applies_to)
+    pop = pp.simulate_population(ep.EPSetup(n_cells=3000), _pool(), cal, 12345, with_trace=False, keep_blocks=False)
+    a = eh.analyse_history(pop, pop.d_true, aq.kernel_aniso(9.0, 9.0, 3, 0.0))
+    hist, _ = np.histogram(pop.d_true, bins=np.r_[ep.D_GRID - 5.0, ep.D_GRID[-1] + 5.0])
+    a["d_pdf"] = hist / hist.sum()
+    return a, cal
+
+
+def _live_polymer() -> None:
+    st.markdown("### 1 · Distances from the polymer simulations, seen through a 2D, z-stack or biplane microscope")
+    st.caption("E and P are two monomers 100 kb apart in the 10 validation simulations. Length scale: 55 nm per polymer unit, chosen so that the pair is within 400 nm 10% of the "
+               "time (the paper checked gives no distances). Time scale: the single-locus MSD at the chosen lag is matched to 6 D t with D = 0.002 µm²/s. The promoter responds to "
+               "the distance over ~45 s but the distance fluctuates within ~10 s, so the curve shown is P(ON) for a distance HELD at d, fitted from the distance history.")
+    with st.form("epp_form"):
+        c = st.columns(4)
+        kind = c[0].selectbox("Microscope", ["biplane", "zstack", "2d"], format_func={"biplane": "3D biplane (2 planes, simultaneous)", "zstack": "3D z-stack (17 planes)", "2d": "2D widefield"}.get)
+        n_cells = c[1].number_input("Cells (1 h each)", 100, 2000, 600, 100)
+        delay = c[2].number_input("Delay between the two colours (s)", 0.0, 0.5, 0.15, 0.05, help="Sequential excitation (Vutara preset: 0.15 s). 0 = both colours at once.")
+        photons = c[3].number_input("Photons (x 6000 per locus per s)", 0.1, 10.0, 1.0, 0.1)
+        c = st.columns(4)
+        focus = c[0].number_input("Focus scatter, 2D / biplane (um)", 0.0, 2.0, 0.3, 0.1)
+        wrong = c[1].number_input("Wrong picks", 0.0, 0.5, 0.0, 0.01)
+        lag = c[2].number_input("D = 0.002 um2/s refers to lag (s)", 5.0, 300.0, 60.0, 5.0)
+        applies = c[3].radio("D is for", ["locus", "pair"], horizontal=True, format_func={"locus": "one locus", "pair": "the E-P distance"}.get)
+        c = st.columns(3)
+        coupled = c[0].checkbox("Enhancer acts (untick = null control)", True)
+        seed = c[1].number_input("Seed", 0, 10**6, 1, key="epp_seed")
+        go = c[2].form_submit_button("Simulate and fit", type="primary")
+    if not go and "epp_last" not in st.session_state:
+        st.info("Press Simulate and fit (about 40 s).")
+        return
+    if go:
+        with st.spinner("Polymer pool, reference (3000 cells), your population, fits..."):
+            ref, cal = _poly_reference(float(lag), applies)
+            pop = pp.simulate_population(ep.EPSetup(n_cells=int(n_cells)), _pool(), cal, int(seed), coupled=bool(coupled), with_trace=False)
+            acq = aq.Acquisition(kind=kind, colour_delay_s=float(delay), photon_scale=float(photons), focus_sd_um=float(focus), wrong_pick_rate=float(wrong),
+                                 plane_time_s=2 * float(delay) if kind == "zstack" and delay > 0 else (0.15 if kind == "zstack" else 0.0))
+            m = aq.measure(pop, pop.blocks, acq, seed=int(seed))
+            K = aq.kernel_aniso(m.sigma_xy, m.sigma_z, m.dims, m.shift_nm)
+            res = eh.analyse_history(pop, m.d, K, n_boot=60, seed=int(seed))
+            inst = ep.analyse_measured(pop, m.d, K)
+        st.session_state["epp_last"] = (ref, cal, res, inst, m, pop.d_true, bool(coupled))
+    ref, cal, res, inst, m, d_true, coupled = st.session_state["epp_last"]
+    r, f = ref["fit"], res["fit"]
+    lo, hi = res.get("contrast_ci", (np.nan, np.nan))
+    c = st.columns(5)
+    c[0].metric("Truth: P(ON) at 150 nm / at 1000 nm (held)", f"{r.contrast():.2f}", help="Same fit to the true distance and the true ON state of 3000 cells.")
+    c[1].metric("Recovered", f"{res['contrast']:.2f}", f"95% {lo:.2f} to {hi:.2f}", delta_color="off")
+    c[2].metric("Interval contains the truth?" if coupled else "Interval excludes 1 (false positive)?",
+                ("yes" if lo <= r.contrast() <= hi else "no") if coupled else ("yes" if (lo > 1 or hi < 1) else "no"))
+    c[3].metric("Memory of the promoter (s): truth / recovered", f"{r.tau_s:.0f} / {f.tau_s:.0f}")
+    c[4].metric("Distance only NOW (instantaneous fit)", f"{inst['contrast']:.2f}", help="P(ON | distance now): nearly flat, because the distance changes within ~10 s while the promoter integrates over ~45 s.")
+    g = ep.D_GRID
+    bs = res.get("boot", [])
+    band = np.array([b.g(g) for b in bs]) if bs else None
+
+    def draw():
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(13, 4.4), gridspec_kw={"width_ratios": [3, 2]})
+        ax.plot(g, r.g(g), color="#e5e7eb", lw=2.4, label="truth: distance held at d (3000 cells, true distance and state)")
+        if band is not None:
+            ax.fill_between(g, np.quantile(band, 0.025, 0), np.quantile(band, 0.975, 0), color="#2dd4bf", alpha=0.25, lw=0)
+        ax.plot(g, f.g(g), color="#2dd4bf", lw=2, label="recovered (95% band)")
+        ax.set_xlim(0, 1500); ax.set_ylim(0, None); ax.set_xlabel("promoter-enhancer distance held at (nm)"); ax.set_ylabel("P(promoter in a burst)")
+        ax.legend(fontsize=8); ax.grid(alpha=0.3)
+        ax2.hist(d_true, bins=np.arange(0, 2500, 50), density=True, color="#94a3b8", alpha=0.6, label="true")
+        ax2.hist(m.d[np.isfinite(m.d)], bins=np.arange(0, 2500, 50), density=True, histtype="step", color="#60a5fa", lw=1.8, label="measured")
+        ax2.set_xlabel("distance (nm)"); ax2.set_ylabel("share of frames"); ax2.legend(fontsize=8); ax2.grid(alpha=0.3)
+        fig.tight_layout()
+        return fig
+
+    style.cached_figure(st, ("epp_live", round(res["contrast"], 6), round(r.contrast(), 6), len(bs)), draw)
+    parts = {k.replace("_nm", " (nm per axis)").replace("_s", " (s)").replace("_", " "): round(v, 1) for k, v in m.parts.items()}
+    st.caption(f"Calibration: {cal.nm_per_unit:.1f} nm per unit, {cal.block_s:.2f} s per saved block (D {cal.applies_to}, lag {cal.lag_s:.0f} s; MSD exponent {cal.alpha:.2f} below one block, an extrapolation). "
+               f"Per-axis error of the measured difference vector: {m.sigma_xy:.0f} nm in the image plane" + (f", {m.sigma_z:.0f} nm in z" if m.dims == 3 else "") + f"; both loci seen in {100 * m.detected:.0f}% of frames.")
+    with st.expander("Error budget (median per-axis contributions)"):
+        st.dataframe(pd.DataFrame({"term": list(parts), "value": list(parts.values())}), hide_index=True, width="stretch")
+
+
 def _live() -> None:
-    st.markdown("### 1 · One population, your errors")
+    st.markdown("### 1b · The earlier version: an invented slow distance process, noise and 2D / 3D only")
     with st.form("ep_form"):
         c = st.columns(4)
         wd = c[0].number_input("Working distance of the enhancer (nm)", 100.0, 1500.0, 400.0, 50.0, help="Distance at which the enhancer's effect is half of its maximum (hill curve, n = 4). The old sharp contact was 150 nm.")
@@ -125,20 +215,22 @@ def _live() -> None:
 
 def _scans() -> None:
     st.markdown("### 2 · Saved scans (many populations per setting)")
-    files = sorted(SWEEPS.glob("ep_curve_*/results.csv"))
+    files = sorted(SWEEPS.glob("ep_polymer_*/results.csv")) + sorted(SWEEPS.glob("ep_curve_*/results.csv"))
     if not files:
-        st.info("No scans yet: `scripts\\run.cmd python scripts\\sweep_ep_curve.py --exps sigma shift outliers cells null`")
+        st.info("No scans yet: scripts\\run.cmd python scripts\\sweep_ep_polymer.py --exps modality null wrong cells")
         return
-    names = {f.parent.name.replace("ep_curve_", ""): f for f in files}
-    exp = st.selectbox("Scan", list(names), key="ep_exp",
-                       format_func=lambda n: {"ladder": "ladder: truth → estimated ON → measured distance → both", "sigma": "localization precision × 2D/3D",
-                                              "shift": "colour shift", "outliers": "wrong picks / missed frames", "cells": "number of cells",
-                                              "null": "no coupling (false positives)", "dynamics": "time per visit", "contact": "contact fraction",
-                                              "frames": "frame interval", "ms2": "MS2 noise × frame interval"}.get(n, n))
+    names = {("polymer: " if f.parent.name.startswith("ep_polymer_") else "invented: ") + f.parent.name.split("_", 2)[2]: f for f in files}
+    LABELS = {"polymer: modality": "polymer distances: 2D / z-stack / biplane", "polymer: null": "polymer: no coupling (false positives)",
+              "polymer: wrong": "polymer: wrong picks", "polymer: cells": "polymer: number of cells", "polymer: contact": "polymer: contact fraction",
+              "polymer: frames": "polymer: frame interval", "polymer: colour": "polymer: delay between the two colours",
+              "polymer: photons": "polymer: photons per locus", "polymer: focus": "polymer: focus error (2D, biplane)",
+              "polymer: timescale": "polymer: which lag the D = 0.002 refers to", "polymer: compare_sources": "invented vs polymer distances, same measurement",
+              "polymer: ms2": "polymer: MS2 noise x frame interval (ON from the MS2 trace)"}
+    exp = st.selectbox("Scan", list(names), key="ep_exp", format_func=lambda n: LABELS.get(n, n))
     df = pd.read_csv(names[exp])
     cols = list(df.columns)
     at = cols.index("run")
-    settings = [c for c in cols[:at] if c != "seed" and df[c].nunique() > 1]
+    settings = [c for c in cols[:at] if c != "seed" and df[c].nunique(dropna=False) > 1]
     st.caption(f"{len(df)} analyses, {df.seed.nunique()} populations per setting. contrast = P(ON at 150 nm) / P(ON at 1000 nm); 'covers' = the 95% interval "
                "contains the reference value; 'excludes 1' = a detected effect.")
     if not settings:

@@ -100,6 +100,9 @@ class Population:
     trace_cu: dict                      # {cell: noisy MS2 trace, one Pol II = 1}
     starts: dict                        # {cell: true initiation times (s)}
     coupled: bool = True
+    vec_nm: np.ndarray | None = None    # true E-P vector per frame (nm, lab frame), polymer-driven populations only
+    calib: object = None                # ep_polymer.Calibration of a polymer-driven population
+    blocks: np.ndarray | None = None    # (cells, n_blocks, 3) float32: the true E-P vector (nm) at every saved block (polymer-driven populations; for acquisition timing)
 
     def cells(self) -> np.ndarray:
         return np.unique(self.cell_id)
@@ -385,9 +388,15 @@ def analyse(pop: Population, meas: Measurement, y: np.ndarray | None = None, nai
     for the attenuation correction. Returns the fit, bootstrap intervals (n_boot > 0) and the curve on D_GRID."""
     rng = np.random.default_rng(seed)
     d_meas = measure_distance(pop.d_true, meas, rng)
+    K = kernel_matrix(meas.sigma_nm, meas.dims, meas.assumed_shift_nm)
+    return analyse_measured(pop, d_meas, K, y=y, naive=naive, correct_calls=correct_calls, n_boot=n_boot, seed=seed, n_shape=n_shape, free_shape=free_shape)
+
+
+def analyse_measured(pop: Population, d_meas: np.ndarray, K: np.ndarray, y: np.ndarray | None = None, naive: bool = False, correct_calls: tuple | None = None,
+                     n_boot: int = 0, seed: int = 0, n_shape: float = 4.0, free_shape: bool = False) -> dict:
+    """The instantaneous curve P(ON | distance now) fitted to already measured distances (NaN = no measurement) with the analysis' measurement kernel K."""
     yy = pop.on_true.astype(float) if y is None else np.asarray(y, float)
     agg = Aggregates.build(pop.cell_id, d_meas, yy)
-    K = kernel_matrix(meas.sigma_nm, meas.dims, meas.assumed_shift_nm)
     prior = population_prior(agg.n.sum(0), K)
     se, fp = correct_calls if correct_calls else (1.0, 0.0)
     kw = dict(n_shape=n_shape, naive=naive, se=se, fp=fp, free_shape=free_shape)

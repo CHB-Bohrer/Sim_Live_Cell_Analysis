@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 137 CPU + 6 GPU tests at 2026-10-14. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 142 CPU + 6 GPU tests at 2026-10-14. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -471,6 +471,20 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   and the correction is then acceptable (4.3-4.9). MS2 noise of 2 x one Pol II with 20 s frames halves the contrast. The cell-bootstrap intervals are ~25% too narrow (coverage 85-90%).
 - NOT done: wrong-pick mixture in the fit; other coupling shapes; the real polymer-library distances (needs MSD calibration); linking sigma to photons / the movie's spot finder; a convergence
   check inside `estimate_on` (single chain); the real MS2 noise relative to one Pol II (user must supply).
+
+### E-P curve with POLYMER distances and three microscopes (2026-10-14, second version; docs/EP_CURVE.md "Update 2026-10-14 (b)")
+- User's decisions: 3D z-stacks AND biplane, compared (2D kept as a reference); D = 0.002 um^2/s is for a SINGLE LOCUS at a 1 MIN lag (assumed corrected for nucleus motion and drift; if it is for the E-P distance the block is 1.94 s instead of 0.46 s);
+  cell type difference (paper = mouse ES cells) ignored for now. The earlier 2D baseline was MY choice (the repo's default configs and the Vutara preset are 2D "bypass"; z-stack config exists; biplane was "not built yet" and is now built at vector level).
+- Paper checked (Jusuf et al. bioRxiv 2025, v1 main text only; Methods/supplement and the journal version not readable): mESC, Micro-C calibrated on BILD live imaging of 2 loops, "looping probability" = fraction of time looped ABOVE the random-polymer background; NO distances,
+  no nm threshold, no diffusion numbers in what I could read. So nm per unit = 55.4 comes from the user's contact-fraction rule (P(d < 400 nm) = 0.100 for 100 kb pairs, pooled over the 10 validation sims), and block = 0.461 s from the MSD match (exponent 0.50 above one block, 0.57 below).
+- Code: `stage7_validation/ep_polymer.py` (pool of 10 sims x 990 pairs, `calibrate`, `simulate_population`), `ep_acquisition.py` (`Acquisition` kinds 2d / zstack / biplane, `measure`, `kernel_aniso`: errors from Thompson / axial Fisher information, exposure blur, the 0.15 s colour delay, piezo,
+  all with the extrapolated sub-block MSD), `ep_history.py` (P(ON) from the distance HISTORY), `scripts/sweep_ep_polymer.py` (experiments modality, null, wrong, cells, contact, frames, colour, photons, focus, timescale, compare_sources, ms2 -> `$SIMLIVE_DATA/sweeps/ep_polymer_<exp>`),
+  page 🔗 E–P curve part 1 (live polymer + microscope), `tests/test_ep_polymer.py` (5 tests; skipped without the validation sims).
+- FINDINGS: polymer E-P distance decorrelates in 9.2 s but the promoter integrates over ~45 s => P(ON | distance NOW) is nearly flat (contrast 1.36 vs 4.1 for the invented slow process); the curve to fit is P(ON) for a distance HELD, from the distance history (reference 4.19, tau 45 s found). Error budget per axis (nm): localization 6-9 in
+  plane / 27 (z-stack) or 51 (biplane) in z, exposure motion 38-62, sequential colours 0.15 s apart = 120 (the biggest), piezo 12; total ~126-140. At 600 cells x 1 h: contrast 4.77 +- 1.00 (2D), 4.25 +- 0.72 (z-stack), 4.45 +- 0.80 (biplane), truth 3.80 +- 0.54; 95% interval width 5.1 / 3.9 / 3.1 / 2.3;
+  null false positives 3-7%. Need ~10x more cells than with the invented process; frames every <= 10 s (reference falls 4.19 -> 1.78 at 80 s); biplane loses loci when focus is off by > 0.6 um or photons < 0.3x; simultaneous colours cut ~20% of the scatter; the ON state from the MS2 trace is biased high (calls cluster near the enhancer) and unstable.
+- NOT done: wrong-pick filter from the locus's past positions (the spot finder already links with a diffusion model; the scan's wrong picks are random draws); nucleus "steadiness" (simulated nuclei: outline changes 0.29 um rms per 10 s frame, long/short radius 1.6, rotation 4.5 deg and centroid step 0.9 um per frame; awaiting which meaning the user intends);
+  rendering real z-stack / biplane movies and localizing in them (the acquisition model is vector-level); loop-extrusion timing is too fast at 0.46 s per block (loop lifetime 46 s); the library of 100 simulations.
 
 ## Dashboard walk-through findings (2026-10-09)
 - Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,
