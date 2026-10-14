@@ -474,6 +474,9 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - Literature checked against PMC full texts, see docs/PLAN_transcription.md: TFF1 ON 16 min (not 6), burst period 66-86 min, 1.5 transcripts/burst;
   Pol II 2.6 kb/min, 3' dwell 116 s (our default 30 s). Defaults not changed: needs the user's choice of gene.
 
+- Scans page (fixed 2026-10-14): it assumed the tracking-sweep layout (`masks` column + CTC metrics) and crashed on opening because the newest sweep
+  (`ms2_brightness`, from `scripts/sweep_ms2_brightness.py`) has another layout. Now generic: sweep CSVs are read as "varied settings, seed, [masks], run, results"
+  (columns before `run` = settings, after = metrics, `seconds` ignored); tracking sweeps keep their named metrics and the masks switch. Not caused by the UI speed-up.
 - Players (app/player.py): every in-browser movie now shows 'Loading frames… n / N' with a progress bar and a disabled button, then 'Ready: press Play'. Chromatin player: the grey circle is the simulation's confining sphere (the territory, NOT the nucleus); caption and in-image label say so. The territory is ~1-1.5 um across at 50 nm/unit vs a 12 um nucleus.
 
 - Display scaling (2026-10-11): single-cell and all-cells players scale each locus colour once for the whole movie from the cell's own mask region (fastview.movie_limits); before, each frame was scaled to the crop maximum, so cosmic rays and fiducial beads in the crop corners made the real spots look missing (spot < 30% of crop max in 70-92% of frames in 3D runs). Measured locus D = MSD/(4t) at 10 s: library loci 0.0017-0.0019 um2/s (falls to 0.0011 at 100 s, nm_per_unit 50 and block_duration_s 10 are PLACEHOLDERS), toy loci 0.0029; the nucleus itself moves 0.43 um per frame.

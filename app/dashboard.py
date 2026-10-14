@@ -586,22 +586,32 @@ def scan_tab():
     else:
         sname = st.selectbox("Scan", [p.parent.name for p in scans])
         sdf = pd.read_csv(RUNS.parent / "sweeps" / sname / "results.csv")
-        params = [c for c in sdf.columns if c not in {"seed", "masks", "run", *SCAN_METRICS}]
-        n_seeds = sdf.seed.nunique()
-        st.caption(f"{len(sdf) // 2} runs ({n_seeds} seeds per setting). Lines = mean over seeds, bars = ± 1 standard "
+        tracking = all(m in sdf.columns for m in SCAN_METRICS) and "masks" in sdf.columns
+        if tracking:                                    # scripts/sweep.py: tracking metrics, scored on two kinds of masks
+            metrics = dict(SCAN_METRICS)
+            params = [c for c in sdf.columns if c not in {"seed", "masks", "run", *SCAN_METRICS}]
+        else:                                           # any other sweep (e.g. scripts/sweep_ms2_brightness.py): find settings vs results
+            # the sweep scripts write: varied settings, seed, [masks], run, then the results
+            cols = list(sdf.columns)
+            at_run = cols.index("run") if "run" in cols else len(cols)
+            params = [c for c in cols[:at_run] if c not in {"seed", "masks"} and sdf[c].nunique() > 1]
+            metrics = {c: c for c in cols[at_run + 1:] if c != "seconds" and pd.api.types.is_numeric_dtype(sdf[c])}
+        n_seeds = sdf.seed.nunique() if "seed" in sdf else 1
+        n_runs = sdf["run"].nunique() if "run" in sdf else len(sdf)
+        st.caption(f"{n_runs} runs ({n_seeds} seeds per setting). Lines = mean over seeds, bars = ± 1 standard "
                    "deviation across seeds, dots = individual seeds. Differences smaller than the bars are not reliable.")
         c1, c2, c3 = st.columns(3)
-        metric = c1.selectbox("Metric", list(SCAN_METRICS), format_func=SCAN_METRICS.get)
+        metric = c1.selectbox("Metric", list(metrics), format_func=metrics.get)
         masks_sel = c3.radio("Masks", ["auto_masks", "gt_masks", "both"], horizontal=True,
                              format_func={"auto_masks": "Automatic segmentation", "gt_masks": "Ground-truth masks",
-                                          "both": "Both"}.get)
+                                          "both": "Both"}.get) if tracking else "both"
         if not params:
             st.warning("This scan has no varied settings to plot.")
         else:
             xcol = c2.selectbox("X axis", params)
             others = [p for p in params if p != xcol]
             d = sdf if masks_sel == "both" else sdf[sdf.masks == masks_sel]
-            group_cols = others + (["masks"] if masks_sel == "both" else [])
+            group_cols = others + (["masks"] if masks_sel == "both" and tracking else [])
             xs = sorted(d[xcol].unique(), key=lambda v: (isinstance(v, str), v))
             xpos = {v: i for i, v in enumerate(xs)}
             numeric = all(not isinstance(v, str) for v in xs)
@@ -617,13 +627,13 @@ def scan_tab():
                 ax.scatter([v if numeric else xpos[v] for v in g[xcol]], g[metric], s=14, alpha=0.35, color=col)
             if not numeric:
                 ax.set_xticks(range(len(xs))); ax.set_xticklabels([str(v) for v in xs])
-            ax.set_xlabel(xcol); ax.set_ylabel(SCAN_METRICS[metric])
+            ax.set_xlabel(xcol); ax.set_ylabel(metrics[metric])
             ax.grid(alpha=0.3)
             if len(groups) > 1:
                 ax.legend(fontsize=9)
             st.pyplot(fig, width="stretch")
             plt.close(fig)
-            summary = d.groupby(group_cols + [xcol])[list(SCAN_METRICS)].agg(["mean", "std"]).round(3)
+            summary = d.groupby(group_cols + [xcol])[list(metrics)].agg(["mean", "std"]).round(3)
             with st.expander("Table (mean and standard deviation over seeds)"):
                 st.dataframe(summary, width="stretch")
 
