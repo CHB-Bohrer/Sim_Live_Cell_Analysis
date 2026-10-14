@@ -19,10 +19,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", required=True)
     ap.add_argument("--samples", type=int, default=1000, help="posterior samples kept per cell (the paper: 1000)")
-    ap.add_argument("--sampler", default="gibbs_shift", choices=SAMPLERS)
+    ap.add_argument("--sampler", default="auto", choices=("auto",) + tuple(SAMPLERS),
+                    help="auto (default): gibbs_shift, convergence-checked per cell, parallel tempering for the cells that fail")
     a = ap.parse_args()
     run = Path(a.run) if Path(a.run).exists() else DATA_ROOT / "runs" / a.run
-    tag = "" if a.sampler == "gibbs_shift" else f"_{a.sampler}"
+    tag = "" if a.sampler in ("auto", "gibbs_shift") else f"_{a.sampler}"
     sc = deconvolve_run(run, ("truth",), progress=lambda s: print(s, flush=True), n_keep=a.samples, sampler=a.sampler, tag=tag)
     sj = run / "stage6_analysis" / "scores.json"
     if sj.exists():

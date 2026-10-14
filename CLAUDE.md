@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 130 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 131 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -421,11 +421,12 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
     - Flips only get stuck (1/5): the shift moves matter. Block sampler 2/5 (needs more samples; 5x cheaper per sample).
     - **FIX BUILT: `sampler="gibbs_pt"` (parallel tempering, 16 replicas, likelihood strength 1 -> 1e-3, adaptive ladder, `n_replicas`, `beta_min`)**:
       constructed 5/5, sparse run 12/12, dense run 11/12 (the miss: one frame's R-hat 1.056 vs 1.05, limit not moved); chain disagreement 0.09-0.26
-      starts/min (was 0.12-1.39). ~20-30x slower than gibbs_shift, so NOT the pipeline default: `deconvolve_run` still uses gibbs_shift; for dense genes run
-      `scripts/deconvolve_ms2.py --sampler gibbs_pt` (files `_gibbs_pt`; the page's sampler table lists all three) and check with
-      `scripts/check_mcmc.py --samplers gibbs_pt --tag _pt --workers 6`. Headline scores vs the simulation are unchanged by tempering (found 0.83, false 0.20,
+      starts/min (was 0.12-1.39). ~20-30x slower than gibbs_shift. **DEFAULT NOW `sampler="auto"` (user's choice 2026-10-13)**: per cell, 4 gibbs_shift chains + the check; pass ->
+      chain 0; only ESS short -> same sampler with 3x samples; R-hat fails -> gibbs_pt (info["checks"], info["n_tempered"]; dense run 9/12 tempered, sparse 0/12).
+      Force one sampler with `scripts/deconvolve_ms2.py --sampler gibbs_pt|gibbs_shift|chen_block` (files `_<name>`; the page's sampler table lists them) and check
+      with `scripts/check_mcmc.py --samplers gibbs_pt --tag _pt --workers 6`. Headline scores vs the simulation are unchanged by tempering (found 0.83, false 0.20,
       rate r 0.80; per-frame posterior means differ by about as much as the other samplers differ from each other), so earlier totals stand; intervals and
-      single-start timing of dense bursts should come from the tempered chains. Open: make tempering the default for dense genes? fewer replicas?
+      single-start timing of dense bursts should come from the tempered chains. Open: fewer replicas / warmer floor than 1e-3 (not explored).
   - Vutara showcase: loci_demo_seed9_1c649d (sequential, tracked) and loci_demo_seed9_17363e (same movie, simultaneous: 8.6% bleed-through,
     no colour delay; tracking skipped). Error effects for both in docs/ERROR_EFFECTS.md.
 - **BURSTY DEFAULT GENE** (user 2026-10-13: "the transcription trajectory needs to be way more bursty"). Configs + transcription.DEFAULTS +

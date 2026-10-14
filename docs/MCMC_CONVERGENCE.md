@@ -87,6 +87,16 @@ noise is ~30x larger) and hand them down; only the strength-1 replica is sampled
 - Posterior intervals and the start times of dense bursts from the plain sampler were not reliable.
 - The placeholder (sparse) gene is fine with either sampler.
 
+## Default behaviour: check every cell, temper only where needed (`sampler="auto"`, user's choice 2026-10-13)
+`deconvolve_run` / `scripts/deconvolve_ms2.py` / the pipeline now do this per cell: four `gibbs_shift` chains from different starts and the check above;
+if it passes, chain 0 is the result. If only the ESS is short (R-hat fine: the chains agree but are too correlated) the cheap sampler is run again with 3x the
+samples. If an R-hat fails, or that is still not enough, the cell is sampled again with `gibbs_pt`. `info["checks"]` and the page's step 5 list which
+sampler gave which cell. The cheap sampler is kept for the cells where it is right, so a sparse movie costs ~4x one plain run and a dense one about
+the tempered cost for the cells that fail.
+- Measured: dense run 9 of 12 cells tempered (the same 9 that fail the plain check), 3 plain; sparse run 12 of 12 plain. Scores vs truth with the checked
+  default: dense 400.0 found / 389 true, 30-s match 0.830, false per true 0.198, 1-min r 0.798; sparse 5.88 / 5, 1.00, 0.169, 0.758: the same as before.
+- Why not "always temper": the cost (20-30x) buys nothing for the cells where the plain sampler already agrees with itself.
+
 ## Use
 ```
 scripts\run.cmd python scripts\check_mcmc.py --run <run_id> [--workers 6]                          # plain, block, flips-only
@@ -98,6 +108,5 @@ In code: `deconvolve_trace(..., sampler="gibbs_pt", n_replicas=16, beta_min=1e-3
 -> `ChainCheck` (`.converged`, `.reasons`, R-hats, ESS).
 
 ## Open
-- Make `gibbs_pt` the pipeline default for dense genes (20-30x slower)? Today `deconvolve_run` defaults to `gibbs_shift`; run the check, and re-run with tempering if it fails.
 - Fewer replicas / a warmer floor than 1e-3 might do the same job faster; not explored. R, beta_min and the 30% target are settings, not tuned.
 - Cell 9's frame R-hat 1.056 and the ESS limit 400 are borderline-sensitive to the seed; one seed per cell so far.

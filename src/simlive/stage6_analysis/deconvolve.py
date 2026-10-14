@@ -417,7 +417,8 @@ def _sample_block(A, kern, logit_p, sb2, beta, s, J0, n_burn_sweeps, n_keep, w, 
     return counts, Gsum / max(kept, 1), Isum / max(kept, 1), acc / max(total, 1), lp_kept, nst_kept, lp_sweep[: total // per_sweep]
 
 
-SAMPLERS = ("gibbs_shift", "chen_block", "gibbs", "gibbs_pt")   # "gibbs" = flips only (no shifts; for the mixing comparison); "gibbs_pt" = gibbs_shift with parallel tempering
+SAMPLERS = ("gibbs_shift", "chen_block", "gibbs", "gibbs_pt")   # plus "auto" in deconvolve_run*: gibbs_shift, checked, tempering where it fails
+_UNUSED = ("gibbs_shift", "chen_block", "gibbs", "gibbs_pt")   # "gibbs" = flips only (no shifts; for the mixing comparison); "gibbs_pt" = gibbs_shift with parallel tempering
 
 
 def deconvolve_trace(a_cu: np.ndarray, kern: Kernel, frame_s: float, rate_prior_per_s: np.ndarray, sigma_b: float, beta: float,
@@ -543,14 +544,38 @@ def prepare_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", uni
 
 
 def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None, n_keep: int = 1000,
-                          seed: int = 0, progress=None, sampler: str = "gibbs_shift") -> tuple[pd.DataFrame, dict, dict]:
+                          seed: int = 0, progress=None, sampler: str = "auto") -> tuple[pd.DataFrame, dict, dict]:
     """Deconvolve every cell's MS2 trace (table with cell_id, t, and the intensity column). Returns (per-frame table, per-cell samples
-    {cell_id: counts}, info: unit, noise model, kernel)."""
+    {cell_id: counts}, info: unit, noise model, kernel). sampler "auto" (default): every cell is sampled by gibbs_shift with 4 chains from
+    different starts and checked (mcmc_check: R-hat < 1.05, ESS >= 400); the first chain is the result if the check passes, otherwise the cell is
+    sampled again with parallel tempering (gibbs_pt). info["checks"] lists per cell which sampler gave the result and why."""
     traces, kern, dt, prior, sb, beta, unit, col = prepare_traces(tr, cfg, col, unit)
     tau = kern.area_s
-    rows, samples, acc, blocks = [], {}, [], []
+    rows, samples, acc, blocks, checks = [], {}, [], [], []
     for i, (cid, a) in enumerate(traces.items()):
-        res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid, sampler=sampler)
+        if sampler == "auto":
+            from simlive.stage6_analysis.mcmc_check import check_convergence
+
+            chk = check_convergence(a, kern, dt, prior, sb, beta, sampler="gibbs_shift", n_keep=n_keep, seed=seed + cid)
+            used, extended = "gibbs_shift", False
+            if not chk.converged and not any(r.startswith("R-hat") for r in chk.reasons):
+                # the chains agree but are too correlated for 1000 samples: more samples from the cheap sampler, not tempering
+                chk2 = check_convergence(a, kern, dt, prior, sb, beta, sampler="gibbs_shift", n_keep=3 * n_keep, seed=seed + cid)
+                if chk2.converged:
+                    chk, extended = chk2, True
+            if chk.converged:
+                res = dict(chk.chains[0])
+                if extended:
+                    res["counts"] = res["counts"][::3]
+            else:
+                res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid, sampler="gibbs_pt")
+                used = "gibbs_pt"
+            checks.append({"cell_id": cid, "sampler_used": used, "plain_converged": bool(chk.converged), "plain_extended": extended,
+                           "plain_rhat_logpost": chk.rhat_logpost,
+                           "plain_rhat_frames_max": chk.rhat_frames_max, "plain_ess_logpost": chk.ess_logpost, "plain_ess_nstarts": chk.ess_nstarts,
+                           "plain_reasons": "; ".join(chk.reasons)})
+        else:
+            res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid, sampler=sampler)
         c = res["counts"]
         samples[cid] = c
         samples[f"fine_{cid}"] = res["p_fine"].astype(np.float32)          # probability of a start at every fine step
@@ -561,16 +586,20 @@ def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_cor
         for n in range(len(a)):
             rows.append((cid, n, a[n], res["G"][n], c[:, n].mean(), c[:, n].std(), 60.0 * c[:, n].mean() / dt, p_on[n], p_any[n]))
         if progress:
-            progress(f"  cell {cid}: {c.sum(1).mean():.1f} initiations (posterior mean) [{i + 1}/{len(traces)}]")
+            progress(f"  cell {cid}: {c.sum(1).mean():.1f} initiations (posterior mean)"
+                     + (f", sampler {checks[-1]['sampler_used']}" if checks else "") + f" [{i + 1}/{len(traces)}]")
     out = pd.DataFrame(rows, columns=["cell_id", "t", "trace_cu", "fit_cu", "n_init_mean", "n_init_sd", "rate_per_min", "p_on", "p_start"])
     info = {"unit": unit, "sigma_b_cu": sb, "beta_cu": beta, "kernel_dt_s": kern.dt_fine_s, "kernel_s": len(kern.values) * kern.dt_fine_s,
             "kernel_area_s": tau, "column": col, "n_samples": int(n_keep), "sampler": sampler,
             "acceptance": float(np.mean(acc)) if acc else None, "block_s": [b for b in blocks if b is not None] or None,
             "fine_t0_s": -len(kern.values) * kern.dt_fine_s}          # time of the first fine step (starts before the movie are allowed)
+    if checks:
+        info["checks"] = checks
+        info["n_tempered"] = int(sum(c["sampler_used"] == "gibbs_pt" for c in checks))
     return out, samples, info
 
 
-def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int = 1000, sampler: str = "gibbs_shift", tag: str = "") -> dict:
+def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int = 1000, sampler: str = "auto", tag: str = "") -> dict:
     """Deconvolve the MS2 traces of a finished run (the calibrated traces if there are any, bleaching-corrected column if present).
     Writes stage6_analysis/<src>/ms2_deconvolution.csv (+ _samples.npz, _info.json) and returns the scores of the truth source."""
     import json

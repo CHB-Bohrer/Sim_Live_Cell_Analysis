@@ -299,7 +299,7 @@ def _step5(dec, samples, ev, tx, dt, info, run):
     with c2:
         st.dataframe(per.reset_index().round(2), hide_index=True, width="stretch")
     rows = []
-    for tg, lab in (("", "Gibbs + shift moves (default)"), ("_chen_block", "Chen et al.'s adaptive block sampler"),
+    for tg, lab in (("", "Default: Gibbs + shift moves, checked per cell, tempering where the check fails"), ("_chen_block", "Chen et al.'s adaptive block sampler"),
                     ("_gibbs_pt", "Gibbs + shift moves with parallel tempering")):
         fj = run / "stage6_analysis" / "truth" / f"ms2_deconvolution{tg}_info.json"
         if fj.exists():
@@ -307,7 +307,7 @@ def _step5(dec, samples, ev, tx, dt, info, run):
             sc2 = ij.get("scores") or {}
             rows.append({"sampler": lab, "starts found (posterior mean)": sc2.get("n_estimated"), "true starts": sc2.get("n_true"),
                          "true found within 30 s": sc2.get("found"), "false per true": sc2.get("false_per_true"),
-                         "1-min rate r": sc2.get("rate_r_1min"), "acceptance (swap rate for tempering)": ij.get("acceptance") if tg else None,
+                         "1-min rate r": sc2.get("rate_r_1min"), "acceptance (swap rate for tempering)": ij.get("acceptance") if tg else None, "cells tempered": ij.get("n_tempered"),
                          "block (s)": (np.median(ij["block_s"]) if ij.get("block_s") else None)})
     if len(rows) >= 2:
         st.markdown("**The samplers side by side** (same model, same data: they should agree)")
@@ -326,6 +326,15 @@ def _convergence(run):
         st.info("Not run for this movie yet. In a terminal: " + f"`scripts\\run.cmd python scripts\\check_mcmc.py --run {run.name}`" + " (about 10 minutes).")
         return
     df = pd.concat([pd.read_csv(x) for x in (f, f.with_name("mcmc_check_pt.csv")) if x.exists()], ignore_index=True)
+    ij = run / "stage6_analysis" / "truth" / "ms2_deconvolution_info.json"
+    ck = (json.loads(ij.read_text()).get("checks") if ij.exists() else None)
+    if ck:
+        k = pd.DataFrame(ck)
+        st.success(f"The results above (default sampler) were checked as they were made: {int((k.sampler_used == 'gibbs_shift').sum())} of {len(k)} cells "
+                   f"passed with Gibbs + shift moves ({int(k.plain_extended.sum())} of them after drawing 3x more samples), "
+                   f"{int((k.sampler_used == 'gibbs_pt').sum())} were sampled again with parallel tempering.")
+        with st.expander("Which sampler gave each cell, and the check that decided it"):
+            st.dataframe(k.round(3), hide_index=True, width="stretch")
     names = {"gibbs_shift": "Gibbs + shift moves (default)", "chen_block": "Chen et al. block sampler", "gibbs": "Gibbs flips only (no shifts)",
              "gibbs_pt": "Gibbs + shift moves with parallel tempering"}
     g = df.groupby("sampler").agg(cells=("converged", "size"), converged=("converged", "sum"), worst_rhat_logpost=("rhat_logpost", "max"),

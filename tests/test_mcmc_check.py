@@ -106,3 +106,45 @@ def test_burn_in_curve_shrinks_with_burn_in():
               for i, ini in enumerate(("empty", "prior", "crowded", "rise"))]
     bc = burn_in_curve(chains, sweeps=(0, 50, 100), window=100)
     assert len(bc) == 3 and bc[0]["spread_of_chain_means"] >= bc[-1]["spread_of_chain_means"]
+
+
+def _auto_inputs():
+    from simlive.stage6_analysis.deconvolve import kernel_from_config
+
+    cfg = {"acquisition": {"frame_interval_s": 10.0, "n_frames": 60}, "loci": {"transcription": {"params": {}}}}
+    k = kernel_from_config(cfg)
+    rng = np.random.default_rng(4)
+    t = np.arange(60) * 10.0
+    rows = []
+    for cid, starts in ((1, [100.0]), (2, [])):
+        G = np.zeros(60)
+        for s0 in starts:
+            u = t - s0
+            ok = (u > 0) & (u < len(k.values))
+            G[ok] += k.values[u[ok].astype(int)]
+        rows += [(cid, n, G[n] + rng.normal() * 0.05) for n in range(60)]
+    import pandas as pd
+
+    return pd.DataFrame(rows, columns=["cell_id", "t", "intensity_corr"]), cfg
+
+
+def test_auto_sampler_keeps_gibbs_shift_when_the_check_passes_and_tempers_when_it_fails(monkeypatch):
+    from simlive.stage6_analysis import mcmc_check
+    from simlive.stage6_analysis.deconvolve import deconvolve_run_traces
+
+    tr, cfg = _auto_inputs()
+    _, _, info = deconvolve_run_traces(tr, cfg, unit=1.0, n_keep=400)
+    assert info["sampler"] == "auto" and info["n_tempered"] == 0
+    assert all(c["sampler_used"] == "gibbs_shift" and c["plain_converged"] for c in info["checks"])
+
+    real = mcmc_check.check_convergence
+
+    def failing(*a, **k):
+        r = real(*a, **k)
+        r.converged, r.reasons = False, ["forced for the test"]
+        return r
+
+    monkeypatch.setattr(mcmc_check, "check_convergence", failing)
+    dec, samples, info = deconvolve_run_traces(tr, cfg, unit=1.0, n_keep=60)
+    assert info["n_tempered"] == 2 and all(c["sampler_used"] == "gibbs_pt" for c in info["checks"])
+    assert dec.n_init_mean.sum() > 0 and samples[1].shape == (60, 60)
