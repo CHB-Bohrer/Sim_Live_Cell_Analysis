@@ -436,7 +436,7 @@ for v in ("auto_masks", "gt_masks"):
 
 # Only the open page is computed. st.tabs ran the code of all 14 tabs on every rerun (~20 s with warm caches, ~40 s cold), and a full
 # rerun jumped back to the first tab; the page choice lives in session state, so it also survives reruns.
-PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'ms2': '🧮 MS2 → Pol II', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
+PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'ms2': '🧮 MS2 → Pol II', 'ep': '🔗 E–P curve', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
 if st.session_state.get("page") not in PAGES.values():
     st.session_state["page"] = PAGES["movie"]
 page = st.segmented_control("Page", list(PAGES.values()), key="page", label_visibility="collapsed") or PAGES["movie"]
@@ -758,3 +758,12 @@ def ms2_frag():
 
 if page == PAGES["ms2"]:
     ms2_frag()
+
+
+if page == PAGES["ep"]:
+    import ep_tab  # noqa: E402  (app/ep_tab.py)
+
+    @st.fragment
+    def ep_frag():
+        ep_tab.render(st)
+    ep_frag()

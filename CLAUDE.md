@@ -109,7 +109,7 @@ branch, not main": that was a misreading of the user's intent.)
 - Dashboard: `scripts\dashboard.cmd` (port 8501, localhost only). The USER runs it themselves in their terminal; test
   on port 8502 (`.claude/launch.json` config `dashboard-test`) and never kill processes by name pattern (it killed the
   user's server once). Pages (navigation bar, only the open one runs): Movie, Metrics, Trajectories, Scans, Cells, Spot finding, Images, Calibration, Stage & fiducials,
-  Transcription, MS2 → Pol II, Probes, Library, Chromatin, Config. DARK theme since 2026-10-12 (user asked for a darker UI): colours in
+  Transcription, MS2 → Pol II, E–P curve, Probes, Library, Chromatin, Config. DARK theme since 2026-10-12 (user asked for a darker UI): colours in
   `.streamlit/config.toml` + `app/style.PALETTE` (matplotlib figures dark too); hard-coded plot colours were remapped to light ones, so use
   light line colours (#e5e7eb, #2dd4bf, #60a5fa...) in new plots, never near-black.
 
@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 131 CPU + 6 GPU tests at 2026-10-13. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 137 CPU + 6 GPU tests at 2026-10-14. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -453,6 +453,24 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   errors, every candidate's distance to the truth, intensity vs true photons, MS2 trace (promoter vs own track vs truth), run scores, 3b photobleaching (true /
   estimated / naive curves, raw vs corrected), method comparison. Run summary has "Image errors at a glance" (errors.BRIEF: one line per source).
 - Gotchas: scripts that call `map_cells` with workers need `if __name__ == "__main__":` (Windows spawn). Keep CLAUDE.md UTF-8 (one stray cp1252 byte was fixed).
+
+## E-P distance -> P(burst ON) curve under measurement errors (stage 7b, built 2026-10-14; docs/EP_CURVE.md)
+- User's decisions (2026-10-14): readout = P(burst ON); fit the WHOLE curve (not one threshold) with much more data; enhancer with a longer working distance (hill, d_half 400 nm, n = 4,
+  fold 12 on k_on; the old sharp contact was 150 nm); contact fraction 0.1 (exact: the stand-in distance process is solved so that P(d < 400 nm) = 0.100).
+- Code: `stage7_validation/ep_curve.py` (`EPSetup`, `simulate_population`, `Measurement` / `measure_distance`, `kernel_matrix`, `estimate_on` (MS2 trace -> deconvolution -> burst rule),
+  `fit_curve` / `analyse` / `reference_curve`), `scripts/sweep_ep_curve.py` (experiments ladder, sigma, shift, outliers, cells, null, dynamics, contact, frames, ms2, rules ->
+  `$SIMLIVE_DATA/sweeps/ep_curve_<exp>/results.csv`, ~60 min for all), page 🔗 E–P curve (`app/ep_tab.py`), `tests/test_ep_curve.py` (6 tests).
+- Method: errors-in-variables fit of p_far (1 + (F-1) / (1 + (d/d_half)^4)) integrating out the true distance (measurement kernel + Richardson-Lucy prior), cell bootstrap intervals,
+  effect size = contrast P(ON at 150 nm)/P(ON at 1000 nm) (F alone is not identified at the null); reference = same fit to true distance + true ON of 4000 cells (contrast 4.07; 6.7 if the
+  distance were fixed: the promoter's response delay flattens it).
+- Findings (placeholders: invented distance dynamics, 57 nm per axis, 2D, 5% missed, 2% wrong picks): null false positive 3.3% (60 populations); 2D projection of the distance costs
+  ~35% of the effect if ignored (2.7 vs 4.1) and is fully corrected by the EIV fit; localization precision matters only above ~200 nm; colour shift up to 100 nm harmless; missed frames
+  harmless to 60%; WRONG PICKS are the bad one (5% -> -6%, 10% -> -13%, 20% -> -24%; not corrected in the fit); cells: contrast sd 0.77 (50) -> 0.055 (3200), d_half scatter 11% -> 2%
+  with a +3.6% offset; contact fraction 0.03 is biased low (2.7 vs 3.5). MS2 -> ON: the balanced-accuracy burst rule has 8% false positives next to real bursts, costs ~10% of the
+  contrast, and the simple (sensitivity, false-positive) attenuation correction FAILS for it (9.2 vs 4.07); conservative rules (2,2), (3,3), (8,6) are nearly unbiased uncorrected
+  and the correction is then acceptable (4.3-4.9). MS2 noise of 2 x one Pol II with 20 s frames halves the contrast. The cell-bootstrap intervals are ~25% too narrow (coverage 85-90%).
+- NOT done: wrong-pick mixture in the fit; other coupling shapes; the real polymer-library distances (needs MSD calibration); linking sigma to photons / the movie's spot finder; a convergence
+  check inside `estimate_on` (single chain); the real MS2 noise relative to one Pol II (user must supply).
 
 ## Dashboard walk-through findings (2026-10-09)
 - Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,

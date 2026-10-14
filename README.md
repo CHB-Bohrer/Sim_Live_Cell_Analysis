@@ -178,6 +178,8 @@ into the moments Pol II started on the gene (with uncertainty) and into bursts. 
 units, what one Pol II looks like, noise, one cell against the truth, and the whole run. The burst rule's settings can be changed live.
 `scripts\run.cmd python scripts\deconvolve_ms2.py --run <run>`; details and measured accuracy in [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md). Has the sampler converged? Four chains per cell, R-hat and effective sample size: `scripts\run.cmd python scripts\check_mcmc.py --run <run>`, results (the plain sampler does not converge on the dense gene; the default now checks every cell and uses parallel tempering where it fails) in [docs/MCMC_CONVERGENCE.md](docs/MCMC_CONVERGENCE.md).
 
+**Promoter-enhancer distance and P(burst ON) (🔗 E–P curve page).** How well can the whole curve of P(promoter in a burst) against the E-P distance be recovered, with localization error, the 2D projection, colour shift, wrong picks, a noisy MS2 trace and a limited number of cells? `scripts\run.cmd python scripts\sweep_ep_curve.py --exps sigma shift outliers cells null --workers 12` (the page also simulates one population live); method and measured numbers in [docs/EP_CURVE.md](docs/EP_CURVE.md).
+
 **Instruments.** `--set instrument=vutara_vxl` (or the sidebar's *Microscope* choice) switches from the generic placeholder optics to a
 Bruker Vutara VXL in 2D mode:
 - **Optics:** 60x / 1.3 NA silicone objective, ~100 nm pixels, Orca Fusion BT (QE 95%), flat top-hat illumination.
