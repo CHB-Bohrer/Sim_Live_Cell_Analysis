@@ -30,13 +30,15 @@ class TrackastraTracker:
 
     def __init__(self, model: str = "general_2d", mode: str = "greedy", device: str | None = None, **_):
         self.model_name, self.mode, self.device = model, mode, device
+        self._model = None                      # loaded on first use and kept: a run tracks twice (ground-truth and automatic masks)
 
     def track(self, images: np.ndarray, masks: np.ndarray) -> TrackResult:
         from trackastra.model import Trackastra
         from trackastra.tracking import graph_to_ctc
 
-        model = Trackastra.from_pretrained(self.model_name, device=self.device or "automatic")
-        graph, _ = model.track(images, masks, mode=self.mode)
+        if self._model is None:
+            self._model = Trackastra.from_pretrained(self.model_name, device=self.device or "automatic")
+        graph, _ = self._model.track(images, masks, mode=self.mode)
         table, tracked = graph_to_ctc(graph, masks, check=False)
         return TrackResult(np.asarray(tracked).astype(np.uint16), table)
 

@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 import style
+from simlive.calibration.polymer import default_scale
 from simlive.io.runs import DATA_ROOT
 from simlive.stage1_chromatin import library as L
 
@@ -240,7 +241,8 @@ def locus_overrides(library: str) -> list[str]:
         df = L.list_library(library)
         n = int(df.n_monomers.min()) if len(df) else 10_000
         mid = (n // 2) // 10 * 10
-        pos, nm, blk = [mid + 50, mid - 50], 50, 10
+        nm, blk, _ = default_scale()
+        pos = [mid + 50, mid - 50]
     return [f"loci.positions_kb=[{pos[0]}, {pos[1]}]", f"loci.nm_per_unit={nm:g}", f"loci.block_duration_s={blk:g}"]
 
 

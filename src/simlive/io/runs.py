@@ -9,6 +9,7 @@ import platform
 import subprocess
 import sys
 from datetime import datetime
+from functools import lru_cache
 from importlib import metadata
 from pathlib import Path
 
@@ -74,15 +75,27 @@ def stage_dir(run: Path, name: str) -> Path:
     return d
 
 
+def _git(*args: str) -> str:
+    try:
+        return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True).stdout
+    except OSError:
+        return ""
+
+
+@lru_cache(maxsize=1)
+def git_state() -> dict:
+    """Commit of the code that is running, whether the working tree differed from it (tracked or untracked files) and a hash of that
+    difference, so a run made from uncommitted code can be told apart from a clean one. Taken once per process (at the first call)."""
+    commit = _git("rev-parse", "HEAD").strip()
+    dirty = bool(_git("status", "--porcelain").strip())
+    diff_hash = hashlib.sha256(_git("diff", "HEAD").encode("utf-8", "replace")).hexdigest() if dirty else ""
+    return {"git_commit": commit, "git_dirty": dirty, "git_diff_sha256": diff_hash}
+
+
 def write_provenance(d: Path, cfg: dict, seed: int) -> None:
-    """params.yaml (resolved config), seed.txt, provenance.json (commit, versions, time)."""
+    """params.yaml (resolved config), seed.txt, provenance.json (commit + dirty flag, versions, time)."""
     (d / "params.yaml").write_text(yaml.safe_dump(copy.deepcopy(cfg), sort_keys=False))
     (d / "seed.txt").write_text(str(seed))
-    try:
-        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True,
-                                text=True).stdout.strip()
-    except OSError:
-        commit = ""
     versions = {}
     for pkg in ("numpy", "scipy", "torch", "trackastra", "traccuracy", "scikit-image", "openmm"):
         try:
@@ -90,5 +103,5 @@ def write_provenance(d: Path, cfg: dict, seed: int) -> None:
         except metadata.PackageNotFoundError:
             pass
     (d / "provenance.json").write_text(json.dumps({
-        "git_commit": commit, "time": datetime.now().isoformat(timespec="seconds"),
+        **git_state(), "time": datetime.now().isoformat(timespec="seconds"),
         "python": sys.version.split()[0], "platform": platform.platform(), "versions": versions}, indent=2))

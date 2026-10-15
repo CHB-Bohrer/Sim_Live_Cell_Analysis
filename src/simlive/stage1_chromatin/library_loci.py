@@ -5,14 +5,14 @@ Each cell gets its own simulation (`library.assign_simulations`: random draw fro
 coordinates are mapped into the nucleus frame (so they rotate / deform / move with the nucleus, as in `toy_loci`):
 
   - space: polymer coordinates are converted to TRUE distances with one calibration number, `nm_per_unit` (nm per polymer
-    length unit); the region keeps whatever physical size that gives (no rescaling to the nucleus). The polymer gets a random
+    length unit; both scale numbers come from `loci.calibration` = a file in configs/calibration/, see simlive.calibration.polymer, unless the
+    config gives `nm_per_unit` / `block_duration_s` itself); the region keeps whatever physical size that gives (no rescaling to the nucleus). The polymer gets a random
     rotation per cell and is placed at a random territory centre inside the nucleus (fixed in the nucleus frame, drawn per
     cell). A position whose loci would leave the nucleus (0.7 of its radius) in any frame is rejected and a new one is
     drawn; an error is raised only if no position works.
-    (x, y) is the 2D image-plane position; z is kept as `zn` for later 3D work. `nm_per_unit` is a PLACEHOLDER until the
-    MSD / compaction calibration exists;
-  - time: one saved block = `block_duration_s` seconds. PLACEHOLDER until the MSD calibration exists (the user will supply
-    measured MSD); frame k reads polymer time `offset + k * frame_interval_s / block_duration_s` (blocks, interpolated), where
+    (x, y) is the 2D image-plane position; z is kept as `zn` for later 3D work. `nm_per_unit` is only as good as the calibration's
+    assumptions (contact fraction and working distance);
+  - time: one saved block = `block_duration_s` seconds (from the MSD calibration: an ASSUMED single-locus D until the user supplies a measured MSD); frame k reads polymer time `offset + k * frame_interval_s / block_duration_s` (blocks, interpolated), where
     `offset` is random per cell so cells do not all start at the same polymer state.
 
 Output has the same columns as `toy_loci` (xn, yn, zn in units of the nuclear radius) plus `sim_id` and `zn`: t, cell_id, locus_id, xn, yn, zn, y_um, x_um, sim_id.
@@ -25,23 +25,12 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from simlive.calibration.polymer import scale_from_config
 from simlive.stage1_chromatin import library as lib
+from simlive.stage1_chromatin.rotation import random_rotation
 from simlive.stage1_chromatin.toy_loci import R_MAX
 from simlive.stage1_chromatin.transcription import pingpong
 from simlive.stage2_cells.motion import nucleus_to_lab_um
-
-
-def _random_rotation(rng: np.random.Generator) -> np.ndarray:
-    """Uniformly random 3x3 rotation matrix (from a normalised Gaussian quaternion). Not scipy's Rotation: its `.apply` loads a
-    second OpenMP runtime (libiomp5md + libomp), after which `import torch` in the tracking step fails with WinError 127 on shm.dll
-    (every library-source movie crashed at tracking until this was replaced). The same holds for ANY numpy matmul (`@`, dot):
-    numpy here is MKL-linked and the first BLAS call loads those runtimes, so the code that runs before the tracker must use
-    elementwise arithmetic (the loci are applied with a broadcast sum for that reason)."""
-    q = rng.normal(size=4)
-    w, x, y, z = q / np.linalg.norm(q)
-    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
 def _territory_centre(p: np.ndarray, rng: np.random.Generator, cell_id, tries: int = 1000) -> np.ndarray:
@@ -64,7 +53,7 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
     locus 1 (enhancer) at full polymer-block resolution, starting at the cell's first frame (for the transcription model)."""
     lc = cfg["loci"]
     positions = list(lc["positions_kb"])
-    nm_per_unit, block_s = float(lc["nm_per_unit"]), float(lc["block_duration_s"])
+    nm_per_unit, block_s, scale_source = scale_from_config(lc)
     dt = float(cfg["acquisition"]["frame_interval_s"])
     cell_ids = sorted(cells.cell_id.unique())
     assigned = lib.assign_simulations(lc["library"], cell_ids, rng, replace=bool(lc.get("replace", False)),
@@ -88,7 +77,7 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
         w = (tau - i0)[:, None, None]
         pos = (1 - w) * ext[i0] + w * ext[i0 + 1]                               # linear interpolation between blocks
         nuc_um = float(g.radius_um.min())                                       # smallest nuclear radius of this cell
-        p = (pos[..., None, :] * _random_rotation(rng)).sum(-1) * (nm_per_unit / 1000.0 / nuc_um)   # nuclear radii; no BLAS call here
+        p = (pos[..., None, :] * random_rotation(rng)).sum(-1) * (nm_per_unit / 1000.0 / nuc_um)   # nuclear radii; no BLAS call here
         p += _territory_centre(p, rng, cid)
         for i, r in enumerate(g.itertuples()):
             y, x = nucleus_to_lab_um(r, p[i, :, 0], p[i, :, 1])
@@ -101,4 +90,5 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
     df = pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "xn", "yn", "zn", "y_um", "x_um", "sim_id", "z_um"])
     if not three_d:
         df = df.drop(columns="z_um")
+    df.attrs["scale"] = {"nm_per_unit": nm_per_unit, "block_duration_s": block_s, "source": scale_source}
     return (df, traces) if return_traces else df

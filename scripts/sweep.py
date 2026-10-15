@@ -51,7 +51,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     combos = list(itertools.product(*axes.values())) if axes else [()]
     seeds = parse_seeds(a.seeds)
-    total, rows, n = len(combos) * len(seeds), [], 0
+    total, rows, failures, n = len(combos) * len(seeds), [], [], 0
+    (out_dir / "failures.csv").unlink(missing_ok=True)       # a re-run starts without the old run's failures
     for combo in combos:
         for seed in seeds:
             n += 1
@@ -66,7 +67,10 @@ def main():
                     rows.append(row)
                 print(f"[{n}/{total}] {dict(zip(axes, combo))} seed={seed}  {time.time() - t0:.0f}s", flush=True)
             except Exception:
-                print(f"[{n}/{total}] FAILED {dict(zip(axes, combo))} seed={seed}\n{traceback.format_exc()[-800:]}", flush=True)
+                tb = traceback.format_exc()
+                failures.append({**dict(zip(axes, combo)), "seed": seed, "error": tb.strip().splitlines()[-1], "traceback": tb[-2000:]})
+                pd.DataFrame(failures).to_csv(out_dir / "failures.csv", index=False)
+                print(f"[{n}/{total}] FAILED {dict(zip(axes, combo))} seed={seed}\n{tb[-800:]}", flush=True)
             pd.DataFrame(rows).to_csv(out_dir / "results.csv", index=False)
     df = pd.DataFrame(rows)
     (out_dir / "sweep.yaml").write_text(yaml.safe_dump({"grid": axes, "seeds": seeds, "fixed": a.set}))
@@ -80,6 +84,8 @@ def main():
         print(f"{dict(zip(keys, k if isinstance(k, tuple) else (k,)))}  " + "  ".join(parts))
     summ.to_csv(out_dir / "summary.csv")
     print(f"\nSaved {out_dir / 'results.csv'} and summary.csv")
+    if failures:        # the summary above is over the runs that finished: say so and exit non-zero so a script / CI notices
+        raise SystemExit(f"{len(failures)} of {total} runs FAILED (see {out_dir / 'failures.csv'}); the summary above leaves them out")
 
 
 if __name__ == "__main__":

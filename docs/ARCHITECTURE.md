@@ -41,9 +41,9 @@ flowchart TD
         direction TB
         S2["<b>Cells</b> (stage 2)<br/>Cells drift, bump into each other,<br/>change shape and sometimes divide.<br/>Each cell keeps its own ID number."]:::built
         LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>many saved polymer simulations of a<br/>chromatin region (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
-        S1["<b>Loci in each cell</b> (stage 1)<br/>Promoter + enhancer per cell: toy motion,<br/>or one saved polymer simulation per cell<br/>(wired, not yet run with a real library).<br/>Units nm / s are still placeholders."]:::standin
+        S1["<b>Loci in each cell</b> (stage 1)<br/>Promoter + enhancer per cell: toy motion,<br/>or one saved polymer simulation per cell<br/>(wired, not yet run with a real library).<br/>nm / s come from the calibration above (assumed)."]:::standin
         S1B["<b>Probes and transcription</b> (stage 1b, 1c)<br/>Probe binding sets each locus' brightness;<br/>promoter bursts driven by the enhancer<br/>distance, Pol II carrying MS2 loops"]:::built
-        CAL["<b>Calibration of the motion</b><br/>Make the simulated motion match<br/>your measured MSD, in nm and seconds"]:::planned
+        CAL["<b>Calibration of the motion</b> (configs/calibration)<br/>nm and seconds per polymer unit from ASSUMED<br/>contact fraction and locus D;<br/>replace with your measured MSD"]:::standin
         S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images (2D or 3D z-stacks)<br/>with 24 switchable image-error sources (drift, chromatic shift,<br/>blur, haze, per-cell bleaching, uneven light, cross-talk,<br/>camera noise...). Cells can walk in and out of the field.<br/>Nucleus + MS2 in one colour, each locus in its own."]:::built
         ICAL["<b>Calibration images</b> (stage 3)<br/>Dark frames, flat-field slide, bead slide<br/>of the same instrument"]:::built
         TRUTH[("<b>ANSWER KEY</b><br/>true cell outlines and ID numbers<br/>true position of every locus")]:::built
@@ -64,7 +64,7 @@ flowchart TD
         direction TB
         S7A["<b>Were the right cells followed?</b> (stage 7a)<br/>Standard tracking scores<br/>plus a count of identity switches"]:::built
         S7E["<b>What does each image error do?</b> (stage 7)<br/>Re-render the movie with one error at a time,<br/>analyse with and without its correction"]:::built
-        S7B["<b>Did tracking mistakes change the loci results?</b> (stage 7b)<br/>Compare locus results from<br/>true cell IDs vs the tracker's IDs"]:::planned
+        S7B["<b>Did tracking mistakes change the loci results?</b> (stage 7b)<br/>Locus results scored through<br/>the tracker's IDs vs the true IDs"]:::built
     end
 
     CAL -.-> S1
@@ -137,7 +137,7 @@ flowchart LR
     TR --> A2["Same locus analysis"]:::standin
     A1 --> R1["Result using true IDs"]:::built
     A2 --> R2["Result using tracker IDs"]:::built
-    R1 --> CMP{{"<b>Difference = the damage<br/>caused by tracking mistakes</b>"}}:::planned
+    R1 --> CMP{{"<b>Difference = the damage<br/>caused by tracking mistakes</b><br/>(scores.json: propagation)"}}:::built
     R2 --> CMP
     R1 --> ACC{{"<b>How accurate is the analysis itself?</b><br/>estimated vs true locus positions"}}:::built
 
@@ -225,7 +225,7 @@ flowchart LR
     subgraph P2["Next: make it real (needs your data)"]
         direction TB
         n1["Run the 100-simulation library<br/>(GPU, your go-ahead)"]:::planned
-        n2["Calibrate to your measured<br/>MSD (nm and seconds)"]:::planned
+        n2["Calibrate to your measured<br/>MSD (nm and seconds): the file exists,<br/>its inputs are still assumed"]:::standin
         n3["Measured values: MS2 brightness R,<br/>error sizes, real movie"]:::planned
         n4["Choose spots with all three signals;<br/>separate homologous copies"]:::planned
         n5["Vutara biplane 3D (two planes<br/>600 nm apart, 50:50 split)"]:::planned
@@ -233,7 +233,7 @@ flowchart LR
     subgraph P3["Then: the real question"]
         direction TB
         m1["Plug in YOUR analysis"]:::planned
-        m2["Measure how tracking mistakes<br/>change the locus results (7b)"]:::planned
+        m2["Measure how tracking mistakes<br/>change the locus results (7b): built,<br/>stitching broken tracks is not"]:::built
     end
     subgraph P4["Finally: trust it"]
         direction TB

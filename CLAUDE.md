@@ -25,7 +25,8 @@ branch, not main": that was a misreading of the user's intent.)
 - Imaging modality (widefield / spinning-disk / lattice light sheet), 2D vs 3D z-stacks, pixel size, NA, wavelengths,
   frame rate, exposure, movie length and cell count must all be easy-to-vary config parameters.
 - The user's analysis will quantify each locus's position through time; not written yet (stage 6).
-- MSD calibration targets (D, alpha, length/time scales) not yet given.
+- MSD calibration targets: the user has given only an ASSUMPTION (single locus D = 0.002 um^2/s at a 1 min lag; 100 kb pair within 400 nm 10% of the time); these set
+  `configs/calibration/default.json` (see "Polymer calibration" below). Still wanted: a measured MSD (D, alpha, length/time scales).
 - Still needed from the user: real frame interval, typical cell speed, cell density, whether cells divide, and ideally
   a real movie with some tracked cells to check how well the simulation matches reality.
 
@@ -122,7 +123,7 @@ identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, d
 STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per nucleus doing confined diffusion in
 the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/spots.py` + `localize.py` / `localize3d.py` (placeholder for the user's
 analysis, but now a measured one: see "Spot finding" below). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
-Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (PLACEHOLDER 50; NOT rescaled to the nucleus) and placed at a random territory centre per cell (re-drawn until all loci stay inside the nucleus in every frame), `block_duration_s` is a PLACEHOLDER) is unit-tested with a fake library on CPU but NOT yet run end-to-end with a real library or on the GPU machine.
+Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (from `loci.calibration`, see "Polymer calibration"; NOT rescaled to the nucleus) and placed at a random territory centre per cell (re-drawn until all loci stay inside the nucleus in every frame), `block_duration_s` likewise) is unit-tested with a fake library on CPU and was run end-to-end (tracked, 2026-10-15) on the 4-simulation `smoke` library; NO real 100-simulation library exists yet.
 Dashboard redesign + library monitor (2026-10-08, built on the cloud container with fake data, NOT yet seen on the Windows machine
 with a real GPU run): `.streamlit/config.toml` + `app/style.py` (one theme, CSS, matplotlib defaults), new 🗂 Library tab
 (`app/library_tab.py`): live monitor (refreshes every 5 s) of `<library>/status.json` (written by `run_chromatin_library.py`) and the
@@ -160,9 +161,8 @@ numbered steps (sampling, distance, coupling, promoter, Pol II kymograph, MS2 si
 hand-off to a movie + sidebar checkbox). Checked in a browser on the cloud container with a FAKE library only; the pipeline was run through stage 4
 segmentation (trackastra not installed there). LITERATURE NUMBERS ARE UNVERIFIED search-summary values (primary papers blocked from the build machine); all
 MS2 brightness, coupling strength, initiation rate and nm_per_unit / block_duration_s are placeholders.
-NOT built: MSD calibration (real nm/s), surrogate distance process for long movies, 3D tracking / 3D cell isolation, the real stage 5 (link
-locus tracks to cells beyond isolation), the user's stage 6 analysis, stage 7b (propagation of tracking errors into
-locus results; e.g. run stage 6 on 'truth' vs 'tracked_*' identity sources and compare), Ultrack/TrackMate adapters,
+NOT built: MSD calibration from MEASURED data (an assumed-D calibration exists, see below), surrogate distance process for long movies, 3D tracking / 3D cell isolation, stage 5 beyond
+isolation (stitching the locus results of broken / switched tracks into one cell), the user's stage 6 analysis, 7b for 3D (7b exists for the 2D locus results), Ultrack/TrackMate adapters,
 density and frame-interval scans.
 
 ## Single-cell isolation + per-cell analysis (stage 5a / 6)
@@ -251,7 +251,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 142 CPU + 6 GPU tests at 2026-10-14. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 161 CPU + 6 GPU tests at 2026-10-15. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -512,3 +512,29 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - Players (app/player.py): every in-browser movie now shows 'Loading frames… n / N' with a progress bar and a disabled button, then 'Ready: press Play'. Chromatin player: the grey circle is the simulation's confining sphere (the territory, NOT the nucleus); caption and in-image label say so. The territory is ~1-1.5 um across at 50 nm/unit vs a 12 um nucleus.
 
 - Display scaling (2026-10-11): single-cell and all-cells players scale each locus colour once for the whole movie from the cell's own mask region (fastview.movie_limits); before, each frame was scaled to the crop maximum, so cosmic rays and fiducial beads in the crop corners made the real spots look missing (spot < 30% of crop max in 70-92% of frames in 3D runs). Measured locus D = MSD/(4t) at 10 s: library loci 0.0017-0.0019 um2/s (falls to 0.0011 at 100 s, nm_per_unit 50 and block_duration_s 10 are PLACEHOLDERS), toy loci 0.0029; the nucleus itself moves 0.43 um per frame.
+
+## Polymer calibration, stage 7b and code clean-up (2026-10-15; user said "do all of them" after a code review)
+- **Polymer calibration is now ONE shared module** (`src/simlive/calibration/polymer.py`; it was inside `stage7_validation/ep_polymer.py`, which re-exports it): `PolymerPool`, `load_pool`, `calibrate`,
+  `Calibration` (JSON save/load, now also stores working distance, contact fraction, separation and the simulations used), `scale_from_config`, `default_scale`. `scripts/calibrate_chromatin.py` writes
+  `configs/calibration/default.json` (committed: 55.42 nm per unit, 0.461 s per block, MSD exponent 0.57 below one block). `configs/loci_library.yaml` now has `loci.calibration: default`;
+  explicit `loci.nm_per_unit` / `loci.block_duration_s` (config or `--set`) still override that one number; no `calibration` key = the config's own numbers (old placeholders). The dashboard (Library and
+  Transcription tabs) starts from the calibration's numbers; RESTART the dashboard (helper modules do not hot-reload).
+- **Its inputs are ASSUMPTIONS, not measurements** (the user's 2026-10-14 rules: 100 kb pair within 400 nm 10% of the time; single-locus D = 0.002 um^2/s at 1 min). **CONSEQUENCE found while wiring it:** one saved block is 0.46 s, so a
+  2000-production-block simulation (`configs/chromatin/library_*.yaml`) covers only ~15 min of movie, while the default movies are 20-40 min and a transcription study needs hours (bursts ~3/h). Longer movies repeat the
+  trajectory back and forth (warning, correlations beyond 15 min are artificial) and loop-extrusion timing is fast (loop lifetime ~46 s). **OPEN DECISION for the user before starting the 100-simulation library (~18 h GPU, 240 GB free):**
+  how many production blocks per simulation (e.g. 10-20x more), region size, and whether the surrogate distance process (PLAN_transcription step 5) should take over for long movies. Not launched on purpose.
+- **Stage 7b built** (`stage7_validation/propagation.py`, called from `pipelines/tracking_demo._propagate`; tests `tests/test_identity_propagation.py`): for tracked identity sources the 2D locus detections are mapped back to the
+  TRUE cell through `identity.match_ids` (largest overlap per frame) and scored with the usual `score_localization` plus locus-distance error, share attributed to a true cell, and share on "mixed" tracks (a tracker label that
+  stood for two true cells). In `scores.json` as `propagation.<source>.{uncalibrated,calibrated}`; per-detection errors in `stage6_analysis/<src>/localization_errors_via_tracks[_cal].csv`. Check: with perfect tracking it equals the
+  truth-source scores exactly (smoke library, seed 5: rms 0.1187 um both). NOT done: a dashboard view of it, 3D, stitching broken/switched tracks into one cell (the rest of stage 5), a movie with real ID switches (unit tests only).
+- **Refactor, verified identical:** `_isolate_and_analyze` (110 lines) is now small functions (`_locate_2d`, `_propagate`, `_trace_ms2`, `_locate_3d`, `_correct_with_fiducials`, one `_write_locus_results` for every positions / distances /
+  errors CSV). Same config before and after (2D with probes + MS2, and 3D without beads) gave byte-identical files; only memory readings differ. **Bug found by it and fixed:** the fiducial-bead step needed
+  `stage4_segtrack/auto_segmentation.tif`, so every 3D run with beads and `tracking.skip: true` crashed (no scores.json); it now falls back to the true labels.
+- Small fixes: `simlive.stage1_chromatin.rotation.random_rotation` replaces two copies; Trackastra loads its model once per tracker (was twice per run); `provenance.json` now has `git_dirty` + `git_diff_sha256` (state at the first
+  call in the process); `scripts/sweep.py` writes `failures.csv` and exits non-zero if any run failed (it used to print and carry on); the dead `_stored` is gone; `pyproject.toml` explains why `dependencies` is empty (environment.yml
+  pins; do not let pip re-resolve); `docs/ci/syntax.yml` is a ready GitHub Actions workflow that only byte-compiles every file (the tests need the conda env + GPU, so they would NOT be in CI). It is NOT active: the push was refused because the GitHub token lacks the `workflow` scope; to enable it run `gh auth refresh -s workflow` and copy it to `.github/workflows/`. New tests: identity / propagation, calibration, segmentation, tracker registry, provenance.
+- Gotchas: (1) `python` in the Bash tool is the Microsoft Store shim: run Python only through `scripts\run.cmd`. (2) Do not edit source while a run is going: the process pool re-imports modules from disk. (3) Python `write_text`
+  on this Windows machine writes CRLF (the repo's index is LF, git normalises; fine) and a `"\r"` inside a normal string literal in an edit script silently becomes a carriage return (it garbled a README edit once; reverted before commit): use the
+  Edit tool or raw strings for docs. (4) skimage warns that `remove_small_objects(min_size)` is deprecated (removal in skimage 2.0): `segment.threshold_watershed` will need `max_size`.
+- Still open from the review (not done): coverage of `trackers`/Cellpose worker is only the registry (Trackastra and Cellpose run only in full pipeline runs); dashboard has no automated tests; nine broad `except Exception`
+  blocks remain (calibration fit, isolate, bleach, two dashboard tabs); CLAUDE.md is long and partly a log (condense when convenient); Scans/Cells pages do not show `propagation`.

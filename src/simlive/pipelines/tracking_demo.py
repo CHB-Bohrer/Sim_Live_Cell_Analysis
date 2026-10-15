@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -33,6 +34,7 @@ from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances
 from simlive.stage6_analysis.ms2 import ms2_trace, ms2_truth, score_ms2
 from simlive.stage4_segtrack.trackers import make_tracker
 from simlive.stage7_validation.identity import identity_summary, match_ids
+from simlive.stage7_validation.propagation import VARIANT_OF_SOURCE, propagation_scores
 from simlive.stage7_validation.tracking_metrics import ctc_ground_truth, evaluate, write_ctc
 
 VARIANTS = ("gt_masks", "auto_masks")
@@ -43,7 +45,7 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     seed = int(cfg["seed"])
     run = Path(out_root) / run_id_for(cfg)
     s2, s3, s4, s7 = (run / n for n in ("stage2_cells", "stage3_microscopy", "stage4_segtrack", "stage7_validation"))
-    ss = np.random.SeedSequence(seed).spawn(8)  # independent streams: motion, rendering, loci, (unused), probes, transcription, cell heights (z), calibration
+    ss = np.random.SeedSequence(seed).spawn(8)  # independent streams: motion, rendering, loci, (unused), probes, transcription, cell heights (z), fiducial beads
     progress(f"Run folder: {run}")
 
     progress("Stage 2: simulating cell motion and shape")
@@ -178,8 +180,144 @@ def nominal_axial_sigma(cfg: dict) -> dict:
     return {f"locus{k}": axial_sigma_um(cfg["optics"], wl) for k, wl in enumerate(cfg["loci"]["wavelengths_nm"][:int(cfg["loci"]["n_loci"])])}
 
 
+EMPTY_DIST = ["cell_id", "t", "dist_um"]
+
+
+@dataclass
+class _Analysis:
+    """What every locus-analysis step of `_isolate_and_analyze` needs: the run, the instrument numbers and the (identity-independent) truth."""
+    cfg: dict
+    run: Path
+    progress: Callable[[str], None]
+    cal_dir: Path | None
+    px_um: float
+    truth: pd.DataFrame
+    zinfo: dict | None
+    ana: dict
+    iso: dict
+
+    @property
+    def s3(self) -> Path:
+        return self.run / "stage3_microscopy"
+
+    @property
+    def n_workers(self):
+        return self.iso.get("n_workers")
+
+    @property
+    def n_loci(self) -> int:
+        return int(self.cfg["loci"]["n_loci"])
+
+    @property
+    def apply_cal(self) -> bool:
+        return self.cal_dir is not None and bool((self.cfg.get("calibration") or {}).get("apply", True))
+
+    @property
+    def has_transcription(self) -> bool:
+        return (self.run / "stage1_chromatin" / "transcription.csv").exists()
+
+
+def _write_locus_results(A: _Analysis, out6: Path, suffix: str, pos: pd.DataFrame, dist_fn, score_fn=None) -> dict | None:
+    """Write loci_positions<suffix>.csv and locus_distances<suffix>.csv (and localization_errors<suffix>.csv when `score_fn` is given);
+    returns the scores. Suffixes: '' (2D), '_cal' (calibration applied), '_3d', '_3d_cal'."""
+    pos.to_csv(out6 / f"loci_positions{suffix}.csv", index=False)
+    (dist_fn(pos, A.px_um) if len(pos) else pd.DataFrame(columns=EMPTY_DIST)).to_csv(out6 / f"locus_distances{suffix}.csv", index=False)
+    if score_fn is None:
+        return None
+    err, sc = score_fn(pos, A.truth, A.px_um)
+    err.to_csv(out6 / f"localization_errors{suffix}.csv", index=False)
+    return sc
+
+
+def _locate_2d(A: _Analysis, src: str, out5: Path, out6: Path, scores: dict) -> None:
+    """2D spot finding on every isolated cell, then (identity = truth) the score against the true loci, or (tracked IDs) stage 7b."""
+    pos = map_cells(localize_loci, out5, n_workers=A.n_workers, px_um=A.px_um, n_loci=A.n_loci, **A.ana)
+    sc = _write_locus_results(A, out6, "", pos, locus_distances, score_localization if src == "truth" else None)
+    if sc is not None:
+        scores[src] = sc
+    posc = None
+    if A.apply_cal:           # the same analysis on dark/flat/hot-pixel-corrected crops with the chromatic shift removed
+        A.progress("Stage 6: locating loci again with the calibration applied")
+        posc = map_cells(localize_loci, out5, n_workers=A.n_workers, px_um=A.px_um, n_loci=A.n_loci, calib=str(A.cal_dir), **A.ana)
+        scc = _write_locus_results(A, out6, "_cal", posc, locus_distances, score_localization if src == "truth" else None)
+        if scc is not None:
+            scores["truth_calibrated"] = scc
+    if src != "truth":
+        _propagate(A, src, out6, pos, posc, scores)
+
+
+def _propagate(A: _Analysis, src: str, out6: Path, pos: pd.DataFrame, posc: pd.DataFrame | None, scores: dict) -> None:
+    """Stage 7b: score the locus detections of a tracked identity source through the tracker's IDs (see stage7_validation/propagation.py)."""
+    mf = A.run / "stage7_validation" / f"id_matches_{VARIANT_OF_SOURCE.get(src, '')}.csv"
+    if not mf.exists():
+        return
+    matches = pd.read_csv(mf)
+    out = scores.setdefault("propagation", {}).setdefault(src, {})
+    for key, p, stem in (("uncalibrated", pos, ""), ("calibrated", posc, "_cal")):
+        if p is None:
+            continue
+        err, sc = propagation_scores(p, matches, A.truth, A.px_um)
+        err.to_csv(out6 / f"localization_errors_via_tracks{stem}.csv", index=False)
+        out[key] = sc
+
+
+def _trace_ms2(A: _Analysis, src: str, out5: Path, out6: Path, scores: dict) -> None:
+    """The MS2 spot in the nuclear channel: Chen et al. 2025 intensity trace per cell (with and without the calibration)."""
+    A.progress("Stage 6: finding the MS2 spot and its intensity trace in every cell")
+    ms2_t = ms2_truth(A.run) if src == "truth" else None
+    kw = {k: v for k, v in A.ana.items() if k != "dilate_px"}
+    for tag, cdir in (("", None),) + ((("_cal", str(A.cal_dir)),) if A.apply_cal else ()):
+        tr = map_cells(ms2_trace, out5, n_workers=A.n_workers, calib=cdir, **kw)
+        tr.to_csv(out6 / f"ms2_traces{tag}.csv", index=False)
+        if ms2_t is not None and len(tr):
+            scores["ms2" + ("_calibrated" if tag else "")] = score_ms2(tr, ms2_t, A.px_um)[1]
+
+
+def _locate_3d(A: _Analysis, src: str, out5: Path, out6: Path, n_cells: int, scores: dict) -> pd.DataFrame:
+    """z-stacks: locate the loci in 3D from the full stacks (the 2D result uses the projections). Returns the 3D positions to correct with the beads
+    (calibrated if available)."""
+    A.progress(f"Stage 6: locating loci in 3D in {n_cells} cells")
+    stacks = {f"locus{k}": str(A.s3 / f"locus{k}_zstack.tif") for k in range(A.n_loci)}
+    ana3 = {**A.ana, "axial_sigma_um": nominal_axial_sigma(A.cfg), "px_um": A.px_um}   # nominal axial PSF (median_z: auto); px for z scaling
+    z = A.zinfo["z_positions_um"]
+    score3 = score_localization_3d if src == "truth" and "z_um" in A.truth.columns else None
+    pos3 = map_cells(localize_loci_3d, out5, n_workers=A.n_workers, stacks=stacks, z_um=z, n_loci=A.n_loci, **ana3)
+    sc = _write_locus_results(A, out6, "_3d", pos3, locus_distances_3d, score3)
+    if sc is not None:
+        scores["truth_3d"] = sc
+    if not A.apply_cal:
+        return pos3
+    pos3c = map_cells(localize_loci_3d, out5, n_workers=A.n_workers, stacks=stacks, z_um=z, n_loci=A.n_loci, calib=str(A.cal_dir), **ana3)
+    scc = _write_locus_results(A, out6, "_3d_cal", pos3c, locus_distances_3d, score3)
+    if scc is not None:
+        scores["truth_3d_calibrated"] = scc
+    return pos3c
+
+
+def _correct_with_fiducials(A: _Analysis, out6: Path, basepos: pd.DataFrame, scores: dict) -> None:
+    """Track the fiducial beads (and the piezo log) and score the corrected heights (identity = truth, z-stacks with beads only)."""
+    A.progress("Stage 6: tracking the fiducial beads and correcting the heights")
+    s3, z = A.s3, A.zinfo["z_positions_um"]
+    seg = A.run / "stage4_segtrack" / "auto_segmentation.tif"
+    if not seg.exists():                 # tracking.skip: no automatic segmentation was made, the true nuclei say where the beads are NOT
+        seg = s3 / "labels.tif"
+    shifts, _ = track_fiducials(s3 / "nucleus_zstack.tif", z, seg)
+    shifts.to_csv(out6 / "fiducial_shifts.csv", index=False)
+    variants = {"uncorrected": basepos, "fiducial beads": correct_with_beads(basepos, shifts)}
+    pt = s3 / "piezo_truth.csv"
+    if pt.exists():
+        log = pd.read_csv(pt)
+        variants["piezo position log"] = correct_with_plane_positions(basepos, log, z)
+        zlog = {int(t): g.sort_values("k").readout_um.to_numpy() for t, g in log.groupby("t")}
+        shifts_l, _ = track_fiducials(s3 / "nucleus_zstack.tif", z, seg, z_per_frame=zlog)
+        variants["beads + piezo log"] = correct_with_beads(variants["piezo position log"], shifts_l)
+    tab = score_variants(variants, pd.read_csv(A.run / "stage1_chromatin" / "loci_truth.csv"), A.px_um)
+    tab.to_csv(out6 / "fiducial_corrections.csv", index=False)
+    scores["fiducial_corrections"] = tab.to_dict("records")
+
+
 def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = None) -> None:
-    """Stage 5 (isolate each cell) + stage 6 (placeholder per-cell locus analysis), for each identity source."""
+    """Stage 5 (isolate each cell) + stage 6 (per-cell locus analysis) + stage 7b (tracked IDs vs the truth), for each identity source."""
     iso = cfg.get("isolation", {})
     sources = iso.get("sources", ["truth", "tracked_auto_masks"])
     s3 = run / "stage3_microscopy"
@@ -192,93 +330,31 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
     truth = photons_in_frame(truth, pd.read_csv(itp) if itp.exists() else None)     # true photons per spot and frame, to score intensities
     ej = s3 / "imaging_errors.json"
     zinfo = json.loads(ej.read_text()).get("z_stack") if ej.exists() else None
-    ana = cfg.get("locus_analysis", {})
+    A = _Analysis(cfg, run, progress, cal_dir, px_um, truth, zinfo, cfg.get("locus_analysis", {}), iso)
     scores = {}
     for src in sources:
         d, f = ID_SOURCES[src]
         progress(f"Stage 5: isolating cells (identity source: {src})")
         t0 = time.time()
         out5 = stage_dir(run, "stage5_cells") / src
-        summ = isolate_cells(images, run / d / f, out5, margin=iso.get("margin", 0.3), n_workers=iso.get("n_workers"),
+        summ = isolate_cells(images, run / d / f, out5, margin=iso.get("margin", 0.3), n_workers=A.n_workers,
                              min_frames=iso.get("min_frames", 1))
         progress(f"Stage 6: locating loci in {len(summ)} cells in parallel ({time.time() - t0:.0f}s so far)")
         out6 = stage_dir(run, "stage6_analysis") / src
         out6.mkdir(parents=True, exist_ok=True)
-        pos = map_cells(localize_loci, out5, n_workers=iso.get("n_workers"), px_um=px_um,
-                        n_loci=cfg["loci"]["n_loci"], **ana)
-        pos.to_csv(out6 / "loci_positions.csv", index=False)
-        dist = locus_distances(pos, px_um) if len(pos) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])
-        dist.to_csv(out6 / "locus_distances.csv", index=False)
-        if src == "truth":  # IDs are the true cell IDs, so detections can be scored against the true loci
-            err, sc = score_localization(pos, truth, px_um)
-            err.to_csv(out6 / "localization_errors.csv", index=False)
-            scores[src] = sc
-        apply_cal = cal_dir is not None and (cfg.get("calibration") or {}).get("apply", True)
-        if apply_cal:           # the same analysis on dark/flat/hot-pixel-corrected crops with the chromatic shift removed
-            progress("Stage 6: locating loci again with the calibration applied")
-            posc = map_cells(localize_loci, out5, n_workers=iso.get("n_workers"), px_um=px_um, n_loci=cfg["loci"]["n_loci"],
-                             calib=str(cal_dir), **ana)
-            posc.to_csv(out6 / "loci_positions_cal.csv", index=False)
-            (locus_distances(posc, px_um) if len(posc) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
-                out6 / "locus_distances_cal.csv", index=False)
-            if src == "truth":
-                errc, scc = score_localization(posc, truth, px_um)
-                errc.to_csv(out6 / "localization_errors_cal.csv", index=False)
-                scores["truth_calibrated"] = scc
-        if (run / "stage1_chromatin" / "transcription.csv").exists():   # the MS2 spot in the nuclear channel: Chen et al. 2025 trace per cell
-            progress("Stage 6: finding the MS2 spot and its intensity trace in every cell")
-            ms2_t = ms2_truth(run) if src == "truth" else None
-            for tag, cdir in (("", None),) + ((("_cal", str(cal_dir)),) if apply_cal else ()):
-                tr = map_cells(ms2_trace, out5, n_workers=iso.get("n_workers"), calib=cdir, **{k: v for k, v in ana.items() if k != "dilate_px"})
-                tr.to_csv(out6 / f"ms2_traces{tag}.csv", index=False)
-                if ms2_t is not None and len(tr):
-                    scores["ms2" + ("_calibrated" if tag else "")] = score_ms2(tr, ms2_t, px_um)[1]
-        if zinfo is not None:   # z-stacks: locate the loci in 3D from the full stacks (the 2D result above uses the projections)
-            progress(f"Stage 6: locating loci in 3D in {len(summ)} cells")
-            stacks = {f"locus{k}": str(s3 / f"locus{k}_zstack.tif") for k in range(int(cfg["loci"]["n_loci"]))}
-            ana3 = {**ana, "axial_sigma_um": nominal_axial_sigma(cfg), "px_um": px_um}   # nominal axial PSF (median_z: auto); px for z scaling
-            pos3 = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
-                             n_loci=cfg["loci"]["n_loci"], **ana3)
-            pos3.to_csv(out6 / "loci_positions_3d.csv", index=False)
-            (locus_distances_3d(pos3, px_um) if len(pos3) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
-                out6 / "locus_distances_3d.csv", index=False)
-            if src == "truth" and "z_um" in truth.columns:
-                err3, sc3 = score_localization_3d(pos3, truth, px_um)
-                err3.to_csv(out6 / "localization_errors_3d.csv", index=False)
-                scores["truth_3d"] = sc3
-            if apply_cal:
-                pos3c = map_cells(localize_loci_3d, out5, n_workers=iso.get("n_workers"), stacks=stacks, z_um=zinfo["z_positions_um"],
-                                  n_loci=cfg["loci"]["n_loci"], calib=str(cal_dir), **ana3)
-                pos3c.to_csv(out6 / "loci_positions_3d_cal.csv", index=False)
-                (locus_distances_3d(pos3c, px_um) if len(pos3c) else pd.DataFrame(columns=["cell_id", "t", "dist_um"])).to_csv(
-                    out6 / "locus_distances_3d_cal.csv", index=False)
-                if src == "truth" and "z_um" in truth.columns:
-                    err3c, sc3c = score_localization_3d(pos3c, truth, px_um)
-                    err3c.to_csv(out6 / "localization_errors_3d_cal.csv", index=False)
-                    scores["truth_3d_calibrated"] = sc3c
+        _locate_2d(A, src, out5, out6, scores)
+        if A.has_transcription:
+            _trace_ms2(A, src, out5, out6, scores)
+        if zinfo is not None:
+            basepos = _locate_3d(A, src, out5, out6, len(summ), scores)
             if src == "truth" and (s3 / "fiducials.csv").exists() and "z_um" in truth.columns:
-                progress("Stage 6: tracking the fiducial beads and correcting the heights")
-                seg = run / "stage4_segtrack" / "auto_segmentation.tif"
-                shifts, _ = track_fiducials(s3 / "nucleus_zstack.tif", zinfo["z_positions_um"], seg)
-                shifts.to_csv(out6 / "fiducial_shifts.csv", index=False)
-                basepos = pos3c if apply_cal else pos3
-                variants = {"uncorrected": basepos, "fiducial beads": correct_with_beads(basepos, shifts)}
-                pt = s3 / "piezo_truth.csv"
-                if pt.exists():
-                    log = pd.read_csv(pt)
-                    variants["piezo position log"] = correct_with_plane_positions(basepos, log, zinfo["z_positions_um"])
-                    zlog = {int(t): g.sort_values("k").readout_um.to_numpy() for t, g in log.groupby("t")}
-                    shifts_l, _ = track_fiducials(s3 / "nucleus_zstack.tif", zinfo["z_positions_um"], seg, z_per_frame=zlog)
-                    variants["beads + piezo log"] = correct_with_beads(variants["piezo position log"], shifts_l)
-                tab = score_variants(variants, pd.read_csv(run / "stage1_chromatin" / "loci_truth.csv"), px_um)
-                tab.to_csv(out6 / "fiducial_corrections.csv", index=False)
-                scores["fiducial_corrections"] = tab.to_dict("records")
+                _correct_with_fiducials(A, out6, basepos, scores)
         scores.setdefault(src, {})["peak_worker_memory_mb"] = summ.attrs.get("peak_worker_mb")
     progress("Stage 6: photobleaching correction (background removed first; added as intensity_corr)")
     from simlive.stage6_analysis.bleach import bleach_correct_run
 
     scores["bleaching"] = bleach_correct_run(run, tuple(sources))
-    if (run / "stage1_chromatin" / "transcription.csv").exists():      # MS2 trace -> Pol II initiation events and bursts (Chen et al. 2025)
+    if A.has_transcription:      # MS2 trace -> Pol II initiation events and bursts (Chen et al. 2025)
         from simlive.stage6_analysis.deconvolve import deconvolve_run
 
         progress("Stage 6: deconvolving the MS2 traces into Pol II initiation events (Chen et al. 2025)")
@@ -291,10 +367,3 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
     (run / "stage6_analysis" / "scores.json").write_text(json.dumps(scores, indent=2, default=str))
     write_provenance(run / "stage5_cells", cfg, int(cfg["seed"]))
     write_provenance(run / "stage6_analysis", cfg, int(cfg["seed"]))
-
-
-def _stored(img: np.ndarray, cfg: dict) -> np.ndarray:
-    """Cameras output integers: with image_dtype: uint16 store counts as 16-bit (half the memory/disk of float32)."""
-    if cfg.get("image_dtype") == "uint16":
-        return np.rint(img).clip(0, 65535).astype(np.uint16)
-    return img

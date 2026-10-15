@@ -7,6 +7,8 @@ name = "simlive"
 version = "0.1.0"
 description = "Simulation-based validation of live-cell chromatin locus analysis"
 requires-python = ">=3.12,<3.13"
+# Deliberately empty: the exact, tested versions live in environment.yml + environments/ (conda + pip lock files, see environments/PINNED.md).
+# Listing packages here would let `pip install -e .` re-resolve them (never upgrade packages in the `simlive` env).
 dependencies = []
 
 [tool.setuptools.packages.find]

@@ -57,8 +57,10 @@ loci:                       # source: library = saved polychrom simulations (nee
   source: library
   library: loop_extrusion          # folder under $SIMLIVE_DATA/chromatin/
   positions_kb: [5050, 4950]     # genomic position (kb, multiples of 10) of locus 0 = promoter and locus 1 = enhancer (100 kb apart)
-  block_duration_s: 10           # PLACEHOLDER seconds per saved block until the MSD calibration exists
-  nm_per_unit: 50                # PLACEHOLDER nm per polymer length unit (the calibration); region keeps its true size
+  calibration: default           # polymer units -> nm and seconds: configs/calibration/default.json (scripts/calibrate_chromatin.py; ASSUMED contact fraction 0.1 at 400 nm
+                                 # for a 100 kb pair and single-locus D = 0.002 um^2/s at 1 min). Remove this line to use the two numbers below instead.
+  # block_duration_s: 10         # seconds per saved block: if given, overrides the calibration's (the old PLACEHOLDER was 10)
+  # nm_per_unit: 50              # nm per polymer length unit: if given, overrides the calibration's (the old PLACEHOLDER was 50); region keeps its true size
   # Which simulation does each cell get?  Default: a seeded random draw from every finished simulation in the library.
   sim_ids: null                  # or a list, e.g. [loop_extrusion_seed1003, loop_extrusion_seed1010]: only draw from these
   pin: null                      # or a map {cell_id: sim_id}, e.g. {1: loop_extrusion_seed1003}: force that cell onto that simulation

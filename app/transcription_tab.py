@@ -13,6 +13,7 @@ import streamlit as st
 
 import library_tab
 import style
+from simlive.calibration.polymer import default_scale
 from simlive.stage1_chromatin import library as L
 from simlive.stage1_chromatin import transcription as T
 from simlive.stage3_microscopy.render import _spot_photons
@@ -84,10 +85,11 @@ def _distance_source(dt: float, minutes: float):
         prom = int(c[2].number_input(f"Promoter position (kb, 0-{n_kb - 1})", 0, n_kb - 1, mid + 50, 10, key=f"tx_prom_{n_kb}"))
         enh = int(c[3].number_input(f"Enhancer position (kb, 0-{n_kb - 1})", 0, n_kb - 1, mid - 50, 10, key=f"tx_enh_{n_kb}"))
         c = st.columns(3)
-        nm = float(c[0].number_input("nm per polymer unit", 1.0, 1000.0, 50.0, 5.0, key="tx_nm",
-                                     help="PLACEHOLDER until the MSD calibration exists."))
-        blk = float(c[1].number_input("Seconds per saved block", 0.01, 3600.0, 10.0, 1.0, key="tx_blk",
-                                      help="PLACEHOLDER until the MSD calibration exists."))
+        nm0, blk0, scale_src = default_scale()
+        nm = float(c[0].number_input("nm per polymer unit", 1.0, 1000.0, round(nm0, 1), 5.0, key="tx_nm",
+                                     help=f"Default from {scale_src}: assumes a 100 kb pair is within 400 nm 10% of the time."))
+        blk = float(c[1].number_input("Seconds per saved block", 0.01, 3600.0, round(blk0, 3), 0.1, key="tx_blk", format="%.3f",
+                                      help=f"Default from {scale_src}: assumes a single locus has D = 0.002 um^2/s at a 1 min lag."))
         c[2].metric("Genomic separation", f"{abs(prom - enh)} kb")
         st.session_state["tx_movie_loci"] = {"library": lib, "positions_kb": [prom, enh], "nm_per_unit": nm, "block_duration_s": blk}   # read by the sidebar
         traj, beads = L.locus_trajectories(df[df.sim_id == sim].path.iloc[0], [prom, enh])

@@ -1,0 +1,14 @@
+# Cheap check on every push: every Python file must at least compile (Python 3.12).
+# The tests themselves are NOT run here: they need the pinned conda env (numba, Cellpose, Trackastra, OpenMM, ...) and, for `pytest -m gpu`, the GPU.
+# Run them locally with scripts\run_tests.cmd.
+name: syntax
+on: [push, pull_request]
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m compileall -q src app scripts tests

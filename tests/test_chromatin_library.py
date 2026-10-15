@@ -89,7 +89,7 @@ def test_pool_restricts_and_pin_forces(fake_library):
 
 
 def test_random_rotation_is_a_proper_rotation():
-    from simlive.stage1_chromatin.library_loci import _random_rotation
+    from simlive.stage1_chromatin.rotation import random_rotation as _random_rotation
     rng = np.random.default_rng(3)
     for _ in range(20):
         R = _random_rotation(rng)

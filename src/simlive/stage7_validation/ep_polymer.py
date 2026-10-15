@@ -13,107 +13,14 @@ Both are approximations; see docs/EP_CURVE.md.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from pathlib import Path
+from dataclasses import replace
 
 import numpy as np
 
-from simlive.io.runs import DATA_ROOT
+from simlive.calibration.polymer import (LAGS, SIMS, VAL_DIR, Calibration, PolymerPool, calibrate, load_pool)  # noqa: F401  (re-exported: the polymer scale lives in simlive.calibration.polymer)
 from simlive.stage1_chromatin import transcription as tx
+from simlive.stage1_chromatin.rotation import random_rotation
 from simlive.stage7_validation import ep_curve as ep
-
-VAL_DIR = DATA_ROOT / "chromatin" / "validation"
-SIMS = ("val_polymer_seed1", "val_polymer_seed2", "val_lef_free_seed1", "val_lef_free_seed2", "val_lef_leaky_seed1", "val_lef_leaky_seed2",
-        "val_lef_ctcf_seed1", "val_lef_ctcf_seed2", "val_lef_loops_seed1", "val_lef_loops_seed2")
-LAGS = np.array([1, 2, 5, 10, 20, 50, 100, 200, 400], float)        # blocks
-
-
-@dataclass
-class PolymerPool:
-    rel: np.ndarray               # (sims, blocks, pairs, 3) float32: vector between the two monomers, polymer units
-    msd_single: np.ndarray        # pooled single-locus MSD at LAGS (units^2, 3D, centre of mass of the tracked monomers removed)
-    msd_rel: np.ndarray           # pooled MSD of the relative vector (the E-P separation vector)
-    names: tuple
-    sep_kb: float
-
-    @property
-    def n_blocks(self) -> int:
-        return self.rel.shape[1]
-
-    def distances(self) -> np.ndarray:
-        return np.linalg.norm(self.rel, axis=-1)
-
-    def autocorr_time_blocks(self) -> float:
-        """Blocks until the autocorrelation of the E-P distance falls to 1/e (averaged over pairs and simulations)."""
-        d = self.distances()
-        z = d - d.mean(1, keepdims=True)
-        ac = [float((z[:, :-l] * z[:, l:]).mean() / (z * z).mean()) for l in range(1, 400)]
-        ac = np.array(ac)
-        i = int(np.argmax(ac < 1 / np.e))
-        return float(i + 1) if ac.min() < 1 / np.e else float("nan")
-
-
-def load_pool(sep_kb: float = 100.0, sims: tuple = SIMS, root: Path = VAL_DIR) -> PolymerPool:
-    rels, ms, mr = [], [], []
-    for s in sims:
-        d = root / s
-        tp = np.load(d / "tracked_positions.npy").astype(np.float32)                 # (T, beads, 3)
-        beads = np.load(d / "tracked_beads.npy")
-        step = int(round(sep_kb / float(beads[1] - beads[0])))
-        x = tp - tp.mean(1, keepdims=True)
-        rel = (tp[:, step:] - tp[:, :-step]).astype(np.float32)
-        rels.append(rel)
-        dv = x[:, step:] - x[:, :-step]
-        ms.append([float(((x[l:] - x[:-l]) ** 2).sum(2).mean()) for l in LAGS.astype(int)])
-        mr.append([float(((dv[l:] - dv[:-l]) ** 2).sum(2).mean()) for l in LAGS.astype(int)])
-    return PolymerPool(np.stack(rels), np.mean(ms, 0), np.mean(mr, 0), tuple(sims), sep_kb)
-
-
-@dataclass(frozen=True)
-class Calibration:
-    nm_per_unit: float
-    block_s: float
-    alpha: float                  # exponent of the single-locus MSD below one block (extrapolation)
-    msd1_nm2: float               # single-locus MSD at one block (nm^2, 3D)
-    msd_nm2: tuple                # single-locus MSD at LAGS (nm^2)
-    msd_rel_nm2: tuple
-    lag_s: float
-    D_um2_s: float
-    applies_to: str
-
-    def msd_single_s(self, tau_s):
-        """Single-locus 3D MSD (nm^2) after tau_s seconds: the simulated table above one block, the power law with the small-lag exponent below it (the simulation
-        stores nothing between blocks)."""
-        tau = np.asarray(tau_s, float)
-        L = tau / self.block_s
-        tab = np.interp(np.log(np.maximum(L, 1e-9)), np.log(LAGS), np.log(self.msd_nm2))
-        small = self.msd1_nm2 * np.maximum(L, 0.0) ** self.alpha
-        return np.where(L < 1.0, small, np.exp(np.where(L > LAGS[-1], np.log(self.msd_nm2[-1]), tab)))
-
-
-def calibrate(pool: PolymerPool, working_nm: float = 400.0, contact_fraction: float = 0.10, D_um2_s: float = 0.002, lag_s: float = 60.0,
-              applies_to: str = "locus", nm_per_unit: float | None = None, block_s: float | None = None) -> Calibration:
-    d = pool.distances()
-    nm = float(nm_per_unit) if nm_per_unit else float(working_nm / np.quantile(d, contact_fraction))
-    msd = np.array(pool.msd_single if applies_to == "locus" else pool.msd_rel, float)
-    alpha = float(np.polyfit(np.log(LAGS[:2]), np.log(msd[:2]), 1)[0])
-    target = 6.0 * D_um2_s * lag_s * 1e6 / nm ** 2                                  # units^2
-    if block_s is None:
-        if target < msd[0]:
-            L = (target / msd[0]) ** (1.0 / alpha)
-        else:
-            L = float(np.exp(np.interp(np.log(target), np.log(msd), np.log(LAGS))))
-        block_s = lag_s / L
-    return Calibration(nm, float(block_s), alpha, float(np.array(pool.msd_single)[0]) * nm ** 2, tuple(np.array(pool.msd_single) * nm ** 2),
-                       tuple(np.array(pool.msd_rel) * nm ** 2), lag_s, D_um2_s, applies_to)
-
-
-def _rotation(rng: np.random.Generator) -> np.ndarray:
-    q = rng.normal(size=4)
-    w, x, y, z = q / np.linalg.norm(q)
-    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
 def cell_vectors(pool: PolymerPool, calib: Calibration, n_blocks: int, rng: np.random.Generator) -> np.ndarray:
@@ -121,7 +28,7 @@ def cell_vectors(pool: PolymerPool, calib: Calibration, n_blocks: int, rng: np.r
     out, n = [], 0
     while n < n_blocks:
         s, p = int(rng.integers(pool.rel.shape[0])), int(rng.integers(pool.rel.shape[2]))
-        seg = pool.rel[s, :, p, :].astype(np.float64) @ _rotation(rng).T
+        seg = pool.rel[s, :, p, :].astype(np.float64) @ random_rotation(rng).T
         out.append(seg * calib.nm_per_unit)
         n += len(seg)
     return np.concatenate(out)[:n_blocks]

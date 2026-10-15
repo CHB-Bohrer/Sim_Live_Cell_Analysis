@@ -22,6 +22,7 @@ Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env fr
 | **Chromatin: run one polymer simulation** (GPU) | `scripts\run.cmd python scripts\run_chromatin.py --config configs\chromatin\smoke_test.yaml --seed 1 --library smoke` (~1 min; browse it in the dashboard's **🧬 Chromatin** tab) |
 | Chromatin: re-check against known Mirny-lab results | `scripts\run.cmd python scripts\validate_chromatin.py all` (about 80 min on the GPU) -> [docs/chromatin_validation.md](docs/chromatin_validation.md) |
 | Chromatin: build a library of simulations (resumable) | `scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\library_loop_extrusion.yaml --library loop_extrusion --n 100` (default 10 Mb region, ~11 min each, ~18 h of GPU for 100; change `polymer.n_monomers` for another region size) |
+| Polymer calibration (nm and seconds per polymer unit) from the saved validation simulations | `scripts\run.cmd python scripts\calibrate_chromatin.py` (writes `configs\calibration\default.json`) |
 | Compare settings over several seeds | `scripts\run.cmd python scripts\sweep.py --name mytest --seeds 1-5 --grid tracking.mode=greedy,ilp` (results in `%SIMLIVE_DATA%\sweeps\mytest\`) |
 | View the tracked cells from that run | `scripts\run.cmd python scripts\view_run.py %SIMLIVE_DATA%\runs\<run_id> --labels stage4_segtrack\tracked_auto_masks.tif` |
 | Make a fake demo movie (old, locus-only toy) | `scripts\run.cmd python scripts\make_demo_run.py` |
@@ -80,7 +81,9 @@ tests/       pytest (GPU tests marked `gpu`)
 
 
 ### Chromatin library in the movie
-`scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml` uses saved polymer simulations for the loci (needs a finished library named in `loci.library`; `block_duration_s` is a placeholder until MSD calibration).
+`scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml` uses saved polymer simulations for the loci (needs a finished library named in `loci.library`). Its nm-per-unit and seconds-per-block come from `configs/calibration/default.json` (`loci.calibration: default`; remake it with `scripts\run.cmd python scripts\calibrate_chromatin.py`). That calibration rests on ASSUMED numbers (a 100 kb pair is within 400 nm 10% of the time; a single locus has D = 0.002 um^2/s at a 1 min lag) until you supply a measured MSD. One saved block is then 0.46 s, so a 2000-block simulation covers only ~15 min of movie (a longer movie repeats the trajectory back and forth, with a warning). `loci.nm_per_unit` / `loci.block_duration_s` still override it.
+
+Stage 7b: when the movie has tracked identity sources, `stage6_analysis/scores.json` has a `propagation` entry per source: the locus results scored through the tracker's cell IDs (detection rate, position and distance errors, share of detections on tracks that mix two true cells).
 
 
 ### Watching a library run, and choosing simulations (🗂 Library tab)
