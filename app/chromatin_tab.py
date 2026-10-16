@@ -149,14 +149,73 @@ def render(st):
     plt.close(fig)
     lef_f = d / "lef_positions.npy"
     if lef_f.exists():
-        lp = np.load(lef_f, mmap_mode="r")
-        st.subheader("Loop-extruding factors over time")
-        fig, ax = plt.subplots(figsize=(14, 3.6))
-        for k in range(min(lp.shape[1], 60)):
-            ax.plot(np.arange(lp.shape[0]), lp[:, k, 0], lw=0.4, color="tab:blue")
-            ax.plot(np.arange(lp.shape[0]), lp[:, k, 1], lw=0.4, color="tab:red")
-        ax.set_xlabel("block"); ax.set_ylabel("monomer index (kb)")
-        ax.set_title("Left (blue) and right (red) leg of 60 LEFs: loops grow, stall at boundaries, unbind and reload")
-        fig.tight_layout()
-        st.pyplot(fig, width="stretch")
-        plt.close(fig)
+        _loop_extruders(st, d, N)
+
+
+@_st.cache_resource(show_spinner=False, max_entries=3)
+def _coverage(sim_dir: str, n_monomers: int, bin_kb: int):
+    lp = np.load(Path(sim_dir) / "lef_positions.npy")
+    return A.loop_coverage(lp, n_monomers, bin_kb), lp.shape
+
+
+def _loop_extruders(st, d: Path, N: int) -> None:
+    """Loop-extruding factors over time, in two readable views: (1) the whole simulation as a picture of how many loops cover each genomic
+    position over time (hundreds of overlapping lines were unreadable); (2) a zoom into a genomic window and a stretch of time that draws each
+    factor's loop as a shaded band between its two legs."""
+    from simlive.calibration.polymer import default_scale
+
+    st.subheader("Loop-extruding factors over time")
+    lp = np.load(d / "lef_positions.npy", mmap_mode="r")
+    T, K, _ = lp.shape
+    _, block_s, _ = default_scale()
+    ctcf = pd.read_csv(d / "ctcf_sites.csv").pos.to_numpy() if (d / "ctcf_sites.csv").exists() else np.array([])
+    st.caption(f"{K} factors over {T:,} blocks (about {T * block_s / 60:.0f} min with the default calibration of {block_s:.2f} s per block, an assumption). "
+               "**Top:** how many loops cover each genomic position (colour) at each time, the whole simulation at a glance: bright horizontal "
+               "bands are positions that are often inside a loop, dark gaps are places loops rarely reach (boundary sites are marked on the right). "
+               "**Middle:** the average loop size. **Below:** zoom into one region and stretch of time to see individual factors.")
+    bin_kb = 20
+    cov, _ = _coverage(str(d), int(N), bin_kb)
+    sizes = np.asarray(lp[:, :, 1] - lp[:, :, 0]).mean(axis=1)
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(14, 6.2), sharex=True, gridspec_kw={"height_ratios": [3.2, 1], "hspace": 0.12})
+    im = ax.imshow(cov.T, aspect="auto", origin="lower", extent=[0, T, 0, N], cmap="magma", vmin=0, vmax=max(1.0, float(np.percentile(cov, 99.5))),
+                   interpolation="nearest")
+    if len(ctcf):
+        ax.scatter(np.full(len(ctcf), T * 1.006), ctcf, marker="<", s=26, color=style.PALETTE["accent"], clip_on=False, zorder=5, label="boundary site")
+        ax.legend(loc="upper left", fontsize=9, frameon=True, facecolor=style.PALETTE["fig"], edgecolor="none")
+    ax.set_ylabel("genomic position (kb)")
+    ax.set_title("Loops covering each genomic position over time")
+    fig.colorbar(im, ax=[ax, ax2], pad=0.02, fraction=0.025, label="loops covering a 20 kb bin")
+    ax2.plot(np.arange(T), sizes, lw=0.8, color=style.CYCLE[0])
+    ax2.set_ylabel("mean loop (kb)"); ax2.set_xlabel("block"); ax2.set_ylim(0, max(1.0, float(sizes.max()) * 1.15)); ax2.grid(alpha=0.3)
+    top = ax.secondary_xaxis("top", functions=(lambda b: b * block_s / 60, lambda m: m * 60 / block_s))
+    top.set_xlabel(f"minutes (assumed {block_s:.2f} s per block)")
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)
+
+    st.markdown("**Zoom: individual factors**")
+    c = st.columns(4)
+    width = c[0].select_slider("Genomic window (kb)", [200, 300, 400, 600, 1000, 2000], 400, key="lef_w")
+    g0 = c[1].slider("Window starts at (kb)", 0, int(max(0, N - width)), int(min(max(0, N - width), N * 0.4)), 50, key="lef_g0")
+    span = c[2].select_slider("Time shown (blocks)", [100, 200, 300, 500, 800, 1500], 300, key="lef_span")
+    t0 = c[3].slider("Time starts at (block)", 0, int(max(0, T - min(span, T))), 0, 50, key="lef_t0")
+    t1 = int(min(T, t0 + span))
+    n_all = len(A.loop_traces(lp, t0, t1, g0, g0 + width, max_factors=10 ** 6))
+    traces = A.loop_traces(lp, t0, t1, g0, g0 + width, max_factors=16)
+    fig, ax = plt.subplots(figsize=(14, 4.4))
+    for i, tr in enumerate(traces):
+        col = style.CYCLE[i % len(style.CYCLE)]
+        ax.fill_between(tr["t"], tr["left"], tr["right"], color=col, alpha=0.16, linewidth=0)
+        ax.plot(tr["t"], tr["left"], lw=0.9, color=col)
+        ax.plot(tr["t"], tr["right"], lw=0.9, color=col)
+    for p in ctcf:
+        if g0 <= p <= g0 + width:
+            ax.axhline(p, color="#e5e7eb", lw=0.8, ls="--", alpha=0.6)
+            ax.text(t1, p, " boundary", va="center", ha="left", fontsize=8, color="#e5e7eb", clip_on=False)
+    ax.set_xlim(t0, t1); ax.set_ylim(g0, g0 + width)
+    ax.set_xlabel("block"); ax.set_ylabel("genomic position (kb)")
+    shown = f"{len(traces)} of {n_all} factors (the busiest; narrow the window or time to see all)" if n_all > len(traces) else f"{n_all} factors"
+    ax.set_title(f"{shown} with a loop in {g0:,}-{g0 + width:,} kb, blocks {t0:,}-{t1:,}: each band is one loop between its two legs")
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)
+    st.caption("A band widens as the factor extrudes (both legs move apart), stops growing at a boundary (dashed line) and ends where the factor unbinds "
+               "and reloads elsewhere (the line breaks). Narrow the window or time range if bands overlap.")

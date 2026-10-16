@@ -520,6 +520,11 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   `.streamlit/config.toml` has `[server] enableStaticServing = true` (serves app/static at /app/static/). Redraw: `scripts\run.cmd python scripts\make_bgfield.py [--seed --width --height]`. The dashboard colours (navy, teal)
   were NOT changed to the site's near-black/red palette. Restart the dashboard to see it (config change). Checked on port 8502: image served (200), no console errors, body text stays legible.
 
+- Chromatin tab "Loop-extruding factors over time" (2026-10-16): the old plot (up to 60 factors x 2 legs x 8000 blocks as thin lines) was unreadable. Now `analysis.loop_coverage` (loops covering each 20 kb bin per
+  time bin) as a heatmap + mean loop size (with a minutes axis from the assumed calibration and the boundary sites marked), and a zoom (`analysis.loop_traces`: genomic window x time window, at most 16 factors as shaded bands between the
+  two legs, lines broken where a factor reloads; default 400 kb x 300 blocks, ~12-19 factors there). Tested in `tests/test_loop_view.py`; viewed on a real 8000-block library simulation. Streamlit does not
+  hot-reload `app/chromatin_tab.py`: restart the dashboard to see edits.
+
 ## Polymer calibration, stage 7b and code clean-up (2026-10-15; user said "do all of them" after a code review)
 - **Polymer calibration is now ONE shared module** (`src/simlive/calibration/polymer.py`; it was inside `stage7_validation/ep_polymer.py`, which re-exports it): `PolymerPool`, `load_pool`, `calibrate`,
   `Calibration` (JSON save/load, now also stores working distance, contact fraction, separation and the simulations used), `scale_from_config`, `default_scale`. `scripts/calibrate_chromatin.py` writes

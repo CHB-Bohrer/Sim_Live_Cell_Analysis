@@ -222,3 +222,41 @@ def anchor_contact_pooled(traj: np.ndarray, beads: np.ndarray, pairs: list[tuple
         obs.append(float((d < cutoff).mean()))
         exp.append(float(np.interp(np.log(b - a), np.log(s), p)))
     return (float(np.mean(obs)), float(np.mean(exp))) if obs else (float("nan"), float("nan"))
+
+
+def loop_coverage(lef: np.ndarray, n_monomers: int, bin_kb: int = 20, max_time_bins: int = 800) -> np.ndarray:
+    """How many loops span each genomic bin, over time: (time bins, genomic bins). `lef` is (blocks, factors, 2) with the left and right leg
+    (monomer index = kb); a factor whose legs have not separated (zero-size loop) is not counted. Blocks are averaged into at most
+    `max_time_bins` columns, so 8000 blocks of 80+ factors become one readable picture instead of 160 overlapping lines."""
+    lef = np.asarray(lef)
+    T, K, _ = lef.shape
+    B = int(np.ceil(n_monomers / bin_kb))
+    lo = np.clip(lef[:, :, 0] // bin_kb, 0, B - 1)
+    hi = np.clip(lef[:, :, 1] // bin_kb, 0, B - 1)
+    on = lef[:, :, 1] > lef[:, :, 0]
+    diff = np.zeros((T, B + 1), np.int32)
+    t_idx = np.broadcast_to(np.arange(T)[:, None], (T, K))
+    np.add.at(diff, (t_idx[on], lo[on]), 1)
+    np.add.at(diff, (t_idx[on], hi[on] + 1), -1)
+    cov = np.cumsum(diff, axis=1)[:, :B].astype(float)
+    n = min(T, max_time_bins)
+    per = T // n
+    return cov[: per * n].reshape(n, per, B).mean(axis=1)
+
+
+def loop_traces(lef: np.ndarray, t0: int, t1: int, g0: float, g1: float, jump: int = 3, max_factors: int = 40) -> list[dict]:
+    """The factors whose loop overlaps the genomic window [g0, g1] kb at some block in [t0, t1): for each, blocks `t`, `left` and `right` leg
+    positions, with NaN where a leg jumped (more than `jump` kb in one block: the factor unbound and reloaded elsewhere), so lines break there
+    instead of crossing the picture. At most `max_factors`, those spending the most blocks in the window first."""
+    seg = np.asarray(lef[t0:t1]).astype(float)
+    inside = (seg[:, :, 1] >= g0) & (seg[:, :, 0] <= g1)
+    order = np.argsort(-inside.sum(axis=0), kind="stable")
+    out = []
+    for k in order[:max_factors]:
+        if not inside[:, k].any():
+            break
+        left, right = seg[:, k, 0].copy(), seg[:, k, 1].copy()
+        broken = np.r_[False, (np.abs(np.diff(left)) > jump) | (np.abs(np.diff(right)) > jump)]
+        left[broken], right[broken] = np.nan, np.nan
+        out.append({"factor": int(k), "t": np.arange(t0, t0 + len(left)), "left": left, "right": right})
+    return out
