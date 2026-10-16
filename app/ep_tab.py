@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import style
+import sweep_plot
 from simlive.io.runs import DATA_ROOT
 from simlive.stage7_validation import ep_acquisition as aq
 from simlive.stage7_validation import ep_curve as ep
@@ -243,29 +244,9 @@ def _scans() -> None:
     st.dataframe(tab.round(3), hide_index=True, width="stretch")
     if not settings:
         return
-    xcol = st.selectbox("x axis", settings, key="ep_x")
-    others = [c for c in settings if c != xcol]
-
-    def draw():
-        fig, ax = plt.subplots(figsize=(9, 4.6))
-        groups = list(df.groupby(others)) if others else [((), df)]
-        xs_all = sorted(df[xcol].unique(), key=lambda v: (isinstance(v, str), v))
-        num = all(not isinstance(v, (str, bool)) for v in xs_all)
-        for gi, (k, g) in enumerate(groups):
-            k = k if isinstance(k, tuple) else (k,)
-            m = g.groupby(xcol)["contrast"].agg(["mean", "std"]).reindex(xs_all)
-            xv = xs_all if num else list(range(len(xs_all)))
-            ax.errorbar(xv, m["mean"], yerr=m["std"].fillna(0), marker="o", capsize=3, lw=1.8, color=style.CYCLE[gi % len(style.CYCLE)],
-                        label=", ".join(f"{c}={v}" for c, v in zip(others, k)) or "contrast")
-        ref = df.contrast_ref.mean()
-        ax.axhline(ref, color="#e5e7eb", lw=1.2, ls="--", label=f"reference {ref:.2f}")
-        ax.axhline(1.0, color="#94a3b8", lw=0.8, ls=":")
-        if not num:
-            ax.set_xticks(range(len(xs_all))); ax.set_xticklabels([str(v) for v in xs_all])
-        if num and xs_all[-1] / max(xs_all[0], 1e-9) > 20:
-            ax.set_xscale("log")
-        ax.set_xlabel(xcol); ax.set_ylabel("recovered contrast (mean ± sd over populations)"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
-        fig.tight_layout()
-        return fig
-
-    style.cached_figure(st, ("ep_scan", exp, xcol, len(df), float(df.contrast.sum())), draw)
+    roles = sweep_plot.controls(st, df, settings, f"ep_{exp}")
+    ref = float(df.contrast_ref.mean())
+    fig = sweep_plot.draw(df, ycol="contrast", ylabel="recovered contrast (mean ± sd over populations)", **roles,
+                          hlines=[(ref, f"reference {ref:.2f}", "--"), (1.0, "no effect (1)", ":")])
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)

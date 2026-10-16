@@ -229,7 +229,7 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
                 a.axvspan(t0 * dt / 60, (t1 + 1) * dt / 60, color=ON_C, alpha=0.35, lw=0)
     ax[0].plot(t_min, g.trace_cu, ".", color=MEAS_C, ms=5, label="measured trace")
     ax[0].plot(t_min, g.fit_cu, color=FIT_C, lw=2, label="fit (posterior mean)")
-    ax[0].set_ylabel("Pol II units"); ax[0].legend(loc="upper left", fontsize=10, ncol=3)
+    ax[0].set_ylabel("Pol II units"); ax[0].legend(loc="lower left", bbox_to_anchor=(0, 1.0), fontsize=11, ncol=3)    # legends sit above the panels, not on the data
     e = np.zeros(0)
     if ev is not None:
         e = ev[ev.cell_id == cid].init_s.to_numpy() / 60
@@ -239,17 +239,18 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
         ax[1].fill_between(tf, pf, color="#f472b6", alpha=0.85, lw=0, label="probability of a Pol II start in each second")
         ax[1].plot(e, np.full(len(e), 1.05), "|", color=TRUE_C, ms=14, mew=2, label="true starts")
         ax[1].set_ylim(0, 1.15); ax[1].set_ylabel("P(start) / s")
-        ax[1].legend(loc="upper left", fontsize=10, ncol=2)
+        ax[1].legend(loc="lower left", bbox_to_anchor=(0, 1.0), fontsize=11, ncol=2)
     else:
         ax[1].text(0.5, 0.5, "(re-run the deconvolution to get the per-second probability)", ha="center", va="center", transform=ax[1].transAxes)
     m, sd = s.mean(0), s.std(0)
     ax[2].bar(t_min, m, width=dt / 60 * 0.9, color=FIT_C, yerr=sd, ecolor="#94a3b8", label="Pol II starts per frame (posterior mean ± sd)")
     ax[2].plot(e, np.full(len(e), max(1.0, float(m.max())) * 1.1), "|", color=TRUE_C, ms=14, mew=2, label="true starts")
-    ax[2].set_ylabel("starts / frame"); ax[2].legend(loc="upper left", fontsize=10)
+    ax[2].set_ylabel("starts / frame"); ax[2].legend(loc="lower left", bbox_to_anchor=(0, 1.0), fontsize=11, ncol=2)
     ax[3].fill_between(t_min, p_on, step="mid", color=FIT_C, alpha=0.8)
     ax[3].set_ylim(0, 1.05); ax[3].set_ylabel("P(burst)"); ax[3].set_xlabel("time (min)")
     ax[3].set_xlim(zoom[0] - 0.05, zoom[1] + 0.05)
     fig.tight_layout()
+    fig.subplots_adjust(hspace=0.42)                      # room for the legends above the panels
     st.pyplot(fig, width="stretch")
     plt.close(fig)
     true_n = int(n_true.get(cid, 0)) if len(n_true) else None
@@ -402,11 +403,11 @@ def _step6(run, ff, tag, dec, samples, tx, dt, info):
             h = ax.imshow(piv.to_numpy(), origin="lower", cmap="viridis", vmin=0, vmax=1, aspect="auto")
             ax.set_xticks(range(len(piv.columns))); ax.set_xticklabels([f"{v:g}" for v in piv.columns])
             ax.set_yticks(range(len(piv.index))); ax.set_yticklabels([f"{v:g}" for v in piv.index])
-            ax.set_xlabel("window w (frames)"); ax.set_ylabel("starts needed g_b"); ax.set_title(title, fontsize=13)
+            ax.set_xlabel("window w (frames)"); ax.set_ylabel("starts needed g_b"); ax.set_title(title, fontsize=13); ax.grid(False)
             for i, gv in enumerate(piv.index):
                 for j, wv in enumerate(piv.columns):
-                    ax.text(j, i, f"{100 * piv.iloc[i, j]:.0f}", ha="center", va="center", fontsize=8,
-                            color="black" if piv.iloc[i, j] > 0.6 else "white")
+                    ax.text(j, i, f"{100 * piv.iloc[i, j]:.0f}", ha="center", va="center", fontsize=11, fontweight="bold",
+                            color="black" if piv.iloc[i, j] > 0.62 else "white")
             if 5 in list(piv.columns) and 2 in list(piv.index):
                 ax.add_patch(plt.Rectangle((list(piv.columns).index(5) - 0.5, list(piv.index).index(2) - 0.5), 1, 1, fill=False,
                                            ec="#f472b6", lw=2.5))

@@ -599,6 +599,9 @@ def _part_flat(run: Path):
                 h = ax.imshow(m, cmap="magma", vmin=lo, vmax=hi)
                 ax.set_title(f"{c}: {lab}", fontsize=12)
                 ax.set_xticks([]); ax.set_yticks([])
+                if i == 1 and np.ptp(m) < 1e-9:      # the self-calibration kept even light: say so instead of showing an unexplained flat colour
+                    ax.text(0.5, 0.5, "fit rejected:\nnot better than even light\n(4-fold cross-validation)", transform=ax.transAxes, ha="center", va="center",
+                            fontsize=13, color="white", bbox={"boxstyle": "round,pad=0.4", "fc": "black", "ec": "none", "alpha": 0.5})
                 fig.colorbar(h, ax=ax, fraction=0.046)
         if ns.exists():
             nn = pd.read_csv(ns)

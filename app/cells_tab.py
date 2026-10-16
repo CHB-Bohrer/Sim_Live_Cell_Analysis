@@ -167,8 +167,11 @@ def render(st, run_path: Path, cfg: dict):
     if len(pos):
         for q in pos[(pos.cell_id == cid) & (pos.t == t_now)].itertuples():
             axes[1].plot(q.crop_x_px, q.crop_y_px, "+", color="white", ms=16, mew=2)
-            axes[1].annotate(f"locus{q.locus_id}", (q.crop_x_px, q.crop_y_px), color="white", fontsize=9,
-                             xytext=(6, -8), textcoords="offset points")
+            left = int(q.locus_id) % 2 == 0           # alternate sides (and heights) so the labels of two close loci do not overlap
+            axes[1].annotate(f"locus{q.locus_id}", (q.crop_x_px, q.crop_y_px), color="white", fontsize=10, fontweight="bold",
+                             xytext=(-10, 14) if left else (10, -18), textcoords="offset points", ha="right" if left else "left",
+                             arrowprops={"arrowstyle": "-", "color": "white", "lw": 0.8, "alpha": 0.7},
+                             bbox={"boxstyle": "round,pad=0.15", "fc": "black", "ec": "none", "alpha": 0.55})
     if truth is not None:
         for q in truth[(truth.cell_id == cid) & (truth.t == t_now)].itertuples():
             axes[1].plot(q.x_um / px_um - fr_now.crop_x0, q.y_um / px_um - fr_now.crop_y0, "o", mfc="none",

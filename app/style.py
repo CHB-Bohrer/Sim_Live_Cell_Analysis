@@ -106,6 +106,26 @@ h3 {{ margin-top: 2rem; }}
 """
 
 
+def fit_titles(fig) -> None:
+    """Wrap every axes title that is wider than its axes onto several lines. Long titles used to run into the title of the next panel (or make a
+    one-panel figure much wider than its plot). Called for every figure before it is shown."""
+    import textwrap
+
+    try:
+        renderer = fig.canvas.get_renderer()
+    except Exception:                                    # a backend without a renderer: leave the titles alone
+        return
+    for ax in fig.axes:
+        axw = ax.get_window_extent(renderer).width
+        for t in (ax.title, getattr(ax, "_left_title", None), getattr(ax, "_right_title", None)):
+            s = t.get_text() if t is not None else ""
+            if not s or "\n" in s or axw <= 0:
+                continue
+            w = t.get_window_extent(renderer).width
+            if w > axw * 1.02:
+                t.set_text(textwrap.fill(s, width=max(12, int(len(s) * axw / w * 0.92))))
+
+
 PYPLOT_DPI = 110      # st.pyplot's own default is 200 dpi: a 17-inch figure became a 3400 px PNG (rasterised + compressed on every rerun)
 
 
@@ -122,6 +142,7 @@ def fast_pyplot(st) -> None:
         import matplotlib.pyplot as plt
 
         fig = fig or plt.gcf()
+        fit_titles(fig)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=kw.pop("dpi", PYPLOT_DPI), bbox_inches="tight", pil_kwargs={"compress_level": 1}, **kw)
         st.image(buf.getvalue(), width=width if width in ("stretch", "content") or isinstance(width, int) else "content")
@@ -143,6 +164,7 @@ def cached_figure(st, key: tuple, draw, width="stretch", keep: int = 30) -> None
     png = cache.pop(key, None)
     if png is None:
         fig = draw()
+        fit_titles(fig)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=PYPLOT_DPI, bbox_inches="tight", pil_kwargs={"compress_level": 1})
         plt.close(fig)

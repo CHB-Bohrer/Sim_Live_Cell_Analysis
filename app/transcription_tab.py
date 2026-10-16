@@ -117,7 +117,7 @@ def _plot_distance(d, blk, p, minutes):
     if p is not None and p.coupling == "contact":
         ax[0].axhline(p.d_contact_nm, color=C["contact"], ls="--", lw=1.3, label=f"contact threshold {p.d_contact_nm:g} nm")
         shade_contact(ax[0], t[m], d[m] <= p.d_contact_nm)
-        ax[0].legend(loc="upper right", fontsize=8)
+        ax[0].legend(loc="upper right", fontsize=11)
     ax[0].set_xlabel("time (min)"); ax[0].set_ylabel("distance (nm)"); ax[0].set_title("Promoter–enhancer distance through time")
     ax[1].hist(d, bins=40, color=C["dist"], alpha=0.6, density=True)
     if p is not None and p.coupling == "contact":
@@ -261,7 +261,7 @@ def render(run_path: Path | None = None) -> None:
     for arr, nm_, col in ((1 / kon / 60, "mean OFF time (min)", C["on"]), (1 / koff / 60, "mean ON time (min)", C["contact"]),
                           (1 / kinit / 60, "Pol II interval (min)", "#a78bfa")):
         ax.plot(xs, arr, color=col, label=nm_, lw=2)
-    ax.set_yscale("log"); ax.set_xlabel("distance between promoter and enhancer (nm)"); ax.legend(fontsize=8, ncol=3)
+    ax.set_yscale("log"); ax.set_xlabel("distance between promoter and enhancer (nm)"); ax.legend(fontsize=11, ncol=3)
     ax.set_title("The three timescales of the promoter as the enhancer gets closer (a flat line = does not depend on distance)", fontsize=11)
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
     style.stat_grid(st, [("ON fraction, enhancer far", f"{100 * far['on_fraction']:.0f}%", "exact"),
@@ -291,7 +291,7 @@ def render(run_path: Path | None = None) -> None:
     p_start, pmean = T.expected_on(p, cell.d_nm, blk)
     ax[1].plot(np.arange(len(p_start)) * blk / 60, p_start, color=C["theory"], ls="--", lw=1.2, label="probability ON (exact, averaged over many cells)")
     shade_contact(ax[1], t_min, contact)
-    ax[1].set_ylabel("promoter ON"); ax[1].set_xlabel("time (min)"); ax[1].set_xlim(0, horizon); ax[1].legend(fontsize=8, loc="upper right")
+    ax[1].set_ylabel("promoter ON"); ax[1].set_xlabel("time (min)"); ax[1].set_xlim(0, horizon); ax[1].legend(fontsize=11, loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=2)
     ax[0].set_title("Step 4: the promoter switches ON more often while the enhancer is close (teal shading)")
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
 
@@ -336,7 +336,7 @@ def render(run_path: Path | None = None) -> None:
     ax.plot(exp_t / 60, expected, color=C["theory"], ls="--", lw=1.2, label="exact expectation (over cells)")
     ax.axvspan(0, warm / 60, color="#e2e8f0", alpha=0.6, lw=0)
     shade_contact(ax, t_min, contact)
-    ax.set_xlim(0, minutes); ax.set_xlabel("time (min)"); ax.set_ylabel("MS2 signal (loops)"); ax.legend(fontsize=8, loc="upper right")
+    ax.set_xlim(0, minutes); ax.set_xlabel("time (min)"); ax.set_ylabel("MS2 signal (loops)"); ax.legend(fontsize=11, loc="upper right")
     ax.set_title("Step 6: bursts of initiation appear as a ramp-up, a plateau and a decay (the grey band is the model's warm-up)")
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
     fr = cell.frames

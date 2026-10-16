@@ -155,7 +155,7 @@ def _locus_panel(locus: str) -> P.ProbeParams | None:
     ax[0].axhline(sm["mean_attached"], color=COL["bad"], ls="--", lw=1.2, label="theory average")
     ax[0].axvline(when, color="#94a3b8", lw=1)
     ax[0].set_xlabel("time (s)"); ax[0].set_ylabel("probes at the locus"); ax[0].set_title("Probes attached through time")
-    ax[0].legend(ncol=4, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.28))
+    ax[0].legend(ncol=4, fontsize=11, loc="upper center", bbox_to_anchor=(0.5, -0.28))
     long = P.sample_trace(P.simulate_trace(p, 2000, seed + 7), np.arange(0, 2000), 1e-3).n_attached
     ax[1].hist(long, bins=np.arange(long.min(), long.max() + 2) - 0.5, density=True, color=COL["bound"], alpha=0.6)
     ax[1].set_xlabel("probes attached"); ax[1].set_title("How often each count occurs", fontsize=11)
@@ -212,7 +212,7 @@ def _sweep_section() -> None:
         a.set_xlabel(param); a.set_title(title, fontsize=11)
         if g[param].max() / max(g[param].min(), 1e-12) > 20:
             a.set_xscale("log")
-    ax[0].legend(fontsize=8)
+    ax[0].legend(fontsize=11)
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)

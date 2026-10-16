@@ -252,7 +252,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 163 CPU + 6 GPU tests at 2026-10-15. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 172 CPU + 6 GPU tests at 2026-10-16. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -520,6 +520,12 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   `.streamlit/config.toml` has `[server] enableStaticServing = true` (serves app/static at /app/static/). Redraw: `scripts\run.cmd python scripts\make_bgfield.py [--seed --width --height]`. The dashboard colours (navy, teal)
   were NOT changed to the site's near-black/red palette. Restart the dashboard to see it (config change). Checked on port 8502: image served (200), no console errors, body text stays legible.
 
+- Dashboard plot clean-up (2026-10-16; user: "anywhere else this could use improvement? ... fix all"). Method: render every page headlessly with Streamlit AppTest on a real run and save each figure by hooking
+  `plt.close` (script kept out of the repo; save with `bbox_inches="tight"` like `style.fast_pyplot` does, otherwise titles/labels look cut off when they are not). Fixed: (1) `app/sweep_plot.py` replaces the one-line-per-combination
+  sweep plot on 📈 Scans and the 🔗 E–P scans: each setting has ONE role (x axis / colour of lines / separate panels / held at a value that EXISTS in the sweep, sweeps are often not full grids), defaults by `default_roles`,
+  widgets by `controls` (keys include the scan name), legend outside; all 60 (sweep x x-axis) combinations in $SIMLIVE_DATA/sweeps draw; (2) `style.fit_titles` wraps axes titles wider than their axes (called by `fast_pyplot` and
+  `cached_figure`); (3) MS2 → Pol II legends above the panels, bigger heatmap numbers; (4) 🔬 Cells locus labels no longer overlap; (5) flat-field maps say "fit rejected" instead of an unexplained flat colour; (6) legends at readable
+  size on Transcription/Probes. Tests: `tests/test_sweep_plot.py`. NOT looked at: sections behind toggles (Images build-up, players) and pages that draw no matplotlib figure (Metrics, Stage & fiducials, Library, Movie).
 - Chromatin tab "Loop-extruding factors over time" (2026-10-16): the old plot (up to 60 factors x 2 legs x 8000 blocks as thin lines) was unreadable. Now `analysis.loop_coverage` (loops covering each 20 kb bin per
   time bin) as a heatmap + mean loop size (with a minutes axis from the assumed calibration and the boundary sites marked), and a zoom (`analysis.loop_traces`: genomic window x time window, at most 16 factors as shaded bands between the
   two legs, lines broken where a factor reloads; default 400 kb x 300 blocks, ~12-19 factors there). Tested in `tests/test_loop_view.py`; viewed on a real 8000-block library simulation. Streamlit does not

@@ -182,8 +182,8 @@ def _loop_extruders(st, d: Path, N: int) -> None:
     if len(ctcf):
         ax.scatter(np.full(len(ctcf), T * 1.006), ctcf, marker="<", s=26, color=style.PALETTE["accent"], clip_on=False, zorder=5, label="boundary site")
         ax.legend(loc="upper left", fontsize=9, frameon=True, facecolor=style.PALETTE["fig"], edgecolor="none")
-    ax.set_ylabel("genomic position (kb)")
-    ax.set_title("Loops covering each genomic position over time")
+    ax.set_ylabel("genomic position (kb)"); ax.grid(False)
+    ax.set_title("Loops covering each genomic position over time", pad=34)       # the minutes axis sits between the plot and the title
     fig.colorbar(im, ax=[ax, ax2], pad=0.02, fraction=0.025, label="loops covering a 20 kb bin")
     ax2.plot(np.arange(T), sizes, lw=0.8, color=style.CYCLE[0])
     ax2.set_ylabel("mean loop (kb)"); ax2.set_xlabel("block"); ax2.set_ylim(0, max(1.0, float(sizes.max()) * 1.15)); ax2.grid(alpha=0.3)

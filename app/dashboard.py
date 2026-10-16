@@ -32,6 +32,7 @@ VARIANT_LABEL = {"auto_masks": "Automatic segmentation (realistic)", "gt_masks":
 
 st.set_page_config(page_title="Sim Live Cell Analysis", page_icon="🧬", layout="wide")
 import style  # noqa: E402  (app/style.py: page CSS + matplotlib defaults)
+import sweep_plot  # noqa: E402  (app/sweep_plot.py: readable sweep plots)
 
 style.apply(st)
 
@@ -599,8 +600,9 @@ def scan_tab():
         n_seeds = sdf.seed.nunique() if "seed" in sdf else 1
         n_runs = sdf["run"].nunique() if "run" in sdf else len(sdf)
         st.caption(f"{n_runs} runs ({n_seeds} seeds per setting). Lines = mean over seeds, bars = ± 1 standard "
-                   "deviation across seeds, dots = individual seeds. Differences smaller than the bars are not reliable.")
-        c1, c2, c3 = st.columns(3)
+                   "deviation across seeds, dots = individual seeds. Differences smaller than the bars are not reliable. "
+                   "Every setting has one role: the x axis, the colour of the lines, a separate panel, or held at one value (choose below).")
+        c1, c3 = st.columns(2)
         metric = c1.selectbox("Metric", list(metrics), format_func=metrics.get)
         masks_sel = c3.radio("Masks", ["auto_masks", "gt_masks", "both"], horizontal=True,
                              format_func={"auto_masks": "Automatic segmentation", "gt_masks": "Ground-truth masks",
@@ -608,29 +610,12 @@ def scan_tab():
         if not params:
             st.warning("This scan has no varied settings to plot.")
         else:
-            xcol = c2.selectbox("X axis", params)
-            others = [p for p in params if p != xcol]
             d = sdf if masks_sel == "both" else sdf[sdf.masks == masks_sel]
-            group_cols = others + (["masks"] if masks_sel == "both" and tracking else [])
-            xs = sorted(d[xcol].unique(), key=lambda v: (isinstance(v, str), v))
-            xpos = {v: i for i, v in enumerate(xs)}
-            numeric = all(not isinstance(v, str) for v in xs)
-            fig, ax = plt.subplots(figsize=(9, 5))
-            groups = list(d.groupby(group_cols)) if group_cols else [((), d)]
-            for gi, (key, g) in enumerate(groups):
-                key = key if isinstance(key, tuple) else (key,)
-                label = ", ".join(f"{c}={v}" for c, v in zip(group_cols, key)) or "all runs"
-                col = plt.cm.tab10(gi % 10)
-                m = g.groupby(xcol)[metric].agg(["mean", "std"]).reindex(xs)
-                xv = [v if numeric else xpos[v] for v in xs]
-                ax.errorbar(xv, m["mean"], yerr=m["std"].fillna(0), marker="o", capsize=4, lw=2, color=col, label=label)
-                ax.scatter([v if numeric else xpos[v] for v in g[xcol]], g[metric], s=14, alpha=0.35, color=col)
-            if not numeric:
-                ax.set_xticks(range(len(xs))); ax.set_xticklabels([str(v) for v in xs])
-            ax.set_xlabel(xcol); ax.set_ylabel(metrics[metric])
-            ax.grid(alpha=0.3)
-            if len(groups) > 1:
-                ax.legend(fontsize=9)
+            settings = params + (["masks"] if masks_sel == "both" and tracking else [])
+            roles = sweep_plot.controls(st, d, settings, f"scan_{sname}_{masks_sel}")                # x axis / colour of lines / panels / held fixed
+            xcol = roles["xcol"]
+            group_cols = [c for c in settings if c != xcol]
+            fig = sweep_plot.draw(d, ycol=metric, ylabel=metrics[metric], **roles)
             st.pyplot(fig, width="stretch")
             plt.close(fig)
             summary = d.groupby(group_cols + [xcol])[list(metrics)].agg(["mean", "std"]).round(3)
