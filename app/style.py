@@ -63,7 +63,10 @@ h3 {{ margin-top: 2rem; }}
 /* ---- polish layer ---- */
 .stApp, .stMarkdown, p, label, input, textarea, button, [data-baseweb="tab"] {{ font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }}
 [data-testid="stIconMaterial"], [class*="material-symbols"], .material-icons {{ font-family: 'Material Symbols Rounded', 'Material Icons' !important; }}
-.stApp {{ background: radial-gradient(1200px 400px at 20% -10%, #12324a 0%, rgba(11,18,32,0) 60%), #0b1220; }}
+/* background: the lab website's faint field of traced chromatin (app/bgfield.py draws app/static/bgfield.png), fixed behind the page, over the old glow */
+.stApp {{ background: url('/app/static/bgfield.png') center / cover no-repeat fixed,
+  radial-gradient(1200px 400px at 20% -10%, #12324a 0%, rgba(11,18,32,0) 60%), #0b1220; }}
+[data-testid="stHeader"] {{ background: transparent; }}
 .sl-hero {{ border-left: 5px solid var(--accent); padding: .35rem 0 .35rem 1rem; margin-bottom: 1.4rem; }}
 .sl-hero h1 {{ background: linear-gradient(90deg, #2dd4bf, #60a5fa); -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; }}

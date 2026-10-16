@@ -514,6 +514,12 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 
 - Display scaling (2026-10-11): single-cell and all-cells players scale each locus colour once for the whole movie from the cell's own mask region (fastview.movie_limits); before, each frame was scaled to the crop maximum, so cosmic rays and fiducial beads in the crop corners made the real spots look missing (spot < 30% of crop max in 70-92% of frames in 3D runs). Measured locus D = MSD/(4t) at 10 s: library loci 0.0017-0.0019 um2/s (falls to 0.0011 at 100 s, nm_per_unit 50 and block_duration_s 10 are PLACEHOLDERS), toy loci 0.0029; the nucleus itself moves 0.43 um per frame.
 
+## Dashboard background (2026-10-16)
+- The page background is the Bohrer Lab website's faint chromatin field (user's choice among the site's backgrounds; source: the `.fieldbg` canvas of https://chb-bohrer.github.io, repo CHB-Bohrer.github.io).
+  `app/bgfield.py` redraws the same recipe with PIL (seed 67, 1920x1080, transparent) into `app/static/bgfield.png` (committed, 450 KB); `style.CSS` puts it behind `.stApp` with `background-attachment: fixed`;
+  `.streamlit/config.toml` has `[server] enableStaticServing = true` (serves app/static at /app/static/). Redraw: `scripts\run.cmd python scripts\make_bgfield.py [--seed --width --height]`. The dashboard colours (navy, teal)
+  were NOT changed to the site's near-black/red palette. Restart the dashboard to see it (config change). Checked on port 8502: image served (200), no console errors, body text stays legible.
+
 ## Polymer calibration, stage 7b and code clean-up (2026-10-15; user said "do all of them" after a code review)
 - **Polymer calibration is now ONE shared module** (`src/simlive/calibration/polymer.py`; it was inside `stage7_validation/ep_polymer.py`, which re-exports it): `PolymerPool`, `load_pool`, `calibrate`,
   `Calibration` (JSON save/load, now also stores working distance, contact fraction, separation and the simulations used), `scale_from_config`, `default_scale`. `scripts/calibrate_chromatin.py` writes

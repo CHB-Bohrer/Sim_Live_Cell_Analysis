@@ -6,6 +6,9 @@ secondaryBackgroundColor = "#152033"
 textColor = "#e5e7eb"
 font = "sans serif"
 
+[server]
+enableStaticServing = true      # serves app/static/ (the page background image) at /app/static/
+
 [browser]
 gatherUsageStats = false
 
