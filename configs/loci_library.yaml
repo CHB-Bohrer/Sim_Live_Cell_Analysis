@@ -56,7 +56,9 @@ nucleus_texture:
 loci:                       # source: library = saved polychrom simulations (needs a finished library); toy = stand-in
   source: library
   library: loop_extrusion          # folder under $SIMLIVE_DATA/chromatin/
-  positions_kb: [5050, 4950]     # genomic position (kb, multiples of 10) of locus 0 = promoter and locus 1 = enhancer (100 kb apart)
+  positions_kb: random           # `random` = every cell draws its own pair (below); or a fixed list [promoter_kb, enhancer_kb] (kb, multiples of 10), e.g. [5050, 4950]
+  pair_separation_kb: 100        # random pairs: promoter-enhancer distance along the chain
+  pair_margin_kb: 1000           # random pairs: keep both loci this far from the ends of the simulated region
   calibration: default           # polymer units -> nm and seconds: configs/calibration/default.json (scripts/calibrate_chromatin.py; ASSUMED contact fraction 0.1 at 400 nm
                                  # for a 100 kb pair and single-locus D = 0.002 um^2/s at 1 min). Remove this line to use the two numbers below instead.
   # block_duration_s: 10         # seconds per saved block: if given, overrides the calibration's (the old PLACEHOLDER was 10)

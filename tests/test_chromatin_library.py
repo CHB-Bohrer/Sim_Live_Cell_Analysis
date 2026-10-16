@@ -97,3 +97,37 @@ def test_random_rotation_is_a_proper_rotation():
     # mean of many random rotations applied to a fixed vector is ~0 (uniform over the sphere)
     v = np.mean([_random_rotation(rng)[:, 0] for _ in range(4000)], axis=0)
     assert np.abs(v).max() < 0.05
+
+
+def test_draw_pair_is_on_the_grid_inside_the_margins_and_on_both_orientations():
+    from simlive.stage1_chromatin.library_loci import draw_pair
+    beads = np.arange(0, 10000, 10)
+    rng = np.random.default_rng(3)
+    pairs = [draw_pair(rng, 10000, beads, 100.0, 1000.0) for _ in range(400)]
+    for p, e in pairs:
+        assert abs(p - e) == 100 and p % 10 == 0 and e % 10 == 0
+        assert min(p, e) >= 1000 and max(p, e) <= 10000 - 1 - 1000
+    assert {p < e for p, e in pairs} == {True, False}                     # promoter on either side
+    assert len({min(p, e) for p, e in pairs}) > 100                       # a wide spread of positions
+    with pytest.raises(ValueError):
+        draw_pair(rng, 1500, beads[:150], 100.0, 1000.0)
+
+
+def test_random_pairs_differ_between_cells_are_reproducible_and_recorded(fake_library):
+    import pandas as pd
+    from simlive.stage1_chromatin.library_loci import simulate_library_loci
+    for s in fake_library.glob("demo_seed[123]"):
+        m = json.loads((s / "meta.json").read_text()); m["confinement_radius"] = 20.0
+        (s / "meta.json").write_text(json.dumps(m))
+    rows = [dict(t=k, cell_id=c, y_um=50.0, x_um=50.0, radius_um=6.0, aspect=1.0, angle_rad=0.0) for c in (1, 2, 3) for k in range(3)]
+    cfg = {"loci": {"library": "demo", "positions_kb": "random", "pair_separation_kb": 100, "pair_margin_kb": 200, "block_duration_s": 10, "nm_per_unit": 1.0},
+           "acquisition": {"frame_interval_s": 10}}
+    a = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(5))
+    b = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(5))
+    pairs = a.attrs["pairs_kb"]
+    assert pairs == b.attrs["pairs_kb"] and sorted(pairs) == [1, 2, 3]
+    assert all(abs(p - e) == 100 and min(p, e) >= 200 and max(p, e) <= 799 for p, e in pairs.values())
+    assert len({tuple(v) for v in pairs.values()}) > 1                    # different cells, different pairs
+    pd.testing.assert_frame_equal(a, b)
+    with pytest.raises(ValueError, match="positions_kb"):
+        simulate_library_loci(pd.DataFrame(rows), {**cfg, "loci": {**cfg["loci"], "positions_kb": "middle"}}, np.random.default_rng(0))

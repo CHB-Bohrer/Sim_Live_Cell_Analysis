@@ -45,14 +45,37 @@ def _territory_centre(p: np.ndarray, rng: np.random.Generator, cell_id, tries: i
                      f"the region centre) cannot fit inside the nucleus; lower nm_per_unit or pick loci nearer the centre")
 
 
+def draw_pair(rng: np.random.Generator, n_monomers: int, beads: np.ndarray, separation_kb: float = 100.0, margin_kb: float = 1000.0) -> list[int]:
+    """Genomic positions (kb = monomer index) of [promoter, enhancer] for one cell: a pair `separation_kb` apart, on the stored monomer grid,
+    anywhere at least `margin_kb` from both ends of the region (loop extrusion and boundaries behave differently at a chain end), the promoter
+    on either side with equal probability. With every cell drawing its own pair, a library of 100 simulations gives hundreds of different pairs."""
+    stride = int(beads[1] - beads[0])
+    sep = int(round(separation_kb / stride)) * stride
+    lo = -(-int(margin_kb) // stride) * stride                       # ceil to the grid
+    hi = (int(n_monomers) - 1 - int(margin_kb)) // stride * stride - sep   # last allowed left position
+    if hi < lo:
+        raise ValueError(f"a {separation_kb:g} kb pair does not fit {margin_kb:g} kb from both ends of a {n_monomers} kb region")
+    left = lo + stride * int(rng.integers(0, (hi - lo) // stride + 1))
+    pair = [left, left + sep]
+    if rng.random() < 0.5:
+        pair.reverse()
+    return pair
+
+
 def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator, return_traces: bool = False):
     """Loci of every cell from its own saved simulation. Frame k is read at polymer time k x frame_interval_s (any frame interval
-    works: positions are interpolated between saved blocks). If the movie is longer than the saved trajectory the trajectory is
+    works: positions are interpolated between saved blocks). `loci.positions_kb` is a list [promoter, enhancer] (the same pair in every cell) or the
+    word "random": every cell then draws its own pair (`draw_pair`: `loci.pair_separation_kb` default 100, `loci.pair_margin_kb` default 1000); the
+    pairs are in the result's `df.attrs["pairs_kb"]` = {cell_id: [promoter_kb, enhancer_kb]}. If the movie is longer than the saved trajectory the trajectory is
     repeated forwards/backwards (no jump at the seams) and a warning is raised.
     With return_traces=True also returns {cell_id: {"dt_block_s", "d_nm", "looped"}}: the 3D distance between locus 0 (promoter) and
     locus 1 (enhancer) at full polymer-block resolution, starting at the cell's first frame (for the transcription model)."""
     lc = cfg["loci"]
-    positions = list(lc["positions_kb"])
+    random_pair = isinstance(lc["positions_kb"], str)
+    if random_pair and lc["positions_kb"] != "random":
+        raise ValueError(f"loci.positions_kb must be a list [promoter_kb, enhancer_kb] or 'random', not {lc['positions_kb']!r}")
+    positions = None if random_pair else list(lc["positions_kb"])
+    pairs = {}
     nm_per_unit, block_s, scale_source = scale_from_config(lc)
     dt = float(cfg["acquisition"]["frame_interval_s"])
     cell_ids = sorted(cells.cell_id.unique())
@@ -62,8 +85,14 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
     rows, traces = [], {}
     for cid, g in cells.sort_values("t").groupby("cell_id"):
         sim = lib.library_dir(lc["library"]) / assigned[int(cid)]
-        traj, _ = lib.locus_trajectories(sim, positions)                       # (T, n_loci, 3) polymer units
-        radius = float(json.loads((sim / "meta.json").read_text())["confinement_radius"])
+        meta = json.loads((sim / "meta.json").read_text())
+        pos_kb = positions
+        if random_pair:
+            pos_kb = draw_pair(rng, int(meta["n_monomers"]), np.load(sim / "tracked_beads.npy"),
+                               float(lc.get("pair_separation_kb", 100.0)), float(lc.get("pair_margin_kb", 1000.0)))
+        traj, beads_used = lib.locus_trajectories(sim, pos_kb)                 # (T, n_loci, 3) polymer units
+        pairs[int(cid)] = [int(b) for b in beads_used]
+        radius = float(meta["confinement_radius"])
         tau = (g.t.to_numpy() - g.t.min()) * dt / block_s                       # polymer time of each frame, in blocks
         need = int(np.ceil(tau.max())) + 2
         offset = int(rng.integers(0, max(1, len(traj) - need)))
@@ -90,5 +119,6 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
     df = pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "xn", "yn", "zn", "y_um", "x_um", "sim_id", "z_um"])
     if not three_d:
         df = df.drop(columns="z_um")
+    df.attrs["pairs_kb"] = pairs
     df.attrs["scale"] = {"nm_per_unit": nm_per_unit, "block_duration_s": block_s, "source": scale_source}
     return (df, traces) if return_traces else df

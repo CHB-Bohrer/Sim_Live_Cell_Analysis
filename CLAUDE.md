@@ -76,9 +76,10 @@ branch, not main": that was a misreading of the user's intent.)
   gives NO insulation (use >= 0.99); validate metrics on null data (random positions, no-boundary control).
 - Speed: N=10,000: ~3,650 MD steps/s (~7.5 min per 2,000-block validation run). N=46,710 (389 LEFs, 52 boundaries):
   ~1,400-1,750 steps/s, i.e. cost scales roughly with region size. Library configs
-  (`configs/chromatin/library_*.yaml`: 1000 equilibration + 2000 production blocks x 750 steps) = ~11 min per 10 Mb
-  simulation, ~18 h per 100-simulation library, ~7 GB per library at 10 Mb. The libraries have NOT been started; each
-  occupies the GPU for many hours, so get the user's go-ahead and region size first. Whether 1000 equilibration blocks
+  (`configs/chromatin/library_*.yaml`: 1000 equilibration + 8000 production blocks x 750 steps since 2026-10-15, was 2000) at 10 Mb. MEASURED with 8000 blocks (loop extrusion): ~2,600 MD steps/s
+  (3.5 blocks/s, GPU only ~60% busy) because every loop-extruder bond is pre-registered (about 3.5x more bonds than at 2000 blocks, and `updateParametersInContext` walks all of them each block):
+  ~43 min per simulation, ~73 h per 100-simulation library, ~30 GB. The old 2000-block figure was ~11 min / ~18 h. Possible speed-up (not done): register only the bonds of the next few hundred
+  blocks. THE LOOP-EXTRUSION LIBRARY IS RUNNING since 2026-10-15 18:24 (see "Library run" below). Whether 1000 equilibration blocks
   suffice is only validated at 10 Mb (P(s) stationarity 0.077 over 2000 blocks); re-check for larger regions.
 - Dashboard: the 🧬 Chromatin tab shows the validation report and any saved simulation, and has a smooth in-browser
   player of the polymer through time (`app/chromatin_view.py` + `app/chromatin_tab.py`: whole chain at each snapshot, or
@@ -251,7 +252,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 161 CPU + 6 GPU tests at 2026-10-15. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 163 CPU + 6 GPU tests at 2026-10-15. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -521,8 +522,15 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   Transcription tabs) starts from the calibration's numbers; RESTART the dashboard (helper modules do not hot-reload).
 - **Its inputs are ASSUMPTIONS, not measurements** (the user's 2026-10-14 rules: 100 kb pair within 400 nm 10% of the time; single-locus D = 0.002 um^2/s at 1 min). **CONSEQUENCE found while wiring it:** one saved block is 0.46 s, so a
   2000-production-block simulation (`configs/chromatin/library_*.yaml`) covers only ~15 min of movie, while the default movies are 20-40 min and a transcription study needs hours (bursts ~3/h). Longer movies repeat the
-  trajectory back and forth (warning, correlations beyond 15 min are artificial) and loop-extrusion timing is fast (loop lifetime ~46 s). **OPEN DECISION for the user before starting the 100-simulation library (~18 h GPU, 240 GB free):**
-  how many production blocks per simulation (e.g. 10-20x more), region size, and whether the surrogate distance process (PLAN_transcription step 5) should take over for long movies. Not launched on purpose.
+  trajectory back and forth (warning, correlations beyond 15 min are artificial) and loop-extrusion timing is fast (loop lifetime ~46 s). **DECIDED with the user (2026-10-15):** 8,000 production blocks (= 61 min of polymer
+  time, a 1 h movie without repeating) at the validated 10 Mb region; every cell draws its own random 100 kb pair (`loci.positions_kb: random`, `pair_separation_kb`, `pair_margin_kb` 1000; `library_loci.draw_pair`; pairs recorded in
+  `stage1_chromatin/library_pairs.csv`), so 100 simulations serve hundreds of cells. Movies longer than ~61 min still repeat the trajectory. Still open: whether a surrogate distance process (PLAN_transcription step 5) should take
+  over for hours-long movies; loops live only ~46 s at this timescale (real cohesin: minutes), which a slower extrusion per block would fix at the price of even more blocks.
+- **Library run (started 2026-10-15 18:24, detached via PowerShell `Start-Process`, output `C:\Users\cbohr\SimLiveData\library_loop_extrusion.out.log`):**
+  `scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\library_loop_extrusion.yaml --library loop_extrusion --n 100`, seeds 1000-1099, folder `$SIMLIVE_DATA/chromatin/loop_extrusion/library_loop_extrusion_seed<seed>`
+  (the simulation NAME is `library_loop_extrusion`, so set `loci.library: loop_extrusion`). Watch it in the 🗂 Library tab or `status.json`; resumable: after a reboot / sleep run the same command again. WHILE IT RUNS do not edit
+  `configs/chromatin/library_loop_extrusion.yaml`, `polymer3d.py`, `lef1d.py` or `io/runs.py` (each simulation is a new process that re-reads them) and do not run GPU tests or other GPU work. The plain-polymer library
+  (`library_polymer.yaml`, also 8000 blocks) has NOT been started.
 - **Stage 7b built** (`stage7_validation/propagation.py`, called from `pipelines/tracking_demo._propagate`; tests `tests/test_identity_propagation.py`): for tracked identity sources the 2D locus detections are mapped back to the
   TRUE cell through `identity.match_ids` (largest overlap per frame) and scored with the usual `score_localization` plus locus-distance error, share attributed to a true cell, and share on "mixed" tracks (a tracker label that
   stood for two true cells). In `scores.json` as `propagation.<source>.{uncalibrated,calibrated}`; per-detection errors in `stage6_analysis/<src>/localization_errors_via_tracks[_cal].csv`. Check: with perfect tracking it equals the

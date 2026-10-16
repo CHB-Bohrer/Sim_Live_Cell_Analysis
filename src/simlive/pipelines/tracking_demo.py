@@ -67,6 +67,10 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
         else:
             truth = simulate_toy_loci(cells, cfg, np.random.default_rng(ss[2]))
         truth.to_csv(run / "stage1_chromatin" / "loci_truth.csv", index=False)
+        if truth.attrs.get("pairs_kb"):          # library loci: which simulation and which genomic pair every cell got
+            sims = truth.groupby("cell_id").sim_id.first()
+            pd.DataFrame([(c, sims[c], pr[0], pr[1]) for c, pr in truth.attrs["pairs_kb"].items()],
+                         columns=["cell_id", "sim_id", "promoter_kb", "enhancer_kb"]).to_csv(run / "stage1_chromatin" / "library_pairs.csv", index=False)
         write_provenance(run / "stage1_chromatin", cfg, seed)
         if (cfg["loci"].get("probes") or {}).get("enabled"):
             progress("Stage 1b: stochastic probe binding at the promoter and enhancer (sets each locus' brightness)")

@@ -13,7 +13,7 @@ polymer:
 dynamics:
   steps_per_block: 750
   equilibration_blocks: 1000
-  production_blocks: 2000
+  production_blocks: 8000    # 8000 blocks x 0.461 s (configs/calibration/default.json) = 61 min of polymer time: covers a 1 h movie without repeating
   full_every_blocks: 20
   track_stride: 10          # store every 10th monomer (10 kb) at EVERY production block, for locus trajectories
   collision_rate: 0.03
