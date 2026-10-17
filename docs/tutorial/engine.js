@@ -61,15 +61,16 @@ function wordsOf(text) { return text.split(/(\s+)/); }
 /* ---------------------------------------------------------------- speech */
 let utter = null;
 function stopSpeech() { try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { } utter = null; }
-function speak(text, spans, token) {
+function speak(text, spans, token, fixedSec) {
   return new Promise((resolve) => {
     const nWords = text.split(/\s+/).length;
-    const est = (nWords / 2.55 / T.rate) * 1000 + 700;            // read-aloud time, also the fallback when there is no voice
+    const est = fixedSec ? fixedSec * 1000 : (nWords / 2.55 / T.rate) * 1000 + 700;            // read-aloud time, also the fallback when there is no voice
     let done = false;
     const finish = () => { if (!done) { done = true; clearTimeout(wd); resolve(); } };
-    const wd = setTimeout(finish, T.mute || !T.voice ? est : est * 1.8 + 4000);
+    const silent = T.mute || !T.voice || !!fixedSec;
+    const wd = setTimeout(finish, silent ? est : est * 1.8 + 4000);
     T.timers.push(wd);
-    if (T.mute || !T.voice || !window.speechSynthesis) {            // no audio: reveal the words at reading speed
+    if (silent || !window.speechSynthesis) {            // no audio: reveal the words at reading speed
       const t0 = performance.now();
       const tick = () => {
         if (done || token !== T.token) return;
@@ -145,7 +146,9 @@ async function runBeat(i, b, token) {
   try { beat.c && beat.c(T.ctl); } catch (e) { console.error(e); }
   if (b === sc.beats.length - 1) showTry(true);
   if (!T.playing) { spans.forEach((s) => s.classList.add("said")); return; }
-  await speak(beat.s, spans, token);
+  const fixed = window.BEAT_DUR && window.BEAT_DUR[sc.id + ":" + b];
+  (window.BEAT_LOG = window.BEAT_LOG || []).push([sc.id + ":" + b, performance.now()]);
+  await speak(beat.s, spans, token, fixed);
   if (token !== T.token || !T.playing) return;
   await sleep(beat.pause != null ? beat.pause : 450);
   if (token !== T.token || !T.playing) return;
@@ -430,10 +433,10 @@ T.boot = () => {
     else if (e.key === "m") $("#mute").click();
     else if (e.key === "c") $("#capbtn").click();
   });
-  const m = /s=([\w-]+)(?:&b=(\d+))?/.exec(location.hash);
+  const m = /s=([\w-]+)(?:&b=(\d+))?/.exec(location.hash), autoplay = /play=1/.test(location.hash);
   if (m) {
     const i = T.scenes.findIndex((s) => s.id === m[1]);
-    if (i >= 0) { $("#start").remove(); T.started = true; T.frozen = false; T.goto(i, +(m[2] || 0)); return; }
+    if (i >= 0) { $("#start").remove(); T.started = true; T.frozen = false; T.goto(i, +(m[2] || 0), autoplay); return; }
   }
   $("#startbtn").onclick = () => { $("#start").remove(); T.started = true; T.goto(0, 0, true); };
   $("#browsebtn").onclick = () => { $("#start").remove(); T.started = true; T.goto(0, 0); };

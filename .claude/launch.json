@@ -14,6 +14,12 @@
       "runtimeArgs": ["/c", "scripts\\run.cmd", "python", "-m", "streamlit", "run", "app/dashboard.py",
                       "--server.port", "8502", "--server.address", "127.0.0.1", "--server.headless", "true"],
       "port": 8502
+    },
+    {
+      "name": "tutorial",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "scripts\\run.cmd", "python", "-m", "http.server", "8503", "--bind", "127.0.0.1", "--directory", "docs/tutorial"],
+      "port": 8503
     }
   ]
 }

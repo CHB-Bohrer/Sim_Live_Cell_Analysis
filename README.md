@@ -7,7 +7,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits tog
 [CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** see the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
 
 ## New here? Take the narrated tutorial
-Double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 40 minutes of animated, narrated scenes covering the
+Watch the video **[docs/tutorial/tutorial_720p.mp4](docs/tutorial/tutorial_720p.mp4)** (46 min, narrated), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 40 minutes of animated, narrated scenes covering the
 pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = your browser's
 speech synthesis (Edge's "Natural" voices sound best); details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
 

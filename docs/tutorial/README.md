@@ -35,3 +35,13 @@ Nothing to install, nothing is sent anywhere.
   `scenes_a.js`, `scenes_b.js`: the narration (one sentence per beat) and which visual cue goes with it. No libraries, works from `file://`.
 - Keep each sentence under ~250 characters: some online voices stop reading long utterances.
 - Run numbers in the screenshots come from `loci_demo_seed11_24bba2`, `tracking_demo_seed3_e15523`, `loci_demo_seed8_f5c88d` and `loci_3d_seed23_2163f4`.
+
+## The MP4 (`tutorial_720p.mp4`, 46 min, 1280x720, 59 MB)
+The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
+A full-resolution 1600x900 copy (115 MB, too big for GitHub) is kept in `C:\Users\cbohr\SimLiveData\tutorial\`.
+How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):
+1. `tts.py`: exports every sentence of the tutorial and synthesizes one MP3 each (sends the narration text, already public in this repo, to Microsoft's service); writes `beats.json` with durations.
+2. `record.py`: plays `index.html#s=welcome&b=0&play=1` silently with every sentence lasting exactly its audio length (`window.BEAT_DUR`), screen-records it with Playwright and logs when each sentence started.
+   Playwright's video recorder needs an ffmpeg at `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`; the `imageio-ffmpeg` binary was copied there.
+3. `mix.py`: places each MP3 at its logged start time and encodes H.264 + AAC. Checked by extracting frames: the caption of a sentence is on screen when its audio starts, at 14:41 and 45:49 (no drift over 46 min); not every sentence was checked.
+Takes about 50 minutes in real time. Re-do it whenever the narration or the dashboard changes.

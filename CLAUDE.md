@@ -526,6 +526,9 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   and screenshot); (2) Windows long paths: the venv must be at a short path; (3) in Streamlit, `get_by_text` finds the intro boxes before the real widget (e.g. "Next error" appears in the intro text), so rectangles are
   found as the smallest visible container whose text contains the label; (4) a tall (9000 px) viewport stretches the fixed page background, so the capture injects `background-image:none`; (5) text in page JS strings
   written by a Python patch script loses `\n` escapes: use the Edit tool.
+- MP4 (2026-10-17; user asked for "claudes voice and an mp4"): `docs/tutorial/tutorial_720p.mp4` (46 min, 59 MB, 1280x720); the full-res 115 MB copy is in `C:\Users\cbohr\SimLiveData\tutorial\` (GitHub limit is 100 MB per file).
+  Voice = Microsoft `en-US-JennyNeural` via `edge-tts` (the user chose it; Claude's own voice cannot be produced). Scripts `scripts/tutorial/video/{tts,record,mix}.py`; the player accepts `#s=<id>&b=<n>&play=1`
+  and `window.BEAT_DUR` (fixed sentence lengths) for recording. Regenerating takes ~50 min of real time. Playwright's recorder needed an ffmpeg copied to `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`.
 - When the dashboard changes: re-run the capture + build, then fix any scene whose control was renamed. Sentences must stay under ~250 characters (some online voices cut off long utterances). NOT checked: how the
   voices actually sound (no audio output was available to the author), and the tutorial on Chrome/Safari.
 
