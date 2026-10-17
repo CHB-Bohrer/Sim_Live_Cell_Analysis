@@ -514,6 +514,21 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 
 - Display scaling (2026-10-11): single-cell and all-cells players scale each locus colour once for the whole movie from the cell's own mask region (fastview.movie_limits); before, each frame was scaled to the crop maximum, so cosmic rays and fiducial beads in the crop corners made the real spots look missing (spot < 30% of crop max in 70-92% of frames in 3D runs). Measured locus D = MSD/(4t) at 10 s: library loci 0.0017-0.0019 um2/s (falls to 0.0011 at 100 s, nm_per_unit 50 and block_duration_s 10 are PLACEHOLDERS), toy loci 0.0029; the nucleus itself moves 0.43 um per frame.
 
+## Narrated tutorial (2026-10-17; user: "in depth tutorial with animation and voice over ... the person should know how to use the UI")
+- `docs/tutorial/index.html` (+ `engine.js`, `anims.js`, `scenes_a.js`, `scenes_b.js`, `tutorial.css`, `shots_data.js`, `img/`): self-contained, no libraries, works from `file://`.
+  36 scenes / ~220 sentences / ~6,300 words (~40 min). Narration = the browser's speech synthesis (Edge "Online (Natural)" voices are best; the picker is on the start screen). It is NOT
+  Claude's own voice (not callable from a local page); an MP4 with audio was not made (no ffmpeg on this PC; only the robotic David/Zira/Mark SAPI voices are installed).
+- Screenshots are real dashboard pages: `scripts/tutorial/capture_shots.py` (Playwright driving the installed Edge, in a separate venv `C:\Users\cbohr\shotenv_tmp\v`, NOT the simlive env) captures TALL page images + the
+  rectangle of each control; `scripts/tutorial/build_data.py <shots dir>` copies them to `docs/tutorial/img` and writes `shots_data.js`. Scenes refer to controls by name (`f("next", "Next error")`), so a
+  layout change needs only a re-capture. Runs shown: `loci_demo_seed11_24bba2` (most pages), `tracking_demo_seed3_e15523` (tracking errors), `loci_demo_seed8_f5c88d` (Images part 2 measured effects), `loci_3d_seed23_2163f4` (Stage page).
+  The capture needs the test dashboard on port 8502 and takes ~10 min; it does not use the GPU.
+- Gotchas hit: (1) the in-app browser pane gives only 800x500 screenshots and shows `file://` pages as static snapshots (no scripts), so test the tutorial with Playwright (`tut.py`-style: open `index.html#s=<id>&b=<n>`
+  and screenshot); (2) Windows long paths: the venv must be at a short path; (3) in Streamlit, `get_by_text` finds the intro boxes before the real widget (e.g. "Next error" appears in the intro text), so rectangles are
+  found as the smallest visible container whose text contains the label; (4) a tall (9000 px) viewport stretches the fixed page background, so the capture injects `background-image:none`; (5) text in page JS strings
+  written by a Python patch script loses `\n` escapes: use the Edit tool.
+- When the dashboard changes: re-run the capture + build, then fix any scene whose control was renamed. Sentences must stay under ~250 characters (some online voices cut off long utterances). NOT checked: how the
+  voices actually sound (no audio output was available to the author), and the tutorial on Chrome/Safari.
+
 ## Dashboard background (2026-10-16)
 - The page background is the Bohrer Lab website's faint chromatin field (user's choice among the site's backgrounds; source: the `.fieldbg` canvas of https://chb-bohrer.github.io, repo CHB-Bohrer.github.io).
   `app/bgfield.py` redraws the same recipe with PIL (seed 67, 1920x1080, transparent) into `app/static/bgfield.png` (committed, 450 KB); `style.CSS` puts it behind `.stApp` with `background-attachment: fixed`;
