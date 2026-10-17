@@ -37,7 +37,7 @@ import yaml
 from simlive.stage3_microscopy import errors as ERR
 
 REFERENCE = ("psf_blur", "qe", "shot_noise", "read_noise")
-ONLY_3D = ("slice_skew", "piezo")
+ONLY_3D = ("slice_skew", "piezo", "biplane_registration")
 
 # per source: the analyses to compare, first = not corrected. spec keys: localize_loci keywords (median_px, method, intensity_background,
 # row_correct), "calib": None | "images" | "movie" with "parts" (which calibration components), "post": raw | global | percell (bleaching).

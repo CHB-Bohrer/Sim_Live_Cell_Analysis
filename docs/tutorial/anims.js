@@ -458,3 +458,52 @@ A.epcurve = (stage) => {
   return { instant: false, n(v) { S.N.set(v, this.instant); return this; }, sigma(v) { S.sig.set(v, this.instant); return this; }, wrong(v) { S.wrong.set(v, this.instant); return this; },
     points(on) { S.pts.set(on ? 1 : 0, this.instant); return this; }, recovered(on) { S.show.set(on ? 1 : 0, this.instant); return this; }, destroy() { cv.destroy(); } };
 };
+
+/* ================================================================ 11. biplane: two planes at once, stepped through the nucleus */
+A.biplane = (stage) => {
+  const S = { ph: 0, pos: new Tween(0), reg: new Tween(0) };
+  const SX = 60, SY = 90, SW = 560, SH = 540, zTop = 120, zBot = 590;                 // side view
+  const zpx = (z) => zBot - (z / 13.6) * (zBot - zTop);                                 // z in um (0 = coverslip) -> pixel row
+  const locus = { z: 7.4 };
+  const titles = ["One plane at a time (widefield mode)", "Biplane: two planes 600 nm apart at the same moment", "A nucleus is thicker than that, so the stage steps",
+    "Each step gives two planes: even sampling every 0.6 µm", "The two camera halves are not registered perfectly", "Beads in the image measure the offset, and it is undone"];
+  const cv = new Canvas(stage, (c, t, dt) => {
+    S.pos.step(dt, 1.2); S.reg.step(dt, 2);
+    txt(c, titles[S.ph], 640, 46, { size: 27, weight: 700, align: "center" });
+    panel(c, SX - 20, SY - 10, SW + 40, SH + 30, "Side view of the sample", PAL.line);
+    c.fillStyle = "#334e7a"; c.fillRect(SX, zpx(0) + 4, SW, 10); txt(c, "coverslip (slide)", SX + 10, zpx(0) + 32, { size: 14, color: PAL.muted });
+    c.beginPath(); c.ellipse(SX + 270, zpx(7.0), 190, (6.0 / 13.6) * (zBot - zTop), 0, 0, 7); c.fillStyle = "rgba(96,165,250,.16)"; c.fill(); c.strokeStyle = PAL.blue; c.lineWidth = 3; c.stroke();
+    circ(c, SX + 300, zpx(locus.z), 8, PAL.purple, "#fff", 2);
+    for (const bx of [SX + 60, SX + 490]) circ(c, bx, zpx(0.3), 6, PAL.amber, "#fff", 1.5);
+    txt(c, "beads", SX + 505, zpx(0.3) - 12, { size: 14, color: PAL.amber });
+    const step = 1.2, z0 = 0.3, cur = Math.min(10, Math.floor(S.pos.v));
+    const pairAt = (j) => [z0 + j * step - 0.3, z0 + j * step + 0.3];
+    const jLocus = Math.round((locus.z - z0) / step);
+    if (S.ph === 0) { line(c, SX, zpx(7.0), SX + SW, zpx(7.0), PAL.teal, 3); txt(c, "one focal plane", SX + SW - 8, zpx(7.0) - 8, { size: 15, color: PAL.teal, align: "right" }); }
+    else {
+      const list = S.ph >= 2 ? Array.from({ length: cur + 1 }, (_, j) => j) : [jLocus];
+      const now = S.ph === 2 ? cur : jLocus;
+      for (const j of list) { const [a, b] = pairAt(j), on = j === now; for (const [zz, col] of [[a, PAL.teal], [b, PAL.pink]]) { c.globalAlpha = on ? 1 : 0.35; line(c, SX, zpx(zz), SX + SW, zpx(zz), col, on ? 3 : 2); c.globalAlpha = 1; } }
+      const [a, b] = pairAt(now);
+      line(c, SX + SW + 8, zpx(a), SX + SW + 8, zpx(b), "#fff", 2); txt(c, "0.6 µm", SX + SW - 8, (zpx(a) + zpx(b)) / 2 + 5, { size: 15, color: "#fff", align: "right", weight: 700 });
+      if (S.ph >= 3) txt(c, "stage step 1.2 µm → planes every 0.6 µm", SX + 12, zpx(13.0), { size: 16, color: PAL.green });
+    }
+    const CX = 700, CY = 120, CW = 500, CH = 400;
+    panel(c, CX - 20, SY - 10, CW + 40, CH + 90, "One camera, two halves", PAL.line);
+    rrect(c, CX, CY, CW, CH, 8, "#05080f", PAL.grey);
+    line(c, CX + CW / 2, CY, CX + CW / 2, CY + CH, PAL.grey, 2);
+    const [pa, pb] = S.ph === 0 ? [7.0, 7.0] : pairAt(S.ph === 2 ? cur : jLocus);
+    const amp = (zp) => Math.exp(-0.5 * ((zp - locus.z) / 0.45) ** 2) * (S.ph === 0 ? 1 : 0.5);
+    const spot = (cx, cy, a, w, col) => { for (let i = 6; i >= 1; i--) { c.globalAlpha = a * 0.13; circ(c, cx, cy, w * i * 0.55, col); } c.globalAlpha = 1; };
+    const regOff = S.ph >= 4 ? 18 * (1 - S.reg.v) : 0;
+    spot(CX + (S.ph === 0 ? CW / 2 : CW / 4), CY + CH / 2, amp(pa), 9 + 14 * (1 - amp(pa)), PAL.teal);
+    txt(c, S.ph === 0 ? "the plane" : "plane A", CX + (S.ph === 0 ? CW / 2 : CW / 4), CY + CH - 14, { size: 15, color: PAL.teal, align: "center" });
+    if (S.ph >= 1) {
+      spot(CX + 3 * CW / 4 + regOff, CY + CH / 2 + regOff * 0.6, amp(pb), 9 + 14 * (1 - amp(pb)), PAL.pink);
+      txt(c, "plane B", CX + 3 * CW / 4, CY + CH - 14, { size: 15, color: PAL.pink, align: "center" });
+      txt(c, "z from the brightness ratio of A and B   ·   each plane gets half of the light", CX + CW / 2, CY + CH + 36, { size: 16, color: PAL.muted, align: "center" });
+    }
+    if (S.ph >= 4) txt(c, regOff > 1 ? "B is shifted: positions are biased" : "bead-measured offset removed", CX + CW / 2, CY + CH + 62, { size: 17, color: regOff > 1 ? PAL.red : PAL.green, align: "center", weight: 700 });
+  });
+  return { instant: false, phase(n) { S.ph = n; if (n === 2) S.pos.set(10, this.instant); if (n >= 3) S.pos.set(10, true); if (n < 2) S.pos.set(0, true); S.reg.set(n >= 5 ? 1 : 0, this.instant); return this; }, destroy() { cv.destroy(); } };
+};

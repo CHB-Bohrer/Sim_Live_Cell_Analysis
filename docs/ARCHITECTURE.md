@@ -220,7 +220,7 @@ flowchart LR
         d7["Spot finder (Chen 2025), MS2 trace,<br/>MS2 → Pol II deconvolution"]:::built
         d8["Calibration from images AND<br/>from the movie; measured effect<br/>of every image error"]:::built
         d9["Dashboard (dark theme), players,<br/>sweeps"]:::built
-        d10["Instrument preset: Bruker Vutara VXL (2D),<br/>bleed-through from spectra"]:::built
+        d10["Instrument preset: Bruker Vutara VXL (widefield mode),<br/>bleed-through from spectra"]:::built
     end
     subgraph P2["Next: make it real (needs your data)"]
         direction TB
@@ -228,7 +228,7 @@ flowchart LR
         n2["Calibrate to your measured<br/>MSD (nm and seconds): the file exists,<br/>its inputs are still assumed"]:::standin
         n3["Measured values: MS2 brightness R,<br/>error sizes, real movie"]:::planned
         n4["Choose spots with all three signals;<br/>separate homologous copies"]:::planned
-        n5["Vutara biplane 3D (two planes<br/>600 nm apart, 50:50 split)"]:::planned
+        n5["Vutara biplane 3D (two planes<br/>600 nm apart, 50:50 split)"]:::built
     end
     subgraph P3["Then: the real question"]
         direction TB

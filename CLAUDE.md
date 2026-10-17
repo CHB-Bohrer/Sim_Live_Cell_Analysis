@@ -390,7 +390,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   - Showcase runs (R = 25, cells moving): loci_demo_seed7_47132d (placeholder gene) and loci_demo_seed8_f5c88d (denser gene, error_effects run on it).
 - 2026-10-13 round (user's questions: which optics? cytoplasm? how is the posterior sampled? start probability? burst rule?):
   - **Instrument presets:** `configs/instruments/<name>.yaml`, applied with `instrument: <name>` / `--set instrument=...` (deep-merged by
-    `io.runs.load_config`, --set still wins; sidebar "Microscope" radio). `vutara_vxl` = Bruker Vutara VXL in 2D bypass mode. Every value is
+    `io.runs.load_config`, --set still wins; sidebar "Microscope" radio). `vutara_vxl` = Bruker Vutara VXL in widefield ("bypass") mode; `vutara_vxl_biplane` = its biplane 3D mode (see "Vutara biplane mode"). Every value is
     sourced or ASSUMED (docs/INSTRUMENTS.md):
     - 60x/1.3 NA silicone, ~100 nm px, Orca Fusion BT QE 0.95, top-hat (vignette 3% ASSUMED), active focus (defocus 30 nm), sequential colours;
     - bleed-through FROM SPECTRA (FPbase EGFP: 0.0042 cross-excitation at 555 nm x 0.062/0.717 in-band emission = 0.036%, vs ~8.6% if excited
@@ -513,6 +513,16 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - Players (app/player.py): every in-browser movie now shows 'Loading frames… n / N' with a progress bar and a disabled button, then 'Ready: press Play'. Chromatin player: the grey circle is the simulation's confining sphere (the territory, NOT the nucleus); caption and in-image label say so. The territory is ~1-1.5 um across at 50 nm/unit vs a 12 um nucleus.
 
 - Display scaling (2026-10-11): single-cell and all-cells players scale each locus colour once for the whole movie from the cell's own mask region (fastview.movie_limits); before, each frame was scaled to the crop maximum, so cosmic rays and fiducial beads in the crop corners made the real spots look missing (spot < 30% of crop max in 70-92% of frames in 3D runs). Measured locus D = MSD/(4t) at 10 s: library loci 0.0017-0.0019 um2/s (falls to 0.0011 at 100 s, nm_per_unit 50 and block_duration_s 10 are PLACEHOLDERS), toy loci 0.0029; the nucleus itself moves 0.43 um per frame.
+
+## Vutara biplane mode (2026-10-17; user: "change it, and why not build in the biplane ... you still need to do a zstack ... calibrate with the beads within the image")
+- The sidebar label "Bruker Vutara VXL (2D)" was misleading (the instrument is 3D-capable; the preset modelled only its widefield mode): renamed "(widefield mode)"; new third choice "(biplane 3D mode)" = `configs/instruments/vutara_vxl_biplane.yaml`.
+- Facts (Bruker bi-plane page, fetched 2026-10-17): two planes 600 nm apart, 50:50 splitter, two halves of one camera, z from the intensity difference by a 3D-PSF fit, PSF calibrated with a bead imaged as a function of z, z-stacks possible; NO axial range per acquisition and
+  no registration step are stated. So a z-stack is still needed for a ~10 um nucleus (the user was right).
+- Code: `acquisition.z_stack.biplane: {enabled, separation_um: 0.6, photon_fraction: 0.5}` in `stage3_microscopy/render.py` (`Imager.biplane`; `n_slices` = stage positions, planes = 2x, stage step = 2 x separation so the planes are EVEN 0.6 um and the 3D localizer is unchanged; both planes of a pair share the
+  time index and the piezo error; each plane gets `plane_fraction` of the signal, background not halved); new error source `biplane_registration` (second plane shifted `shift_px`, its height `separation_error_um` off; in `_LATER`, off unless a config enables it; listed in `error_effects.ONLY_3D`).
+  `stage6_analysis/biplane.py` `estimate_plane_offset` (beads between the lowest pair -> offset) + `localize_loci_3d(plane_shift_px=)`; pipeline `_undo_biplane_registration` writes `truth_3d_registered` and `biplane_registration` in scores.json. `tests/test_biplane.py` (5 tests). 176+ CPU tests.
+- Measured once (seed 61, 2 cells, 12 frames): offset (0.321, -0.214) px vs true (0.35, -0.25); locus error unchanged within noise (dominated by the placeholder axial chromatic shift; calibration was off); biplane vs an ordinary 22-plane z-stack: same 3D rms (0.27 um), lateral rms 0.06 vs 0.10 um. ONE seed: not evidence.
+- NOT done: true plane-separation and PSF z-calibration from a bead z-scan; registration with rotation / scale; a bead SLIDE calibration of the offset; biplane in the E-P tab's vector model is separate (`ep_acquisition.py`); the Images/Stage tabs have not been looked at with a biplane run; the tutorial MP4 predates this (HTML tutorial has a biplane scene).
 
 ## Narrated tutorial (2026-10-17; user: "in depth tutorial with animation and voice over ... the person should know how to use the UI")
 - `docs/tutorial/index.html` (+ `engine.js`, `anims.js`, `scenes_a.js`, `scenes_b.js`, `tutorial.css`, `shots_data.js`, `img/`): self-contained, no libraries, works from `file://`.

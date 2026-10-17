@@ -1,6 +1,6 @@
 # Narrated tutorial
 
-`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 40 minutes in 36 short scenes;
+`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 45 minutes in 37 short scenes;
 every scene can be jumped to from the list on the left). **Open it by double-clicking `index.html`** (Microsoft Edge recommended).
 Nothing to install, nothing is sent anywhere.
 
@@ -37,6 +37,7 @@ Nothing to install, nothing is sent anywhere.
 - Run numbers in the screenshots come from `loci_demo_seed11_24bba2`, `tracking_demo_seed3_e15523`, `loci_demo_seed8_f5c88d` and `loci_3d_seed23_2163f4`.
 
 ## The MP4 (`tutorial_720p.mp4`, 46 min, 1280x720, 59 MB)
+**Out of date:** it was made before the Vutara biplane scene and the renamed Vutara label were added to the HTML tutorial (2026-10-17, later). Re-render with the steps below (~55 min) when wanted.
 The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
 A full-resolution 1600x900 copy (115 MB, too big for GitHub) is kept in `C:\Users\cbohr\SimLiveData\tutorial\`.
 How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):

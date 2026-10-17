@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import tifffile
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, shift
 
 from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
@@ -65,10 +65,11 @@ def median_z_for(median_z, step_um: float, axial_sigma_um: float | None) -> int:
 
 
 def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: str = "dog_viterbi", dilate_px: int = 2,
-                     calib: str | None = None, axial_sigma_um: dict | None = None, px_um: float = 0.13, **kw) -> pd.DataFrame:
+                     calib: str | None = None, axial_sigma_um: dict | None = None, px_um: float = 0.13, plane_shift_px=None, **kw) -> pd.DataFrame:
     """Locate every locus in every frame of one isolated cell from the full z-stacks. `stacks`: {channel: path of (T, Z, Y, X) TIFF}.
     With `calib` (folder of a saved Calibration) the crops are dark/flat/hot-pixel corrected and the measured chromatic shift (lateral and
-    axial) of the colour is subtracted from the detected position. `axial_sigma_um`: {channel: nominal axial PSF sigma} for median_z: auto."""
+    axial) of the colour is subtracted from the detected position. `axial_sigma_um`: {channel: nominal axial PSF sigma} for median_z: auto.
+    `plane_shift_px` = (dy, dx): biplane registration offset of the second plane of every pair (stage6_analysis/biplane.py); it is undone when the volume is cut out."""
     from simlive.stage6_analysis.localize import _load_calibration, centroid_in_crop, spot_params
 
     cal = _load_calibration(calib) if calib else None
@@ -88,6 +89,8 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
 
         def volume(i, r):
             v = _crop3d(np.asarray(st[int(r.t)]), int(r.crop_y0), int(r.crop_x0), S, pad)
+            if plane_shift_px is not None and any(plane_shift_px):
+                v[1::2] = np.stack([shift(pl, (-plane_shift_px[0], -plane_shift_px[1]), order=1, mode="nearest") for pl in v[1::2]])
             return cal.correct(v, name, int(r.crop_y0), int(r.crop_x0)).astype(np.float32) if cal is not None else v
 
         frames = list(fr.itertuples())

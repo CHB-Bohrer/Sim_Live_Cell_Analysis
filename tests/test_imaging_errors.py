@@ -33,7 +33,7 @@ def test_master_switch_off_keeps_only_the_original_model():
     E = ERR.ErrorSet(_cfg("imaging_errors.enabled=false"))
     assert E.enabled_ids() == ERR.BASELINE and not E.master
     full = ERR.ErrorSet(_cfg())
-    assert full.master and set(full.enabled_ids()) == set(ERR.ORDER) - {"sequential_colour"}   # an acquisition choice, off unless an instrument sets it
+    assert full.master and set(full.enabled_ids()) == set(ERR.ORDER) - {"sequential_colour", "biplane_registration"}   # acquisition choices, off unless an instrument sets them
 
 
 def test_frames_are_reproducible_and_independent_of_other_frames():

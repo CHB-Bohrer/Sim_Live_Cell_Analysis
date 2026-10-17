@@ -73,6 +73,15 @@ SOURCES: dict[str, dict] = {
                 "settling_um": (0.04, "um", "lag just after the piezo starts a scan: the first planes are recorded before it has settled"),
                 "bidirectional": (True, "", "alternate the scan direction (up, down, up, ...) from frame to frame"),
                 "readout_noise_nm": (5.0, "nm", "noise of the piezo's own position sensor, which logs where each plane really was")}),
+    "biplane_registration": dict(
+        group="Sample position", title="Biplane: the two camera halves are not perfectly registered", baseline=False,
+        what="In biplane imaging a 50:50 beam splitter sends light from two focal planes (about 600 nm apart in the sample) to the two halves of one camera. "
+             "The two halves are never aligned perfectly: the second plane's image is shifted sideways by a fraction of a pixel, and the real plane "
+             "separation differs a little from the nominal one.",
+        effect="A locus is seen at slightly different (y, x) positions in the two planes, which tilts the 3D position fit: the lateral position and, "
+               "through the plane separation, the height are biased. Beads that appear in both planes measure the offset (a bead slide, or the beads in the image).",
+        params={"shift_px": ([0.35, -0.25], "px (y, x)", "offset of the second plane's image relative to the first"),
+                "separation_error_um": (0.03, "um", "the second plane is this much higher than the nominal separation")}),
     "psf_blur": dict(
         group="Optics", title="Diffraction blur (PSF)", baseline=True,
         what="A point of light is imaged as a small blob, not a point: sigma = 0.21 x wavelength / NA.",
@@ -202,7 +211,7 @@ SOURCES: dict[str, dict] = {
 }
 
 # physical order in which a frame is degraded (used for the cumulative build-up in the dashboard)
-ORDER = ["stage_drift", "chromatic_shift", "sequential_colour", "slice_skew", "piezo", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
+ORDER = ["stage_drift", "chromatic_shift", "sequential_colour", "slice_skew", "piezo", "biplane_registration", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
          "background", "autofluorescence", "cytoplasm", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
          "read_noise", "row_noise", "dsnu", "adc"]
 assert set(ORDER) == set(SOURCES)
@@ -214,6 +223,7 @@ BRIEF = {
     "sequential_colour": "Colours are exposed one after another, so the loci move a little between the colour images.",
     "slice_skew": "Planes of a z-stack are taken one after another, so a moving locus is smeared in z.",
     "piezo": "The focus motor puts each plane slightly off its intended height.",
+    "biplane_registration": "Biplane: the second camera half is shifted a little, so a locus appears at different positions in the two planes.",
     "psf_blur": "Diffraction turns every point of light into a blob ~0.2 um wide.",
     "defocus": "The focus wanders, so spots get wider and dimmer (or shift in z in a stack).",
     "exposure_motion": "A locus moves while the shutter is open, smearing its spot.",
@@ -239,7 +249,7 @@ BRIEF = {
 assert set(BRIEF) == set(SOURCES)
 # Random-stream numbers. Frozen: a source keeps its number when others are inserted into ORDER, so images made before a new source existed are
 # still reproduced bit for bit. New sources get the next free number.
-_LATER = ["piezo", "cytoplasm", "sequential_colour"]          # added after the first version, in this order: they get the next numbers
+_LATER = ["piezo", "cytoplasm", "sequential_colour", "biplane_registration"]          # added after the first version, in this order: they get the next numbers
 INDEX = {s: i + 1 for i, s in enumerate([x for x in ORDER if x not in _LATER])}
 for _s in _LATER:
     INDEX[_s] = len(INDEX) + 1

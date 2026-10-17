@@ -1,4 +1,4 @@
-# Bruker Vutara VXL, used as a live-cell widefield microscope in its 2D "bypass" mode (biplane 3D: not built yet, see docs/INSTRUMENTS.md).
+# Bruker Vutara VXL, used as a live-cell widefield microscope in its widefield ("bypass") mode: ONE focal plane per image (the biplane acquisition is a separate mode: see docs/INSTRUMENTS.md).
 # Use it on any config:   --set instrument=vutara_vxl     (or `instrument: vutara_vxl` in the YAML). Explicit --set values still win.
 #
 # Every value is either SOURCED (fetched 2026-10-13, see docs/INSTRUMENTS.md for links) or marked ASSUMED (check on your instrument).
@@ -10,7 +10,7 @@
 #   [News-Medical 2025]  Orca Fusion BT, quantum efficiency 95%; "around 100 nanometers per pixel".
 #   [FPbase EGFP]  excitation at 555 nm = 0.0042 of the peak; 8.6% of the emission falls in 570-620 nm vs 71.7% in 500-550 nm.
 instrument_info:
-  name: Bruker Vutara VXL (2D bypass mode)
+  name: Bruker Vutara VXL (widefield mode)
   colour_mode: sequential
 optics:
   modality: widefield            # top-hat epi-illumination [Bruker]

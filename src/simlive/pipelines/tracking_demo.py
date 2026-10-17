@@ -30,6 +30,7 @@ from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
 from simlive.stage6_analysis.localize import localize_loci, locus_distances, photons_in_frame, score_localization
 from simlive.stage6_analysis.fiducials import (correct_with_beads, correct_with_plane_positions, score_variants, track_fiducials)
+from simlive.stage6_analysis.biplane import estimate_plane_offset
 from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances_3d, score_localization_3d
 from simlive.stage6_analysis.ms2 import ms2_trace, ms2_truth, score_ms2
 from simlive.stage4_segtrack.trackers import make_tracker
@@ -289,6 +290,8 @@ def _locate_3d(A: _Analysis, src: str, out5: Path, out6: Path, n_cells: int, sco
     sc = _write_locus_results(A, out6, "_3d", pos3, locus_distances_3d, score3)
     if sc is not None:
         scores["truth_3d"] = sc
+    if A.zinfo.get("biplane") and (A.s3 / "fiducials.csv").exists():
+        _undo_biplane_registration(A, out5, out6, stacks, z, ana3, score3, scores)
     if not A.apply_cal:
         return pos3
     pos3c = map_cells(localize_loci_3d, out5, n_workers=A.n_workers, stacks=stacks, z_um=z, n_loci=A.n_loci, calib=str(A.cal_dir), **ana3)
@@ -296,6 +299,23 @@ def _locate_3d(A: _Analysis, src: str, out5: Path, out6: Path, n_cells: int, sco
     if scc is not None:
         scores["truth_3d_calibrated"] = scc
     return pos3c
+
+
+def _undo_biplane_registration(A: _Analysis, out5: Path, out6: Path, stacks: dict, z: list, ana3: dict, score3, scores: dict) -> None:
+    """Biplane: measure the offset between the two camera halves from the beads that are in the image, undo it, and locate the loci again."""
+    A.progress("Stage 6: biplane: measuring the offset between the two planes from the fiducial beads")
+    seg = A.run / "stage4_segtrack" / "auto_segmentation.tif"
+    if not seg.exists():
+        seg = A.s3 / "labels.tif"
+    off, tab = estimate_plane_offset(A.s3 / "nucleus_zstack.tif", seg)
+    tab.to_csv(out6 / "biplane_registration_measurements.csv", index=False)
+    true = np.asarray(A.zinfo.get("plane_offset_px", [[0, 0], [0, 0]])[1], float)
+    scores["biplane_registration"] = {"estimated_dy_px": off[0], "estimated_dx_px": off[1], "true_dy_px": float(true[0]), "true_dx_px": float(true[1]),
+                                      "n_measurements": int(len(tab)), "n_beads": int(tab.bead.nunique()) if len(tab) else 0}
+    posr = map_cells(localize_loci_3d, out5, n_workers=A.n_workers, stacks=stacks, z_um=z, n_loci=A.n_loci, plane_shift_px=off, **ana3)
+    sc = _write_locus_results(A, out6, "_3d_reg", posr, locus_distances_3d, score3)
+    if sc is not None:
+        scores["truth_3d_registered"] = sc
 
 
 def _correct_with_fiducials(A: _Analysis, out6: Path, basepos: pd.DataFrame, scores: dict) -> None:

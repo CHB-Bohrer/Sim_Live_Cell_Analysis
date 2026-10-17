@@ -78,6 +78,17 @@ The piezo that moves the focus from plane to plane does not put every plane exac
 | `bidirectional` | `True` |  | alternate the scan direction (up, down, up, ...) from frame to frame |
 | `readout_noise_nm` | `5.0` | nm | noise of the piezo's own position sensor, which logs where each plane really was |
 
+### Biplane: the two camera halves are not perfectly registered  (`biplane_registration`)
+
+In biplane imaging a 50:50 beam splitter sends light from two focal planes (about 600 nm apart in the sample) to the two halves of one camera. The two halves are never aligned perfectly: the second plane's image is shifted sideways by a fraction of a pixel, and the real plane separation differs a little from the nominal one.
+
+**Effect:** A locus is seen at slightly different (y, x) positions in the two planes, which tilts the 3D position fit: the lateral position and, through the plane separation, the height are biased. Beads that appear in both planes measure the offset (a bead slide, or the beads in the image).
+
+| parameter | default | unit | meaning |
+|---|---|---|---|
+| `shift_px` | `[0.35, -0.25]` | px (y, x) | offset of the second plane's image relative to the first |
+| `separation_error_um` | `0.03` | um | the second plane is this much higher than the nominal separation |
+
 
 ## Optics
 

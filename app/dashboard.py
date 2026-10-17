@@ -213,10 +213,12 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_speed = st.slider("Cell speed scale", 0.0, 2.0, 0.4, 0.05, key="l_speed", help="Multiplies how fast the cells move (0.4 keeps tracking easy).")
         l_phot = st.number_input("Photons per locus per second", 200, 100000, 6000, 200, key="l_phot", help="Brightness of each locus spot. A placeholder until measured.")
         l_div = st.slider("Division probability per cell per frame", 0.0, 0.05, 0.0, 0.005, key="l_div", help="Chance per frame that a cell divides into two.")
-        l_inst = st.radio("Microscope", ["generic", "vutara_vxl"], key="l_inst", horizontal=True,
-                          format_func={"generic": "Generic placeholder", "vutara_vxl": "Bruker Vutara VXL (2D)"}.get,
+        l_inst = st.radio("Microscope", ["generic", "vutara_vxl", "vutara_vxl_biplane"], key="l_inst", horizontal=True,
+                          format_func={"generic": "Generic placeholder", "vutara_vxl": "Bruker Vutara VXL (widefield mode)",
+                                        "vutara_vxl_biplane": "Bruker Vutara VXL (biplane 3D mode)"}.get,
                           help="Vutara VXL: 60x / 1.3 NA silicone objective, ~100 nm pixels, Orca Fusion BT (QE 95%), flat top-hat light, colours "
                                "taken one after another (bleed-through from the spectra: ~0.04%; the loci move between colour exposures). "
+                               "Biplane 3D mode: two planes 600 nm apart at once (half the light each), stepped through the nucleus, with fiducial beads; it sets its own z-stack, so the 3D options below are ignored. "
                                "Sources and assumptions: docs/INSTRUMENTS.md.")
         l_fov = st.slider("Field of view (µm, square)", 30, 120, 80, 5, key="l_fov",
                           help="Side length of the imaged area. A smaller field is much cheaper for z-stacks (50 µm is a good start).")
@@ -316,7 +318,11 @@ if go_loci:
     if l_conf:
         common.append("optics.modality=confocal")
     est_gb = 0.0
-    if l_3d:
+    if l_inst == "vutara_vxl_biplane":       # the preset supplies the z-stack (11 stage positions x 2 planes) and the beads
+        est_gb = l_frames * 22 * (l_fov / 0.1) ** 2 * 2 * 3 / 1e9
+        st.info(f"Biplane 3D run: 22 planes 0.6 µm apart in every frame (11 stage positions x 2 planes), about {est_gb:.1f} GB of images "
+                f"({l_frames} frames × 3 colours). Try 40-50 µm fields and 30-60 frames.")
+    elif l_3d:
         px_um = load_config(REPO_ROOT / "configs" / "loci_demo.yaml")["optics"]["pixel_size_nm"] / 1000.0
         est_gb = l_frames * l_nz * (l_fov / px_um) ** 2 * 2 * 3 / 1e9
         zc = round(0.2 + (l_nz - 1) / 2 * l_dz, 3) if l_fid else "null"      # fiducial beads need the stack to reach the slide

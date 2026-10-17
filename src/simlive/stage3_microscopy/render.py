@@ -27,6 +27,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter
+from scipy.ndimage import shift as nd_shift
 
 from simlive.stage3_microscopy import errors as ERR
 from simlive.stage3_microscopy.errors import ErrorSet
@@ -149,6 +150,15 @@ def _spots_from_arrays(shape, y, x, photons, sig: float) -> np.ndarray:
 def _spot_photons(shape, spots: pd.DataFrame, sig: float) -> np.ndarray:
     """Expected photons per pixel from point sources (columns y_px, x_px, photons)."""
     return _spots_from_arrays(shape, spots.y_px.to_numpy(), spots.x_px.to_numpy(), spots.photons.to_numpy(), sig)
+
+
+def _shift_planes(vol: np.ndarray, off: np.ndarray, order: int) -> np.ndarray:
+    """Shift every plane k of a (nz, ny, nx) stack by off[k] = (dy, dx) pixels (bilinear for images, nearest for label masks)."""
+    out = vol.copy()
+    for k in range(len(vol)):
+        if off[k].any():
+            out[k] = nd_shift(vol[k], off[k], order=order, mode="nearest")
+    return out
 
 
 def _points3d(shape, zk: np.ndarray, Y, X, Z, photons, sig: float, sz: float, fh: float, sig_h: float, sz_h: float) -> np.ndarray:
@@ -331,6 +341,19 @@ class Imager:
         self.slice_time_s = float(zs.get("slice_time_s", 0.0))
         self.projection = str(zs.get("projection", "max"))
         self.zk = self.zcenter + (np.arange(self.nz) - (self.nz - 1) / 2) * self.zstep if self.nz else np.zeros(0)
+        # biplane (Bruker Vutara): at every stage position a 50:50 beam splitter images TWO planes `separation_um` apart at the same moment, on the two
+        # halves of the camera. The stage steps 2 x separation, so the planes tile the sample evenly: n_slices stage positions give 2 n_slices planes
+        # `separation_um` apart (the 3D localizer, which assumes even plane spacing, works unchanged). Each plane gets `photon_fraction` of the light.
+        bp = zs.get("biplane") or {}
+        self.biplane = bool(self.nz and bp.get("enabled"))
+        self.n_stage = self.nz                                    # stage positions per stack (= planes without biplane)
+        self.bp_sep = float(bp.get("separation_um", 0.6)) if self.biplane else 0.0
+        self.plane_fraction = float(bp.get("photon_fraction", 0.5)) if self.biplane else 1.0
+        if self.biplane:
+            self.zstep = self.bp_sep
+            s = self.zcenter + (np.arange(self.n_stage) - (self.n_stage - 1) / 2) * 2 * self.bp_sep
+            self.zk = np.stack([s - self.bp_sep / 2, s + self.bp_sep / 2], axis=1).ravel()
+            self.nz = 2 * self.n_stage
         # fiducial beads lying on the slide in every image: static point sources that emit in every colour
         self.fid = None
         if fiducials is not None and len(fiducials):
@@ -420,25 +443,48 @@ class Imager:
 
     def time_index(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
         """When (0 = first) each plane is recorded within the stack of frame t."""
-        k = np.arange(self.nz)
-        return k if self.scan_dir(t, E) > 0 else k[::-1]
+        k = np.arange(self.n_stage)
+        k = k if self.scan_dir(t, E) > 0 else k[::-1]
+        return np.repeat(k, 2) if self.biplane else k             # both planes of a biplane pair are recorded at the same moment
 
     def piezo_error_um(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
-        """How far each plane of frame t really is from its nominal height (um): random step error + bow + hysteresis + settling lag."""
+        """How far each plane of frame t really is from its nominal height (um): random step error + bow + hysteresis + settling lag.
+        With biplane the stage moves once per PAIR of planes, so both planes of a pair share the error."""
         E = E or self.E
         if not self.nz or not E.on("piezo"):
             return np.zeros(self.nz)
-        p, n, d = E.params["piezo"], self.nz, self.scan_dir(t, E)
+        p, n, d = E.params["piezo"], self.n_stage, self.scan_dir(t, E)
         u = (np.arange(n) - (n - 1) / 2) / max((n - 1) / 2, 1)
         rnd = ERR.rng_for(self.session, t, "piezo", 0).normal(0, p["repeatability_nm"] / 1000.0, n)
         bow = p["bow_um"] * (1 - u ** 2)
         hyst = d * p["hysteresis_um"] / 2
-        lag = -d * p["settling_um"] * np.exp(-self.time_index(t, E) / 2.0)
-        return rnd + bow + hyst + lag
+        lag = -d * p["settling_um"] * np.exp(-(self.time_index(t, E)[::2] if self.biplane else self.time_index(t, E)) / 2.0)
+        err = rnd + bow + hyst + lag
+        return np.repeat(err, 2) if self.biplane else err
+
+    def bp_plane_b(self) -> np.ndarray:
+        """Boolean mask over the planes: True for the second plane (the upper one) of every biplane pair."""
+        m = np.zeros(self.nz, bool)
+        if self.biplane:
+            m[1::2] = True
+        return m
+
+    def plane_offset_px(self, E: ErrorSet | None = None) -> np.ndarray:
+        """(nz, 2) lateral offset (y, x pixels) of every plane's image on the camera: zero for the first plane of a pair, the registration error
+        of the second camera half (`biplane_registration.shift_px`) for the second."""
+        E = E or self.E
+        out = np.zeros((self.nz, 2))
+        if self.biplane and E.on("biplane_registration"):
+            out[self.bp_plane_b()] = np.asarray(E.par("biplane_registration", "shift_px"), float)
+        return out
 
     def plane_z(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
-        """The true height of every plane of frame t (nominal + piezo error)."""
-        return self.zk + self.piezo_error_um(t, E)
+        """The true height of every plane of frame t (nominal + piezo error; with biplane also the error of the plane separation)."""
+        E = E or self.E
+        z = self.zk + self.piezo_error_um(t, E)
+        if self.biplane and E.on("biplane_registration"):
+            z = z + self.bp_plane_b() * float(E.par("biplane_registration", "separation_error_um"))
+        return z
 
     def piezo_readout(self, t: int, E: ErrorSet | None = None) -> np.ndarray:
         """What the piezo's position sensor would log for the planes of frame t: the true heights plus the sensor's own noise."""
@@ -748,15 +794,17 @@ class Imager:
         per_cell = self.per_cell_bleach(E)
         bleach = 1.0 if per_cell else self.bleach(channel, t, E)
         zk, nz = self.plane_z(t, E), self.nz               # where the planes really are (nominal unless the piezo source is on)
+        off = self.plane_offset_px(E)                      # (nz, 2) registration offset of each plane's image (biplane only)
         lab = None
         if channel == "nucleus":
             m = int(np.ceil(self.zstep / 0.25))
             dzf = self.zstep / m
-            n_pad = int(np.ceil(4 * sz / dzf)) + (2 if E.on("piezo") else 0)
+            moved = E.on("piezo") or (self.biplane and E.on("biplane_registration"))        # planes are not at their nominal heights
+            n_pad = int(np.ceil(4 * sz / dzf)) + (2 if moved else 0)
             zf = self.zk[0] - n_pad * dzf + dzf * np.arange((nz - 1) * m + 1 + 2 * n_pad)
             vol, lab = self.nucleus.volume(t, (dy, dx), dz, zf, zk, self._factor_dict(channel, t, E) if per_cell else None)
             blurred = gaussian_filter(vol, (sz / dzf, sig, sig) if sig > 0 else (sz / dzf, 0, 0))
-            if E.on("piezo"):                       # planes are off their nominal heights: interpolate the fine grid at the true heights
+            if moved:                               # planes are off their nominal heights: interpolate the fine grid at the true heights
                 pos = (zk - zf[0]) / dzf
                 i0 = np.clip(np.floor(pos).astype(int), 0, len(zf) - 2)
                 w = (pos - i0)[:, None, None].astype(np.float32)
@@ -767,11 +815,13 @@ class Imager:
             if fh > 0:
                 ph = ph + fh * ERR.broad_blur3d(raw, sig_h, sz_h / self.zstep)
             ph = ph * (self.opt["photons_per_px_s"] * self.exposure_s) * bleach
+            if off.any():                           # biplane: the second camera half is registered imperfectly, so its planes (and their masks) are shifted
+                ph, lab = _shift_planes(ph, off, 1), _shift_planes(lab, off, 0)
             s = self.nucleus.spots_by_t.get(int(t))
             if s is not None:
                 P = self._points_at(self.nucleus.spots_by_t, t, E)
                 w = self.bleach_of(channel, t, s["ids"], E) if per_cell else 1.0
-                ph = ph + bleach * _points3d(self.shape, zk, P[0] + dy, P[1] + dx, P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
+                ph = ph + bleach * _points3d(self.shape, zk, P[0] + dy + off[:, :1], P[1] + dx + off[:, 1:], P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
         else:
             k = int(channel[5:])
             P = self._points_at(self.loci[k].by_t, t, E) if k < len(self.loci) else None
@@ -779,16 +829,16 @@ class Imager:
                 ph = np.zeros((nz, *self.shape), np.float32)
             else:
                 w = self.bleach_of(channel, t, self.loci[k].by_t[int(t)]["ids"], E) if per_cell else bleach
-                ph = _points3d(self.shape, zk, P[0] + dy + cy, P[1] + dx + cx, P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
+                ph = _points3d(self.shape, zk, P[0] + dy + cy + off[:, :1], P[1] + dx + cx + off[:, 1:], P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
         if self.fid is not None:
             nb = len(self.fid["ph"])
-            Y, X = np.tile(self.fid["y"] + dy + cy, (nz, 1)), np.tile(self.fid["x"] + dx + cx, (nz, 1))
+            Y, X = np.tile(self.fid["y"] + dy + cy, (nz, 1)) + off[:, :1], np.tile(self.fid["x"] + dx + cx, (nz, 1)) + off[:, 1:]
             Z = np.tile(self.fid["z"] + dz, (nz, 1))
             ph = ph + _points3d(self.shape, zk, Y, X, Z, self.fid["ph"], sig, sz, fh, sig_h, sz_h)
         flat = self._flat(channel, E)
         if flat is not None:
             ph = ph * flat[None]
-        ph = ph * self.flicker(channel, t, E)
+        ph = ph * self.flicker(channel, t, E) * self.plane_fraction      # biplane: each of the two planes gets half of the light
         return ph.astype(np.float32), lab
 
     def frame(self, t: int, E: ErrorSet | None = None, channels: list[str] | None = None) -> dict:
@@ -877,6 +927,8 @@ class Imager:
                "sources": self.E.summary(), "master_switch": self.E.master}
         if self.nz:
             out["z_stack"] = {"n_slices": self.nz, "step_um": self.zstep, "z_positions_um": [float(z) for z in self.zk],
+                              "biplane": self.biplane, "n_stage_positions": self.n_stage, "plane_photon_fraction": self.plane_fraction,
+                              "plane_offset_px": self.plane_offset_px().tolist(),
                               "slice_time_s": self.slice_time_s, "projection": self.projection,
                               "axial_sigma_um": {c: self.sigma_z_um(c) for c in self.channels},
                               "channel_shift_z_um": {c: self.channel_shift_z_um(c) for c in self.channels}}
