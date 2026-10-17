@@ -536,7 +536,12 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   and screenshot); (2) Windows long paths: the venv must be at a short path; (3) in Streamlit, `get_by_text` finds the intro boxes before the real widget (e.g. "Next error" appears in the intro text), so rectangles are
   found as the smallest visible container whose text contains the label; (4) a tall (9000 px) viewport stretches the fixed page background, so the capture injects `background-image:none`; (5) text in page JS strings
   written by a Python patch script loses `\n` escapes: use the Edit tool.
-- MP4 (2026-10-17; user asked for "claudes voice and an mp4"): `docs/tutorial/tutorial_720p.mp4` (46 min, 59 MB, 1280x720); the full-res 115 MB copy is in `C:\Users\cbohr\SimLiveData\tutorial\` (GitHub limit is 100 MB per file).
+- MP4 (2026-10-17; user asked for "claudes voice and an mp4", then "don't add another 59 MB to the history"): re-rendered after the biplane scene, 48 min, published as GitHub release `tutorial-video-2026-10-17`
+  (https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17; 720p 61 MB + full size 118 MB), NOT in the git tree (the first 59 MB version is still in history). Local copies in `C:\Users\cbohr\SimLiveData\tutorial\`.
+  Delete the audio cache before re-running `tts.py` (clips are keyed by scene:sentence, not by text). Frame-checked at 19:44 and 47:49.
+- TODO (the user said wait until the library run ends): `io/runs.py` `_git` uses `text=True` (cp1252), so `git diff HEAD` containing non-cp1252 characters in uncommitted changes returns None and `git_state()` crashes
+  (`NoneType has no attribute encode`; `tests/test_segment_tracker_provenance.py` fails on such a dirty tree). Fix: add `encoding="utf-8", errors="replace"` to the `subprocess.run` in `_git`. Do NOT edit `io/runs.py`
+  while `run_chromatin_library.py` is running (59/100 done on 2026-10-17).
   Voice = Microsoft `en-US-JennyNeural` via `edge-tts` (the user chose it; Claude's own voice cannot be produced). Scripts `scripts/tutorial/video/{tts,record,mix}.py`; the player accepts `#s=<id>&b=<n>&play=1`
   and `window.BEAT_DUR` (fixed sentence lengths) for recording. Regenerating takes ~50 min of real time. Playwright's recorder needed an ffmpeg copied to `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`.
 - When the dashboard changes: re-run the capture + build, then fix any scene whose control was renamed. Sentences must stay under ~250 characters (some online voices cut off long utterances). NOT checked: how the
