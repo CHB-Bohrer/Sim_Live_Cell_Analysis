@@ -5,6 +5,8 @@ const shot = (o) => (st) => new Shot(st, o);
 const code = (s) => `<code>${s}</code>`;
 /* focus helper: f("name", "label", opts) */
 const f = (n, l, o) => (s) => s.focus(n, l, o);
+/* the same on another picture of a scene with several (shot({ sets: {...} })) */
+const fs = (set, n, l, o) => (s) => { s.use(set); s.focus(n, l, o); };
 const sec = (a, b, label, extra) => (s) => { const r = s.between(a, b); s.focus(r, label, Object.assign({ maxZoom: 2.2, padX: 1.35, padY: 1.1 }, extra)); };
 
 /* ================================================================== 0 */

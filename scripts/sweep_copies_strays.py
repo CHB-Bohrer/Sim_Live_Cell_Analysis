@@ -12,7 +12,7 @@ The SAME crops are then analysed three ways:
   one_path     the one-copy finder (Chen et al.: one Viterbi path per colour; no coverage test, no pairing, no pair gate),
   multi        the multi-copy linker without the pair gate (paths, coverage test, promoter-enhancer pairing),
   multi_gate   the multi-copy linker with the flat pair gate (1.5 um),
-  multi_gauss  the multi-copy linker with the smooth (gauss) pair prior.
+  multi_gauss  the multi-copy linker with the smooth (gauss) pair prior (the configs' default since 2026-10-19).
 Scores per analysis (stage6_analysis.localize.score_localization, with the stray-spot truth): found, wrong picks (frac_far), picks of a
 stray spot, picks of the other copy, copies found right per cell, missed / extra copies, promoter-enhancer distance error, and the MS2
 trace read at each found promoter (copies matched to the true ones): share of labelled copies traced, ON frames found, trace r.

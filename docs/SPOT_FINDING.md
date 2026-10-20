@@ -296,3 +296,74 @@ time (Otsu rejects nothing for a single spot). Code: git history before commit 0
 5. The player's + and o markers were half a pixel up-left of the spot (PIL coordinates are pixel corners; positions are pixel centres).
 6. The old 5 x 5 centroid around the brightest pixel is biased towards the pixel centre ("pixel locking"): replaced by a Gaussian fit
    (centroid vs fit, calibrated library run: median 29 vs 25 nm, p95 84 vs 74 nm).
+
+## Several copies per cell and stray spots (`multicopy.py`, built 2026-10-19)
+
+The user asked for cells with several promoter-enhancer pairs, each with its own bursting, and for stray spots that the linking has to reject.
+
+**Simulation.** `loci.copies` (`stage1_chromatin/copies.py`) gives each cell 1, 2, ... copies (shares in `weights`; the configs use half the
+cells with two). Every copy has its own chromatin (toy loci: an own territory centre; library loci: another simulation of the library, its own
+pair, rotation, time offset and territory, at least `min_separation_um` = 2.5 um from the other copies in the image plane), its own probe
+binding, and its own promoter / Pol II / MS2 process driven by its own promoter-enhancer distance; `transcription: [{}, {k_on: ...}]` gives a
+copy its own rates (the configs: copy 1 bursts twice as often, so mixing the copies up would show), `ms2: first` leaves the other copies unlabelled.
+Copy 0 uses exactly the random numbers of a one-copy run: with copies and stray spots off, every truth file, image and analysis output was
+byte-identical to commit 06e4070. Stray spots are an image-error source (`stray_spots`): per cell and colour, Poisson births (`rate_per_min`),
+exponential life (`lifetime_s`, 60 s), diffusion inside the nucleus, brightness = 0.7 x a locus spot (nuclear channel: x one loaded Pol II),
+log-normal spread. Truth: `stage3_microscopy/stray_spots.csv`.
+
+**The linker** (`locus_analysis.max_copies` > 1; all colours of a cell together):
+1. per colour, up to max_copies + `extra_tracks` Viterbi paths, each through the candidates the earlier ones left;
+2. a later path counts as a locus only if it looks like the first one: coverage >= 0.5, median SNR >= 0.6 x, diffusion D <= 3 x. Coverage alone
+   does NOT separate them: on the library movies the leftover paths (noise peaks and strays) covered 65-98% of the frames, because there is
+   always a candidate to hop to, but their median SNR was 3.3-6.7 (loci 7.6-10.8) and D 5-117 px^2 per frame (loci 2.7-5.6);
+3. `untangle`: the first path may jump from one copy to the other where that buys a brighter stretch, the second then takes the complement
+   (measured: a whole cell's copies swapped for the last 30% of the movie). Wherever exchanging two paths' tails makes their steps shorter
+   (sum of |step|^2 / gap), they are exchanged;
+4. pairing: promoter path with enhancer path, median distance <= `pair_max_um` (1.5 um), Hungarian assignment that first maximises the number
+   of valid pairs (with raw distances it broke a real pair to shorten an invalid one: copies missed in 2 of 8 cells);
+5. pair prior (`pair_prior`): each copy's paths found again, anchored on the partner colour. `gauss` (default since 2026-10-19):
+   -d^2 / 2 s^2 with s from the cell's own pairs; `gate`: flat inside 1.5 um, quadratic outside; `none`;
+6. the copies are untangled once more, both colours together. Unpaired paths are dropped.
+Scores (`localize.score_localization`): found copies are matched to the true ones per cell (`match_copies`); `frac_on_stray`,
+`frac_on_other_copy`, `copy_number_right`, `missed_copies`, `extra_copies`. MS2 traces are per copy (`trace_id` = cell_id + 100000 x copy).
+
+**Measured** (`scripts/sweep_copies_strays.py`, polymer library, 25 movies = 5 stray rates x 5 seeds, 8 cells each, ~12 copies per movie,
+probes + MS2 on, true cell IDs; the same crops analysed four ways; `$SIMLIVE_DATA/sweeps/copies_strays/results.csv`, Spot finding page part 3e):
+
+| strays / nucleus / min | analysis | copies right | found | wrong pick | on a stray | on the other copy | distance bias / rms (nm) |
+|---|---|---|---|---|---|---|---|
+| 0 | one path (Chen et al.) | 0.58 | 0.71 | 9.9% | 0 | 9.7% | 530 / 1260 |
+| 0 | multi, no prior | 1.00 | 0.99 | 1.3% | 0 | 1.2% | 51 / 255 |
+| 0 | multi + flat gate | 1.00 | 0.99 | 1.7% | 0 | 1.5% | 8 / 102 |
+| 0 | multi + smooth prior | 1.00 | 0.98 | 0.2% | 0 | 0.0% | 3 / 81 |
+| 1 | multi + smooth prior | 0.98 | 0.97 | 2.3% | 0.5% | 1.7% | 4 / 104 |
+| 2 | multi + smooth prior | 0.98 | 0.95 | 5.7% | 3.0% | 2.5% | 14 / 172 |
+| 4 | multi, no prior | 0.90 | 0.91 | 13.7% | 10.9% | 1.7% | 631 / 1574 |
+| 4 | multi + flat gate | 0.90 | 0.88 | 9.9% | 6.9% | 2.4% | 50 / 266 |
+| 4 | multi + smooth prior | 0.90 | 0.88 | 8.3% | 5.4% | 2.5% | 30 / 288 |
+
+The one-path finder follows one spot per colour: it finds one copy in two-copy cells (copy number right in 58% of cells, 3.4 copies missed per
+movie) and jumps between copies where they come close. No analysis ever reported an extra copy. Copies missed by the linker (0.2-0.8 per movie
+at 1-4 strays/min) are copies whose second path failed the locus test.
+
+**Does the prior bias the distance distribution?** On 6 of the movies (3 seeds x 0 and 2 strays/min), share of frames with d < 400 nm, found vs
+true in the same frames: smooth prior 0.257 vs 0.262, flat gate 0.248 vs 0.258, none 0.237 vs 0.258; share above 1.5 um: smooth 1.0% vs
+0.7%, gate 2.0% vs 1.2%, none 7.3% vs 1.2% (wrong picks). The smooth prior's cost is censoring: it reported ~2% fewer frames than the gate,
+mostly frames whose true distance is large (the true share above 1.5 um among its frames is 0.7% vs 1.2%). Report results with and without it.
+
+**Showcase** `loci_library_seed12_87a16d` (smooth prior, tracked, calibrated): 10 copies in 8 cells, all found; 98.6% of loci found, 0.6% wrong
+picks (0.3% on strays, 0 on the other copy), median error 46 nm (21 nm calibrated); MS2 trace r 0.98 at R = 8.
+
+**Not done:** 3D z-stack runs with copies were not measured (the 3D path exists, `localize3d.py`); sister chromatids (cohesed copies < 1 um
+apart) are not modelled; homolog territory separation is a placeholder (2.5 um minimum); stray-spot rate, life and brightness are placeholders.
+
+## MS2 deconvolution: noise model fix (2026-10-19)
+
+The noise model sigma^2 = sigma_b^2 + beta G was a straight-line fit through binned frame-to-frame variances; one high bin set the slope and
+pushed the intercept below zero, so sigma_b was clipped to its floor (0.01 Pol II units). With almost no background noise allowed, the sampler
+explained every small baseline offset of a trace with a phantom Pol II (fit ~1 Pol II in quiet stretches, a "start" every residence time).
+Now sigma_b^2 is measured on the low-signal half of the bins and beta is the slope of what remains. False starts per true start: showcase
+seed12 1.57 -> 1.17; dense gene seed8 0.198 -> 0.197 (found 83% both); seed11 0.677 -> 0.676 (found 79% both). Traces also sit on their own
+baseline (quiet-frame median -0.14 to +0.55 Pol II units: nuclear texture, strays, the other copy's spot); `deconvolve_run(..., baseline="auto")`
+subtracts a per-trace baseline (10th percentile + noise), which helped seed12 (false 0.93) but hurt the dense gene (found 83 -> 76%) and
+seed11 (false 0.68 -> 1.22), so it is OFF by default.

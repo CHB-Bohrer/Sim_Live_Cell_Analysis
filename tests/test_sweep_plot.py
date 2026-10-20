@@ -80,3 +80,10 @@ def test_sweeps_that_are_not_full_grids_get_held_values_that_exist_together():
     assert fig.axes
     fig2 = sp.draw(df, "b", "y", "y", lines=[], panels=[], held={"a": 99})                       # nothing matches: a message, not an error
     assert not fig2.axes[0].axison
+
+
+def test_a_numeric_setting_goes_on_x_and_categories_become_line_colours():
+    rows = [dict(stray_rate=r, analysis=a, seed=s, run="r", found=0.9) for r in (0.0, 1.0) for a in ("one_path", "multi", "multi_gate", "multi_gauss")
+            for s in range(3)]
+    r = sp.default_roles(pd.DataFrame(rows), ["stray_rate", "analysis"])
+    assert r["x"] == "stray_rate" and r["lines"] == ["analysis"]

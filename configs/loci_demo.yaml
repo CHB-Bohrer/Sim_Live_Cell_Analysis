@@ -127,7 +127,7 @@ locus_analysis:             # stage 6 spot finder: src/simlive/stage6_analysis/d
   extra_tracks: 2           # paths tried per colour beyond max_copies, so loci can be found among stray spots
   min_track_coverage: 0.5   # a second or later path is a locus only if it has a spot in >= this share of the frames (strays live ~1 min)
   pair_max_um: 1.5          # promoter and enhancer paths of one copy: median distance at most this
-  pair_prior: gate          # how the other colour of a copy helps choose spots: gate (flat window) | gauss (smooth; biases distances) | none
+  pair_prior: gauss         # how the other colour of a copy helps choose spots: gauss (default: fewest wrong picks, separates close copies; drops ~2% of frames, mostly far ones) | gate (flat 1.5 um window) | none (docs/SPOT_FINDING.md)
   pair_gate_um: 1.5         # candidates farther than this from the other colour's spot of the same copy are penalised (null = off)
   gate_softness_px: 2.0
 

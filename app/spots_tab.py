@@ -262,7 +262,11 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
     else:
         df, cands, D = _analyse(str(sdir), int(cid), name, json.dumps(params, sort_keys=True), calib, dil)
         if len(true_copies) > 1:          # the MS2 spot (own track, one path) or a one-copy finder: compare with one chosen true copy
-            copy_true = st.radio("Compare with true copy", true_copies, horizontal=True, key="spt_copy_true")
+            busy = 0
+            if name == "nucleus" and mt is not None:        # start on the copy that actually bursts in this cell
+                ph = mt[mt.cell_id == cid].groupby("copy").photons.sum()
+                busy = true_copies.index(int(ph.idxmax())) if len(ph) and int(ph.idxmax()) in true_copies else 0
+            copy_true = st.radio("Compare with true copy", true_copies, index=busy, horizontal=True, key=f"spt_copy_true_{cid}_{name}")
     if name == "nucleus":
         st.info("MS2 spot: one spot per nucleus while the promoter is ON, nothing while it is OFF. 'Found' below counts ON frames; the trace "
                 "plot underneath shows the intensity measured at the tracked position in every frame against the true MS2 signal.")
@@ -576,6 +580,8 @@ def _ms2_trace_figure(df: pd.DataFrame, i: int, per_loop: float = 100.0):
     st.pyplot(fig, width="stretch")
     plt.close(fig)
     r = lambda c: np.corrcoef(df[c].fillna(0), df.photons_frame)[0, 1] if df.photons_frame.std() > 0 else np.nan  # noqa: E731
+    if not df.photons_frame.std() > 0:
+        st.info("This promoter (copy) never transcribes during the movie, so there is nothing to correlate with: choose another copy or cell.")
     st.caption(f"Correlation with the true MS2 signal over all frames: measured at the tracked promoter r = {r('intensity_at_promoter'):.2f}; "
                f"at the MS2 spot's own track r = {r('trace_intensity'):.2f}. The MS2 spot sits on the promoter, so the promoter's own colour gives "
                "its position reliably even when the MS2 spot is faint or OFF; the spot's own track can only follow it when it is brighter than "
@@ -869,7 +875,7 @@ def _part_copies_sweep():
                 "spots in all three colours at the rate on the x axis (each lives ~1 min, so the rate is also about how many of each colour sit in "
                 f"a nucleus at once), true cell IDs. The same movie is analysed four ways. Points = mean over {n_seeds} seeds, bars = range.")
     styles = {"one_path": ("one path per colour (Chen et al.)", "#f87171"), "multi": ("multi-copy linker, no pair prior", "#94a3b8"),
-              "multi_gate": ("multi-copy + flat pair gate (default)", "#2dd4bf"), "multi_gauss": ("multi-copy + smooth pair prior", "#a78bfa")}
+              "multi_gate": ("multi-copy + flat pair gate", "#a78bfa"), "multi_gauss": ("multi-copy + smooth pair prior (default)", "#2dd4bf")}
     panels = [("copy_number_right", "cells with the right number of copies", 1, (0, 1.05)),
               ("detection_rate", "loci found (of visible)", 1, (0, 1.05)),
               ("frac_on_stray", "detections on a stray spot (%)", 100, None),
@@ -967,7 +973,8 @@ def render(st_, run_path: Path, R: dict):
     style.intro(st, "How stage 6 finds each locus in each cell: the steps (Chen et al. 2025), every intermediate image for "
                     "any cell and frame, the error of every frame against the simulation's truth, and a comparison of methods.",
                 "Part 2: pick a cell, a colour and a frame (or jump to a problem frame), and change the settings to see what each step "
-                "does. Part 4: press Compare methods to score every variant on this whole run.")
+                "does; in runs with two promoter-enhancer copies also pick the copy, and part 2b shows every path the linker tried. "
+                "Part 4: press Compare methods to score every variant on this whole run.")
     run = Path(run_path)
     st.session_state["_run_path"] = str(run)
     cfg = R["cfg"]

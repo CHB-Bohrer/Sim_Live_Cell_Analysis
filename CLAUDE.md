@@ -30,27 +30,35 @@ branch, not main": that was a misreading of the user's intent.)
 - Still needed from the user: real frame interval, typical cell speed, cell density, whether cells divide, and ideally
   a real movie with some tracked cells to check how well the simulation matches reality.
 
-## Session 2026-10-19 (UNFINISHED: read first; user asked for several E-P copies per cell, stray spots, informative graphs, fixes, tutorial update)
-- BUILT: `loci.copies` (stage1_chromatin/copies.py; toy + library loci, probes, transcription per copy with per-copy overrides, `ms2: all|first`;
-  copy 0 = exactly the old random numbers, verified byte-identical outputs vs commit 06e4070 with copies/strays off); new error source `stray_spots`
-  (render.py `Imager.stray_spots`, truth `stage3_microscopy/stray_spots.csv`, `_LATER` index); multi-copy linker `stage6_analysis/multicopy.py`
-  (paths per colour, locus test coverage/SNR/D, `untangle`, `assign_pairs`, pair prior `gate|gauss|none`); copy-aware scores (`localize.match_copies`,
-  `frac_on_stray`, `frac_on_other_copy`, copy-number scores), MS2 traces per copy (`trace_id`), 3D path, deconvolution keyed by trace_id.
-  Tests: tests/test_copies_strays.py (14). Configs loci_demo/loci_library have copies + strays + max_copies 2 + pair_prior gate.
-- FINDINGS (one showcase run loci_library_seed12_87a16d, pair_prior gauss): copies right 10/10, found 98.6%, wrong 0.6% (0.3% on strays), 0% other copy.
-  Flat gate cannot resolve copies closer than ~1 um (3-7% other-copy picks on seed 51); gauss prior fixed it (bias 3 nm there). DECIDE default
-  (configs still say gate) from `$SIMLIVE_DATA/sweeps/copies_strays/results.csv` (scripts/sweep_copies_strays.py, was ~14/25 movies when stopped; resumable).
-- Fixed: provenance cp1252 bug (io/runs.py), skimage max_size, bead tracking spikes (fiducials.consistent_beads), deconvolution noise model
-  (sigma_b collapsed to floor -> phantom Pol II; now measured on low-signal bins); optional per-trace `baseline="auto"` (10th pct) exists but default
-  "none": its effect on the dense gene run (loci_demo_seed8_f5c88d) was being measured (_v4 files) when stopped. NOT re-verified: full pipeline after the
-  noise-model change on dense genes.
-- Dashboard: Cells (P/E+copy labels, strays, new error/offset/per-copy distance figure), Spot finding (copy selector, part 2b linker paths, 3e sweep,
-  nm histogram), Images (strays, copy labels), MS2 (per trace_id), Transcription (contact zoom, numbers in step 4, tiles at first burst, run view per copy),
-  Trajectories (crowding vs speed panels), Scans (numeric x, no lines between categories), Calibration, Probes, Chromatin, Stage fixes; sidebar controls.
-  Figures audited with an AppTest capture script (kept in the session scratchpad, not the repo). Not yet looked at in a real browser.
-- Tutorial: new scene `copies` (A.copies in anims.js, untested: no node here), Cells/Spots/Trajectories/sidebar scenes updated, capture_shots.py has
-  RUN_E shots `pg_cells_copies`, `pg_spots_copies`. NOT DONE: re-capture (dashboard on 8502 + venv C:\Users\cbohr\shotenv_tmp\v), build_data.py
-  (check its hand-set OVERRIDES), test the tutorial with Playwright, MP4 re-render, docs (README, docs/SPOT_FINDING.md, ARCHITECTURE) updates.
+## Several promoter-enhancer copies per cell, stray spots, figure audit (2026-10-19/20; user: "multiple sets of E-P pairs and separate bursting dynamics", "stray spots ... the linking algorithms have to distinguish", "make sure the graphs are informative", "fix any problems", "update the tutorial")
+- **Simulation:** `loci.copies` (`stage1_chromatin/copies.py`): copies per cell (`n`, `weights`), `min_separation_um`, `ms2: all|first`, per-copy
+  transcription overrides; toy + library loci (extra copies = other library simulations, own pair/rotation/offset/territory), probes and transcription
+  per copy (`copy` column everywhere, `trace_id` = cell_id + 100000 x copy). Copy 0 uses exactly the old random numbers: with copies and strays off,
+  every truth file, image and analysis output was byte-identical to commit 06e4070 (regression run against a git worktree at a SHORT path:
+  numba cache files exceed Windows' path limit under the scratchpad). Pipeline seed streams: `SeedSequence(seed).spawn(10)`, [8] = copies.
+  New error source `stray_spots` (`Imager.stray_spots`, truth `stage3_microscopy/stray_spots.csv`, in `_LATER`). Configs loci_demo/loci_library: half
+  the cells with two copies, copy 1 bursts twice as often (k_on x2), strays 1/min, `max_copies: 2`, `max_candidates: 8`, `pair_prior: gauss`.
+- **Analysis:** `stage6_analysis/multicopy.py` (paths per colour, locus test coverage/median SNR/D relative to the best path, `untangle`, `assign_pairs`
+  that maximises valid pairs first, pair prior gauss|gate|none, joint untangle of copies); 2D (`localize.analyse_cell_copies`), 3D (`localize3d`), MS2
+  per copy (`ms2.relabel_to_true_copies` for the truth source). Scores: `localize.match_copies` (EXTRA_COPY = 50 + found number for unmatched copies),
+  `frac_on_stray`, `frac_on_other_copy`, `copy_number_right`, `missed_copies`, `extra_copies`. Truth-source positions are renumbered like the true
+  copies before saving (`copy_found` keeps the analysis' number). Deconvolution keyed by `trace_id` (`deconvolve.trace_key`). `locus_analysis.deconvolve:
+  false` skips it (sweeps).
+- **Measured** (25 movies, docs/SPOT_FINDING.md "Several copies per cell"): one path per colour gets the copy number right in 58% of cells; the linker
+  in 100% (0-0.5 strays/nucleus/min), 98% (1-2), 90% (4). Smooth prior: fewest wrong picks (0.2% -> 8% from 0 to 4 strays/min), 0% other-copy picks
+  without strays, distance bias 3-30 nm; flat gate cannot separate copies closer than ~1 um. Bias check: the smooth prior drops ~2% of frames, mostly far
+  ones (censoring of the tail). Showcase `loci_library_seed12_87a16d` (tracked, calibrated, R = 8): 10/10 copies, 98.6% found, 0.6% wrong picks.
+- **Fixed:** provenance cp1252 crash (`io/runs._git`), skimage `max_size`, bead tracking outliers (`fiducials.consistent_beads`: a bead whose height fit
+  wandered by um made frame medians jump up to 4.6 um; now within 0.2 um), MS2 deconvolution noise model (sigma_b had collapsed to its floor -> phantom
+  Pol II; now measured on the low-signal bins: false starts per true 1.57 -> 1.17 on the showcase, unchanged on seed8/seed11). Per-trace baseline
+  (`baseline="auto"`) exists but is OFF (helped one run, hurt two).
+- **Dashboard:** Cells (P/E + copy labels, stray squares, figure = position errors with stray/other-copy marks + found-minus-true offsets + one distance
+  panel per copy), Spot finding (copy selector, part 2b "what the linker did", 3e sweep, error histogram in nm, MS2 spot starts on the bursting copy),
+  Images (stray squares, copy labels, per-copy truth table), MS2 (one trace per cell and copy), Transcription (contact zoom with %, P(ON) in contact vs far
+  in the step-4 title, tiles start at the first burst, run view per copy), Trajectories (crowding vs speed at switches), Scans (numeric x axis, no
+  lines between categories), Calibration, Probes, Chromatin (um / minutes axes), Stage; home summary lists copies and strays; sidebar: copies share,
+  copy 1 rate, MS2 on all copies, stray rate/brightness, copies looked for, pair prior. Every page's figures audited with `scripts/audit_figures.py`
+  (AppTest, saves each figure); changed pages also checked in a browser (port 8502).
 
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
@@ -101,7 +109,7 @@ branch, not main": that was a misreading of the user's intent.)
   (`configs/chromatin/library_*.yaml`: 1000 equilibration + 8000 production blocks x 750 steps since 2026-10-15, was 2000) at 10 Mb. MEASURED with 8000 blocks (loop extrusion): ~2,600 MD steps/s
   (3.5 blocks/s, GPU only ~60% busy) because every loop-extruder bond is pre-registered (about 3.5x more bonds than at 2000 blocks, and `updateParametersInContext` walks all of them each block):
   ~43 min per simulation, ~73 h per 100-simulation library, ~30 GB. The old 2000-block figure was ~11 min / ~18 h. Possible speed-up (not done): register only the bonds of the next few hundred
-  blocks. THE LOOP-EXTRUSION LIBRARY IS RUNNING since 2026-10-15 18:24 (see "Library run" below). Whether 1000 equilibration blocks
+  blocks. THE LOOP-EXTRUSION LIBRARY IS FINISHED (100/100, 2026-10-18 19:10, ~43.7 min per simulation; see "Library run" below). Whether 1000 equilibration blocks
   suffice is only validated at 10 Mb (P(s) stationarity 0.077 over 2000 blocks); re-check for larger regions.
 - Dashboard: the 🧬 Chromatin tab shows the validation report and any saved simulation, and has a smooth in-browser
   player of the polymer through time (`app/chromatin_view.py` + `app/chromatin_tab.py`: whole chain at each snapshot, or
@@ -146,7 +154,7 @@ identity-switch analysis), `scripts/run_tracking_demo.py`, `scripts/sweep.py`, d
 STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per nucleus doing confined diffusion in
 the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/spots.py` + `localize.py` / `localize3d.py` (placeholder for the user's
 analysis, but now a measured one: see "Spot finding" below). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
-Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (from `loci.calibration`, see "Polymer calibration"; NOT rescaled to the nucleus) and placed at a random territory centre per cell (re-drawn until all loci stay inside the nucleus in every frame), `block_duration_s` likewise) is unit-tested with a fake library on CPU and was run end-to-end (tracked, 2026-10-15) on the 4-simulation `smoke` library; NO real 100-simulation library exists yet.
+Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (from `loci.calibration`, see "Polymer calibration"; NOT rescaled to the nucleus) and placed at a random territory centre per cell (re-drawn until all loci stay inside the nucleus in every frame), `block_duration_s` likewise) is unit-tested with a fake library on CPU and was run end-to-end (tracked, 2026-10-15) on the 4-simulation `smoke` library; The 100-simulation loop-extrusion library exists since 2026-10-18 (showcase loci_library_seed12_87a16d uses it).
 Dashboard redesign + library monitor (2026-10-08, built on the cloud container with fake data, NOT yet seen on the Windows machine
 with a real GPU run): `.streamlit/config.toml` + `app/style.py` (one theme, CSS, matplotlib defaults), new 🗂 Library tab
 (`app/library_tab.py`): live monitor (refreshes every 5 s) of `<library>/status.json` (written by `run_chromatin_library.py`) and the
@@ -274,7 +282,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 172 CPU + 6 GPU tests at 2026-10-16. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 192 CPU + 6 GPU tests at 2026-10-20. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -522,7 +530,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   (both loci on the last monomer in a 3 Mb library) -> now from the Transcription tab or the middle of the library region; Transcription tab default
   positions follow region size; run log decode crashed on non-ASCII (cp1252) -> UTF-8; figure fonts were tiny.
 - `st.rerun(scope="fragment")` buttons work in the browser but raise under AppTest (test artefact only).
-- Not done: the 100-simulation library (waiting for go-ahead; the live monitor is still only tested with fake files + finished libraries);
+- Not done: the live library monitor was never looked at while a library ran (only fake files + finished libraries);
   one library selector exists in the monitor and a separate one in the picker (confusing; not merged); the header metrics of the selected run
   sit above the Transcription/Probes/Library/Chromatin tabs although unrelated to them; default seed-1 cell in Transcription step 5 shows no Pol II
   (empty plots); with 50 nm/unit and 150 nm contact the smoke distances rarely touch, so coupling looks inert (placeholder scale).
@@ -548,22 +556,28 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 
 ## Narrated tutorial (2026-10-17; user: "in depth tutorial with animation and voice over ... the person should know how to use the UI")
 - `docs/tutorial/index.html` (+ `engine.js`, `anims.js`, `scenes_a.js`, `scenes_b.js`, `tutorial.css`, `shots_data.js`, `img/`): self-contained, no libraries, works from `file://`.
-  36 scenes / ~220 sentences / ~6,300 words (~40 min). Narration = the browser's speech synthesis (Edge "Online (Natural)" voices are best; the picker is on the start screen). It is NOT
-  Claude's own voice (not callable from a local page); an MP4 with audio was not made (no ffmpeg on this PC; only the robotic David/Zira/Mark SAPI voices are installed).
+  38 scenes / 243 sentences (~50 min; 2026-10-20). Narration = the browser's speech synthesis (Edge "Online (Natural)" voices are best; the picker is on the start screen). It is NOT
+  Claude's own voice (not callable from a local page); the MP4 (below) uses a Microsoft neural voice instead.
 - Screenshots are real dashboard pages: `scripts/tutorial/capture_shots.py` (Playwright driving the installed Edge, in a separate venv `C:\Users\cbohr\shotenv_tmp\v`, NOT the simlive env) captures TALL page images + the
   rectangle of each control; `scripts/tutorial/build_data.py <shots dir>` copies them to `docs/tutorial/img` and writes `shots_data.js`. Scenes refer to controls by name (`f("next", "Next error")`), so a
-  layout change needs only a re-capture. Runs shown: `loci_demo_seed11_24bba2` (most pages), `tracking_demo_seed3_e15523` (tracking errors), `loci_demo_seed8_f5c88d` (Images part 2 measured effects), `loci_3d_seed23_2163f4` (Stage page).
-  The capture needs the test dashboard on port 8502 and takes ~10 min; it does not use the GPU.
+  layout change needs only a re-capture. Runs shown: `loci_demo_seed11_24bba2` (most pages), `tracking_demo_seed3_e15523` (tracking errors), `loci_demo_seed8_f5c88d` (Images part 2 measured effects), `loci_3d_seed23_2163f4` (Stage page),
+  `loci_library_seed12_87a16d` (two copies + stray spots: shots `pg_cells_copies`, `pg_spots_copies`).
+  The capture needs the test dashboard on port 8502 and takes ~10 min; it does not use the GPU. `python capture_shots.py <out> <shot> ...` re-takes single shots.
+  Shots of 2026-10-20 in `C:\Users\cbohr\SimLiveData\tutorial\shots_2026-10-20b`. Hand-set rectangles live in `build_data.py` `OVERRIDES` (used where the label text
+  also appears higher up, e.g. a dataframe column called "simulation"); check them after a re-capture by drawing them onto the shot (they went stale once when a table was added).
+  Check every sentence for script errors / missing rectangles with a Playwright loop over `T.scenes` (each beat: open `index.html#s=<id>&b=<n>`, collect console errors and
+  the engine's "no rect" / "missing shot" warnings).
 - Gotchas hit: (1) the in-app browser pane gives only 800x500 screenshots and shows `file://` pages as static snapshots (no scripts), so test the tutorial with Playwright (`tut.py`-style: open `index.html#s=<id>&b=<n>`
   and screenshot); (2) Windows long paths: the venv must be at a short path; (3) in Streamlit, `get_by_text` finds the intro boxes before the real widget (e.g. "Next error" appears in the intro text), so rectangles are
   found as the smallest visible container whose text contains the label; (4) a tall (9000 px) viewport stretches the fixed page background, so the capture injects `background-image:none`; (5) text in page JS strings
-  written by a Python patch script loses `\n` escapes: use the Edit tool.
+  written by a Python patch script loses `\n` escapes: use the Edit tool; (6) 2026-10-20: switching runs raced with the page capture (the old run's page was saved; now `select_run` waits for the new run),
+  pages taller than the 9000 px viewport were cut (copies shots use 15000 px; `save_page` reads the real viewport height), and clicking an already-open page in the segmented control DESELECTS it
+  (`goto_page` now skips when `aria-checked == "true"`); (7) Streamlit keeps the PREVIOUS page's elements, dimmed, until the new page replaces them, so a long page
+  saved too early ends in the old page's leftovers (the first Spot finding shot ended in Trajectories plots, parts 3d / 4 were missing): `save_page` now waits until no
+  `[data-stale="true"]` element is left. A scene with several pictures (`shot({ sets })`) stays on the last one chosen: switch back explicitly with `fs("main", ...)`.
 - MP4 (2026-10-17; user asked for "claudes voice and an mp4", then "don't add another 59 MB to the history"): re-rendered after the biplane scene, 48 min, published as GitHub release `tutorial-video-2026-10-17`
   (https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17; 720p 61 MB + full size 118 MB), NOT in the git tree (the first 59 MB version is still in history). Local copies in `C:\Users\cbohr\SimLiveData\tutorial\`.
   Delete the audio cache before re-running `tts.py` (clips are keyed by scene:sentence, not by text). Frame-checked at 19:44 and 47:49.
-- TODO (the user said wait until the library run ends): `io/runs.py` `_git` uses `text=True` (cp1252), so `git diff HEAD` containing non-cp1252 characters in uncommitted changes returns None and `git_state()` crashes
-  (`NoneType has no attribute encode`; `tests/test_segment_tracker_provenance.py` fails on such a dirty tree). Fix: add `encoding="utf-8", errors="replace"` to the `subprocess.run` in `_git`. Do NOT edit `io/runs.py`
-  while `run_chromatin_library.py` is running (59/100 done on 2026-10-17).
   Voice = Microsoft `en-US-JennyNeural` via `edge-tts` (the user chose it; Claude's own voice cannot be produced). Scripts `scripts/tutorial/video/{tts,record,mix}.py`; the player accepts `#s=<id>&b=<n>&play=1`
   and `window.BEAT_DUR` (fixed sentence lengths) for recording. Regenerating takes ~50 min of real time. Playwright's recorder needed an ffmpeg copied to `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`.
 - When the dashboard changes: re-run the capture + build, then fix any scene whose control was renamed. Sentences must stay under ~250 characters (some online voices cut off long utterances). NOT checked: how the
@@ -598,7 +612,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   time, a 1 h movie without repeating) at the validated 10 Mb region; every cell draws its own random 100 kb pair (`loci.positions_kb: random`, `pair_separation_kb`, `pair_margin_kb` 1000; `library_loci.draw_pair`; pairs recorded in
   `stage1_chromatin/library_pairs.csv`), so 100 simulations serve hundreds of cells. Movies longer than ~61 min still repeat the trajectory. Still open: whether a surrogate distance process (PLAN_transcription step 5) should take
   over for hours-long movies; loops live only ~46 s at this timescale (real cohesin: minutes), which a slower extrusion per block would fix at the price of even more blocks.
-- **Library run (started 2026-10-15 18:24, detached via PowerShell `Start-Process`, output `C:\Users\cbohr\SimLiveData\library_loop_extrusion.out.log`):**
+- **Library run (2026-10-15 18:24 to 2026-10-18 19:10, FINISHED 100/100, no failures; detached via PowerShell `Start-Process`, output `C:\Users\cbohr\SimLiveData\library_loop_extrusion.out.log`):**
   `scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\library_loop_extrusion.yaml --library loop_extrusion --n 100`, seeds 1000-1099, folder `$SIMLIVE_DATA/chromatin/loop_extrusion/library_loop_extrusion_seed<seed>`
   (the simulation NAME is `library_loop_extrusion`, so set `loci.library: loop_extrusion`). Watch it in the 🗂 Library tab or `status.json`; resumable: after a reboot / sleep run the same command again. WHILE IT RUNS do not edit
   `configs/chromatin/library_loop_extrusion.yaml`, `polymer3d.py`, `lef1d.py` or `io/runs.py` (each simulation is a new process that re-reads them) and do not run GPU tests or other GPU work. The plain-polymer library

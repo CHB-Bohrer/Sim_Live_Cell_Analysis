@@ -41,10 +41,10 @@ flowchart TD
         direction TB
         S2["<b>Cells</b> (stage 2)<br/>Cells drift, bump into each other,<br/>change shape and sometimes divide.<br/>Each cell keeps its own ID number."]:::built
         LIB[("<b>CHROMATIN LIBRARY</b> (stage 1, made separately)<br/>many saved polymer simulations of a<br/>chromatin region (polychrom, GPU):<br/>confined polymer + loop extrusion<br/>with boundary elements")]:::standin
-        S1["<b>Loci in each cell</b> (stage 1)<br/>Promoter + enhancer per cell: toy motion,<br/>or one saved polymer simulation per cell<br/>(wired, not yet run with a real library).<br/>nm / s come from the calibration above (assumed)."]:::standin
-        S1B["<b>Probes and transcription</b> (stage 1b, 1c)<br/>Probe binding sets each locus' brightness;<br/>promoter bursts driven by the enhancer<br/>distance, Pol II carrying MS2 loops"]:::built
+        S1["<b>Loci in each cell</b> (stage 1)<br/>One or more promoter + enhancer pairs per cell<br/>(copies, e.g. both alleles): toy motion, or one saved<br/>polymer simulation per copy (100-simulation library).<br/>nm / s come from the calibration above (assumed)."]:::standin
+        S1B["<b>Probes and transcription</b> (stage 1b, 1c)<br/>Probe binding sets each locus' brightness;<br/>every copy's promoter bursts on its own, driven<br/>by its enhancer distance, Pol II carrying MS2 loops"]:::built
         CAL["<b>Calibration of the motion</b> (configs/calibration)<br/>nm and seconds per polymer unit from ASSUMED<br/>contact fraction and locus D;<br/>replace with your measured MSD"]:::standin
-        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images (2D or 3D z-stacks)<br/>with 24 switchable image-error sources (drift, chromatic shift,<br/>blur, haze, per-cell bleaching, uneven light, cross-talk,<br/>camera noise...). Cells can walk in and out of the field.<br/>Nucleus + MS2 in one colour, each locus in its own."]:::built
+        S3["<b>Microscope</b> (stage 3)<br/>Turns cells and loci into recorded images (2D or 3D z-stacks)<br/>with 28 switchable image-error sources (drift, chromatic shift,<br/>blur, haze, per-cell bleaching, uneven light, cross-talk,<br/>stray decoy spots, camera noise...). Cells can walk in and out of the field.<br/>Nucleus + MS2 in one colour, each locus in its own."]:::built
         ICAL["<b>Calibration images</b> (stage 3)<br/>Dark frames, flat-field slide, bead slide<br/>of the same instrument"]:::built
         TRUTH[("<b>ANSWER KEY</b><br/>true cell outlines and ID numbers<br/>true position of every locus")]:::built
         MOVIE[("<b>THE MOVIE</b><br/>nucleus images +<br/>one image per locus colour")]:::built
@@ -56,7 +56,7 @@ flowchart TD
         S4B["<b>Follow each cell through time</b> (stage 4b)<br/>Decide which outline in frame 2<br/>is the same cell as in frame 1<br/>(Trackastra, GPU)"]:::built
         S5["<b>Cut out each cell</b> (stage 5)<br/>Make one small movie per cell,<br/>centred on it, so cells can be<br/>analyzed side by side in parallel"]:::built
         SC["<b>Correct the images</b> (stage 6)<br/>with the calibration images, or<br/>from the movie alone: background and<br/>hot pixels, illumination, colour shift,<br/>per-cell bleaching, camera rows"]:::built
-        S6["<b>Locate the loci</b> (stage 6)<br/>Chen et al. 2025 spot finder: difference of<br/>Gaussians + Viterbi path, one per colour.<br/>MS2 trace read at the tracked promoter.<br/>A placeholder for YOUR analysis."]:::standin
+        S6["<b>Locate the loci</b> (stage 6)<br/>Chen et al. 2025 spot finder: difference of<br/>Gaussians + Viterbi paths; several copies per<br/>cell paired promoter-enhancer, stray spots rejected.<br/>MS2 trace read at each tracked promoter.<br/>A placeholder for YOUR analysis."]:::standin
         S6M["<b>MS2 → Pol II</b> (stage 6)<br/>Bayesian deconvolution of each trace<br/>into Pol II start times and bursts<br/>(Chen et al. 2025)"]:::built
     end
 
@@ -212,22 +212,22 @@ flowchart LR
     subgraph P1["Done"]
         direction TB
         d1["Simulated cells that move, deform,<br/>divide and walk in and out of view"]:::built
-        d2["Microscope images with 24 error<br/>sources, 2D or 3D z-stacks"]:::built
+        d2["Microscope images with 28 error<br/>sources (incl. stray spots), 2D or 3D z-stacks"]:::built
         d3["Cellpose + Trackastra,<br/>scored against the truth"]:::built
         d4["One movie per cell, analyzed<br/>in parallel"]:::built
-        d5["Chromatin engine (polychrom),<br/>validated; library wiring"]:::built
+        d5["Chromatin engine (polychrom), validated;<br/>100-simulation library made"]:::built
         d6["Probe binding, distance-driven<br/>transcription and MS2"]:::built
         d7["Spot finder (Chen 2025), MS2 trace,<br/>MS2 → Pol II deconvolution"]:::built
         d8["Calibration from images AND<br/>from the movie; measured effect<br/>of every image error"]:::built
         d9["Dashboard (dark theme), players,<br/>sweeps"]:::built
         d10["Instrument preset: Bruker Vutara VXL (widefield mode),<br/>bleed-through from spectra"]:::built
+        d11["Several promoter-enhancer copies per cell;<br/>multi-copy linker, copies paired"]:::built
     end
     subgraph P2["Next: make it real (needs your data)"]
         direction TB
-        n1["Run the 100-simulation library<br/>(GPU, your go-ahead)"]:::planned
         n2["Calibrate to your measured<br/>MSD (nm and seconds): the file exists,<br/>its inputs are still assumed"]:::standin
         n3["Measured values: MS2 brightness R,<br/>error sizes, real movie"]:::planned
-        n4["Choose spots with all three signals;<br/>separate homologous copies"]:::planned
+        n4["Use MS2 as a third witness;<br/>sister chromatids"]:::planned
         n5["Vutara biplane 3D (two planes<br/>600 nm apart, 50:50 split)"]:::built
     end
     subgraph P3["Then: the real question"]

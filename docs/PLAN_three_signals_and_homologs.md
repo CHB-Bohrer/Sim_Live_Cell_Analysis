@@ -1,4 +1,9 @@
-# Plan (not built): use all three signals to choose spots, and tell apart loci on different chromosomes
+# Plan (partly built): use all three signals to choose spots, and tell apart loci on different chromosomes
+
+**Status 2026-10-19:** B.1 (two copies per cell with their own territories and bursting; `loci.copies`) and B.2 (several paths per colour,
+promoter-enhancer pairing, untangling; `stage6_analysis/multicopy.py`) are built, and A.1 in a simpler form (the pair prior re-runs each copy's
+paths anchored on the partner colour; its bias was measured, docs/SPOT_FINDING.md). Not built: A.2 (MS2 as a third witness), A.3 (quality
+flags), sister chromatids.
 
 Asked by the user 2026-10-11 ("use all three loci to select for good spots, and separate the loci from different chromosomes");
 written down for later. Nothing here is implemented yet.

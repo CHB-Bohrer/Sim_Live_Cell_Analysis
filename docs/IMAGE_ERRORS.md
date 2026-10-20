@@ -200,6 +200,21 @@ Each nucleus sits in a cell body that also glows a little: the nuclear label (NL
 | `nucleus_fraction` | `0.08` |  | cytoplasm brightness in the nuclear channel, relative to that cell's nucleus |
 | `locus_photons` | `2.0` | photons/px | cytoplasm level in each locus colour (free probes, dyes), per exposure |
 
+### Stray spots (decoys in the nucleus)  (`stray_spots`)
+
+Real nuclei also hold spots that are not the labelled loci: probe or MCP-GFP aggregates, probes stuck to other sites, dye clusters. They appear at random places inside a nucleus, wander a little, and disappear again after some time.
+
+**Effect:** Extra candidate spots of the same colour and similar brightness inside the cell, moving with the nucleus. A spot finder that takes the brightest spot, or a path that has lost its locus for a few frames, can jump onto one; telling them apart needs their short life, their motion and (for promoter and enhancer) whether a partner of the other colour sits next to them. The truth of every stray spot is saved (stage3_microscopy/stray_spots.csv), so picks of a stray are counted.
+
+| parameter | default | unit | meaning |
+|---|---|---|---|
+| `rate_per_min` | `1.0` | 1/min | new stray spots per nucleus per minute, in each colour listed in `channels` |
+| `lifetime_s` | `60.0` | s | mean time a stray spot lasts (exponential) |
+| `D_um2_s` | `0.01` | um^2/s | diffusion of a stray spot inside the nucleus (it also moves with the nucleus) |
+| `brightness` | `0.7` |  | mean brightness relative to a locus spot of that colour (nuclear channel: relative to one fully loaded Pol II's MS2 signal) |
+| `brightness_cv` | `0.5` |  | spread of the brightness between stray spots (log-normal) |
+| `channels` | `['locus0', 'locus1', 'nucleus']` |  | colours with stray spots (nucleus = MCP-GFP aggregates in the MS2 colour) |
+
 ### Colour cross-talk (bleed-through)  (`crosstalk`)
 
 A fluorophore's emission is not confined to its own channel: some of its light leaks into a neighbouring colour.

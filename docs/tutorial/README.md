@@ -1,6 +1,6 @@
 # Narrated tutorial
 
-`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 45 minutes in 37 short scenes;
+`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 50 minutes in 38 short scenes;
 every scene can be jumped to from the list on the left). **Open it by double-clicking `index.html`** (Microsoft Edge recommended).
 Nothing to install, nothing is sent anywhere.
 
@@ -20,7 +20,7 @@ Nothing to install, nothing is sent anywhere.
 | 3 Cells and tracking | animation of tracking errors; Movie, Metrics, Trajectories, Scans pages |
 | 4 The microscope | animation of a spot becoming an image; Images, Calibration, Stage and fiducials pages |
 | 5 Chromatin | polymer + loop extrusion animation; Library, Chromatin pages |
-| 6 Finding the loci | Cells page; animation of the Viterbi spot finder; Spot finding page |
+| 6 Finding the loci | Cells page; animation of the Viterbi spot finder; animation of two promoter-enhancer copies, stray spots and the multi-copy linker; Spot finding page |
 | 7 Transcription biology | probes, transcription, MS2 deconvolution and E-P curve animations; Probes, Transcription, MS2, E-P pages |
 | 8 Configuration | Config page; command-line cheat sheet |
 | 9 Putting it together | three workflows, cautions, cheat sheet |
@@ -34,10 +34,12 @@ Nothing to install, nothing is sent anywhere.
 - `engine.js`: player, speech, the screenshot "camera" (`Shot`), canvas helpers, terminal and card components. `anims.js`: the concept animations.
   `scenes_a.js`, `scenes_b.js`: the narration (one sentence per beat) and which visual cue goes with it. No libraries, works from `file://`.
 - Keep each sentence under ~250 characters: some online voices stop reading long utterances.
-- Run numbers in the screenshots come from `loci_demo_seed11_24bba2`, `tracking_demo_seed3_e15523`, `loci_demo_seed8_f5c88d` and `loci_3d_seed23_2163f4`.
+- Run numbers in the screenshots come from `loci_demo_seed11_24bba2`, `tracking_demo_seed3_e15523`, `loci_demo_seed8_f5c88d`, `loci_3d_seed23_2163f4` and
+  (two copies per cell, stray spots: shots `pg_cells_copies`, `pg_spots_copies`) `loci_library_seed12_87a16d`.
 
 ## The MP4 (48 min; 720p = 61 MB, full size 1600x900 = 118 MB)
 Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17
+That video was recorded on 2026-10-17: it does not have the two-copies / stray-spots scene or the 2026-10-20 screenshots (the HTML tutorial does).
 It is NOT in the git tree, to keep the repository small (an earlier 46-minute version, `docs/tutorial/tutorial_720p.mp4`, is still in the git history; it was removed from the tree on 2026-10-17). This version includes the Vutara biplane scene. Local copies: `C:\Users\cbohr\SimLiveData\tutorial\`.
 The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
 How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):

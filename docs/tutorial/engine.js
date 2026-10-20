@@ -202,6 +202,7 @@ class Shot {
   }
   get data() { return window.SHOTS[this.sets[this.key]]; }
   use(key, first) {
+    if (!first && key === this.key) return;   /* already showing this picture: keep the camera where it is */
     this.key = key; const d = this.data; if (!d) { console.warn("missing shot", key); return; }
     this.world.innerHTML = "";
     this.img = h("img", { src: d.src, style: `width:${d.w}px;height:${d.h}px` });

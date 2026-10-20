@@ -318,9 +318,11 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_maxc = st.slider("Copies per cell the spot finder looks for", 1, 4, 2, key="l_maxc",
                            help="1 = one path per colour (Chen et al.). More = the multi-copy linker: several paths per colour, a path counts as a locus "
                                 "only if it is there in most frames (strays live ~1 min), and promoter paths are paired with enhancer paths.")
-        l_gate = st.checkbox("Pair gate: penalise spots far from the other colour's spot of the same copy", True, key="l_gate",
-                             help="Re-runs each copy's paths with candidates more than 1.5 µm from the partner colour penalised. It keeps a path "
-                                  "off a stray spot after the locus went dark; distances beyond 1.5 µm would be biased.")
+        l_prior = st.radio("Pair prior: use the other colour of the same copy to choose spots", ["gauss", "gate", "none"], key="l_prior", horizontal=True,
+                           format_func={"gauss": "Smooth (default)", "gate": "Flat 1.5 µm gate", "none": "None"}.get,
+                           help="Each copy's paths are found again with candidates far from the partner colour penalised. Smooth: fewest wrong picks "
+                                "and keeps close copies apart, but skips ~2% of frames, mostly ones with a large distance. Flat gate: no preference "
+                                "inside 1.5 µm, so copies closer than ~1 µm can swap. Measured over 25 movies: docs/SPOT_FINDING.md.")
         l_ie = error_controls("loci")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
@@ -370,7 +372,7 @@ if go_loci:
               f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", f"geometry.fov_um=[{l_fov}, {l_fov}]", *l_ie,
               f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}",
               f"locus_analysis.method={l_meth}", f"locus_analysis.dog_snr={l_snr}",
-              f"locus_analysis.max_copies={l_maxc}", f"locus_analysis.pair_gate_um={1.5 if l_gate else 'null'}",
+              f"locus_analysis.max_copies={l_maxc}", f"locus_analysis.pair_prior={l_prior}", "locus_analysis.pair_gate_um=1.5",
               f"loci.copies.n=[1, 2]", f"loci.copies.weights=[{1 - l_two:g}, {l_two:g}]", f"loci.copies.ms2={'all' if l_ms2all else 'first'}",
               f"imaging_errors.stray_spots.enabled={'true' if l_stray > 0 else 'false'}", f"imaging_errors.stray_spots.rate_per_min={l_stray}",
               f"imaging_errors.stray_spots.brightness={l_stray_b}",
@@ -478,6 +480,16 @@ def run_summary() -> None:
                   ("Probe binding", "on" if (lc.get("probes") or {}).get("enabled") else "off", "stochastic probe attachment sets the locus brightness"),
                   ("MS2 transcription", "on" if (lc.get("transcription") or {}).get("enabled") else "off",
                    "distance-dependent bursts of transcription produce a bright spot in the nuclear channel")]
+        cp_f = run_path / "stage1_chromatin" / "copies.csv"
+        if cp_f.exists():                      # several promoter-enhancer pairs per cell (loci.copies)
+            ncp = pd.read_csv(cp_f).n_copies
+            items.append(("Promoter-enhancer copies", f"{int(ncp.sum())} in {len(ncp)} cells",
+                          f"{int((ncp > 1).sum())} cells have more than one pair; each copy has its own motion and its own bursts"))
+        sp_f = run_path / "stage3_microscopy" / "stray_spots.csv"
+        if sp_f.exists():                      # decoys (image error source stray_spots)
+            sp = pd.read_csv(sp_f, usecols=["cell_id", "stray_id", "channel"])
+            n_sp = sp.drop_duplicates().shape[0]
+            items.append(("Stray spots", f"{n_sp}", "short-lived decoy spots inside the nuclei (all colours together) that the spot finder must ignore"))
     items += [("Segmentation", cfg["segmentation"]["method"], "finds the nuclei in every image"),
               ("Tracker", f"{cfg['tracking']['tracker']} ({cfg['tracking']['mode']})", "links the nuclei through time")]
     with st.expander("What was simulated in this run", expanded=True):
@@ -743,8 +755,10 @@ if page == PAGES["metrics"]:
                 "Open 'What do these numbers mean?' for definitions. Single runs are not evidence: use 📈 Scans for several seeds.")
     metrics_tab()
 if page == PAGES["traj"]:
-    style.intro(st, "The true path of every cell (coloured) against the paths the tracker built (black dashed). Red crosses mark identity switches.",
-                "Look for places where a dashed line jumps between coloured paths: that is a swap. Choose which tracker result to compare.")
+    style.intro(st, "The true path of every cell (coloured) against the paths the tracker built (white dashed); red crosses mark identity switches. "
+                    "Two histograms ask why: were the switches where nuclei crowd, or where they moved far between frames?",
+                "Look for places where a dashed line jumps between coloured paths: that is a swap. Then compare the red and blue histograms. "
+                "Choose which tracker result to compare.")
     traj_tab()
 if page == PAGES["scan"]:
     style.intro(st, "Results of parameter sweeps (many seeds per setting) saved by scripts/sweep.py, so conclusions rest on more than one run.",

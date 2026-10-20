@@ -35,15 +35,28 @@ def wait_gone(pg, text, timeout=240):
         time.sleep(0.5)
 
 
+def wait_text(pg, text, timeout=240):
+    """Wait until `text` is visible (the end of a long page has rendered)."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if pg.get_by_text(text).locator("visible=true").count() > 0:
+            return
+        time.sleep(0.5)
+    print("   (timeout waiting for)", text, flush=True)
+
+
 def goto_page(pg, name):
-    pg.locator("[data-testid=stButtonGroup] button", has_text=name).first.click(); idle(pg, 2.5)
+    btn = pg.locator("[data-testid=stButtonGroup] button", has_text=name).first
+    if btn.get_attribute("aria-checked") == "true":      # already open: clicking the selected page de-selects it (back to Movie)
+        return
+    btn.click(); idle(pg, 2.5)
 
 
 def select_run(pg, run):
     sel = pg.locator("[data-testid=stSidebar] [data-testid=stSelectbox]").last
     if run in sel.inner_text():
         return
-    sel.click(); time.sleep(0.4); pg.keyboard.type(run); time.sleep(0.5); pg.keyboard.press("Enter"); idle(pg, 3)
+    sel.click(); time.sleep(0.4); pg.keyboard.type(run); time.sleep(0.5); pg.keyboard.press("Enter"); idle(pg, 4, 240); time.sleep(3); idle(pg, 2, 240)   # let the new run finish rendering
 
 
 def rect(pg, spec, ox, oy):
@@ -78,10 +91,15 @@ def exact(pg, text, up, ox, oy, nth=0):
 
 def save_page(pg, name, anchors, exacts=None, top_css="[data-testid=stButtonGroup]", crop_x=300):
     """Tall capture of the main column from the navigation bar down; anchors give named rectangles."""
+    t0 = time.time()                       # Streamlit keeps the previous page's elements, dimmed, until they are replaced
+    while pg.locator('[data-stale="true"]').count() > 0 and time.time() - t0 < 180:
+        time.sleep(0.5)
+    if pg.locator('[data-stale="true"]').count() > 0:
+        print("   (stale elements left)", name, flush=True)
     nav = pg.locator(top_css).first.bounding_box()
     oy = max(nav["y"] - 10, 0)
     bottom = pg.evaluate("(() => { const b=document.querySelector('[data-testid=stMainBlockContainer]').getBoundingClientRect(); return b.bottom; })()")
-    h = int(min(bottom + 30, TALL) - oy)
+    h = int(min(bottom + 30, pg.viewport_size["height"]) - oy)        # the current viewport (taller for the longest pages)
     pg.screenshot(path=str(OUT / f"{name}.jpg"), type="jpeg", quality=84, clip={"x": crop_x, "y": oy, "width": W - crop_x, "height": h})
     rects = {}
     for k, spec in anchors.items():
@@ -165,7 +183,7 @@ def main():
                                                       "Field of view", "Room outside the field", "Bleach each cell", "3D z-stacks", "Record 3D z-stacks", "Calibration",
                                                       "Where do the locus movements come from?", "Model probe binding", "Model distance-dependent transcription",
                                                       "Promoter-enhancer copies and stray spots", "Share of cells with two copies", "Stray spots: new ones per nucleus per minute (each colour)",
-                                                      "Spot finding (stage 6)", "Copies per cell the spot finder looks for", "Pair gate",
+                                                      "Spot finding (stage 6)", "Copies per cell the spot finder looks for", "Pair prior",
                                                       "Image errors", "Run single-cell loci simulation"])]:
             if not want(nm):
                 continue
@@ -232,23 +250,27 @@ def main():
                                        "cellsel": ("Clean track", ALERT), "legend": ("White + = spot found by the analysis", EC), "traces": ("Solid = copy 0", EC)})
         if want("spots"):
             goto_page(pg, "Spot finding"); wait_gone(pg, "Running the spot finder")
-            idle(pg, 2)
+            wait_text(pg, "4 · Compare methods on this run"); idle(pg, 2)   # else the bottom still shows the previous page's dimmed leftovers
             save_page(pg, "pg_spots", {"intro": INTRO, "method": ("1 · The method and where it comes from", EC), "table": ("dog_viterbi: the MS2 spot pipeline", EXP),
                                        "step2": ("2 · Every step on one cell", EC), "settings": ("Settings of the spot finder", EXP), "cellsel": ("Cell (true identity)", EC),
                                        "spotsel": ("locus 0 (promoter)", EC), "frames": ("Frame (this cell)", EC),
                                        "s3": ("3 · This run's result", EC), "s3b": ("3b · Photobleaching correction", EC), "s3c": ("3c · Uneven illumination", EC), "s3d": ("3d · How bright must the MS2 spot be", EC), "s4": ("4 · Compare methods on this run", EC)})
         if want("cells_copies") or want("spots_copies"):          # the two-copy showcase: copy labels, stray spots, the linker's paths
-            select_run(pg, RUN_E)
+            select_run(pg, RUN_E); idle(pg, 4, 240)                # let the run switch finish re-rendering before changing page
+            pg.set_viewport_size({"width": W, "height": 15000}); time.sleep(1.5); idle(pg, 2)   # the Spot finding page is taller than 9000 px
             if want("cells_copies"):
                 goto_page(pg, "Cells")
+                pg.get_by_text("One cell through time").first.wait_for(timeout=240000); idle(pg, 4, 240)
                 save_page(pg, "pg_cells_copies", {"intro": INTRO, "onecell": ("One cell through time", EC), "legend": ("White + = spot found by the analysis", EC),
                                                   "fig": ("css_last", "[data-testid=stImage]"), "traces": ("Solid = copy 0", EC)})
             if want("spots_copies"):
-                goto_page(pg, "Spot finding"); wait_gone(pg, "Running the spot finder"); wait_gone(pg, "Running the multi-copy linker"); idle(pg, 3)
+                goto_page(pg, "Spot finding"); wait_gone(pg, "Running the spot finder"); wait_gone(pg, "Running the multi-copy linker")
+                pg.get_by_text("2b · Copies and stray spots").first.wait_for(timeout=240000); idle(pg, 4, 240)
                 save_page(pg, "pg_spots_copies", {"intro": INTRO, "step2": ("2 · Every step on one cell", EC), "copysel": ("Copy", EC),
                                                   "s2b": ("2b · Copies and stray spots", EC), "s3": ("3 · This run's result", EC),
                                                   "s3e": ("3e · Several copies and stray spots", EC)})
-            select_run(pg, RUN_A)
+            pg.set_viewport_size({"width": W, "height": TALL}); time.sleep(1.5); idle(pg, 2)
+            select_run(pg, RUN_A); idle(pg, 4, 240)
         if want("images"):
             goto_page(pg, "Images")
             save_page(pg, "pg_images", {"intro": INTRO, "p1": ("1. The recorded image and the truth behind it", EC), "frame": ("Frame", EC), "channels": ("Channels", EC),

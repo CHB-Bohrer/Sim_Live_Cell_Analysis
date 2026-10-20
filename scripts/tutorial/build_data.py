@@ -19,7 +19,7 @@ OVERRIDES = {
     "pg_scans": {"masks": [660, 380, 550, 68], "roles": [90, 455, 1120, 95]},
     "pg_images": {"frame": [90, 405, 370, 90]},
     "pg_images_err": {"what": [90, 2270, 370, 179]},
-    "pg_chrom": {"lib": [90, 285, 1120, 75], "sim": [90, 375, 1120, 70]},
+    "pg_chrom": {"lib": [90, 285, 1120, 75], "sim": [90, 840, 1120, 70]},
 }
 TAILS = {"pg_probes": ("use", 140)}
 data = {}

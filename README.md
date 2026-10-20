@@ -7,7 +7,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits tog
 [CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** see the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
 
 ## New here? Take the narrated tutorial
-Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17)** (48 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 40 minutes of animated, narrated scenes covering the
+Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17)** (48 min, 720p or full size; recorded 2026-10-17, so it lacks the two-copies / stray-spots scene), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge; current): about 50 minutes of animated, narrated scenes covering the
 pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = your browser's
 speech synthesis (Edge's "Natural" voices sound best); details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
 
@@ -159,6 +159,18 @@ terminal (re-runs only stage 6 on a finished run, ~1-3 min; also adds MS2 traces
 **How bright must the MS2 spot be?** `scripts\run.cmd python scripts\sweep_ms2_brightness.py` sweeps R = (one Pol II's MS2 photons) / (one nuclear GFP pixel),
 3 seeds per value, tracking skipped (`tracking.skip: true`). Results: Spot finding page, part 3d.
 
+**Several promoter-enhancer copies per cell, and stray spots (2026-10-19).**
+- **Simulation:** `loci.copies` gives some cells two (or more) promoter-enhancer pairs, e.g. both alleles labelled. Each copy has its own chromatin
+  trajectory, probe binding and promoter, so it bursts on its own; `loci.copies.transcription` can give a copy its own rates (the loci configs: half
+  the cells have two copies, copy 1 bursts twice as often). The image-error source `stray_spots` adds short-lived decoy spots (probe or MCP
+  aggregates) inside the nuclei in every colour. Sidebar: *Promoter-enhancer copies and stray spots* in the loci form.
+- **Analysis:** with `locus_analysis.max_copies` > 1 the multi-copy linker (`stage6_analysis/multicopy.py`) follows several paths per colour, keeps the
+  ones that look like a locus, untangles swapped copies, pairs each promoter with its enhancer and uses the partner colour (`pair_prior`, default
+  `gauss`) to choose spots. Every detection and MS2 trace carries its `copy`.
+- **Measured** over 25 movies (`scripts\run.cmd python scripts\sweep_copies_strays.py`, Spot finding page part 3e): copy number right in every cell
+  without strays and in 90% of cells at 4 strays per nucleus per minute; one path per colour (the one-copy finder) misses the second copy.
+  Details and the bias check: [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md).
+
 **What each image error does, and how it is corrected (🖼 Images page, part 2).** Pick one of the 24 error sources from the list:
 - **Explanation:** what it is, what it does to the picture, and how it is corrected. There are three possible routes: by the analysis
   itself, with calibration images (dark frames, flat-field slide, bead slide), or from the movie alone.
@@ -203,8 +215,8 @@ Sources and assumptions are in [docs/INSTRUMENTS.md](docs/INSTRUMENTS.md); the m
 
 The dashboard is now dark. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has updated diagrams of how it all works and of what is built.
 
-**Not built yet:** using the promoter, the enhancer and the MS2 spot together to choose spots, and separating the copies of a locus on different
-chromosomes. The plan is in [docs/PLAN_three_signals_and_homologs.md](docs/PLAN_three_signals_and_homologs.md).
+**Built since the plan** [docs/PLAN_three_signals_and_homologs.md](docs/PLAN_three_signals_and_homologs.md): two copies per cell and the
+promoter-enhancer pairing (above). **Not built yet:** using the MS2 spot as a third witness to choose spots, sister chromatids, quality flags per frame.
 
 The dashboard now runs only the page you have open (a navigation bar replaces the tabs), which made reruns ~5-10x faster; the run summary has a one-line description
 of every image-error source.
