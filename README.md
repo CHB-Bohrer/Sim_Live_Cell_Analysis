@@ -7,7 +7,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits tog
 [CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** see the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
 
 ## New here? Take the narrated tutorial
-Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17)** (48 min, 720p or full size; recorded 2026-10-17, so it lacks the two-copies / stray-spots scene), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge; current): about 50 minutes of animated, narrated scenes covering the
+Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20)** (52 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 50 minutes of animated, narrated scenes covering the
 pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = your browser's
 speech synthesis (Edge's "Natural" voices sound best); details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
 

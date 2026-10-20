@@ -37,12 +37,12 @@ Nothing to install, nothing is sent anywhere.
 - Run numbers in the screenshots come from `loci_demo_seed11_24bba2`, `tracking_demo_seed3_e15523`, `loci_demo_seed8_f5c88d`, `loci_3d_seed23_2163f4` and
   (two copies per cell, stray spots: shots `pg_cells_copies`, `pg_spots_copies`) `loci_library_seed12_87a16d`.
 
-## The MP4 (48 min; 720p = 61 MB, full size 1600x900 = 118 MB)
-Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17
-That video was recorded on 2026-10-17: it does not have the two-copies / stray-spots scene or the 2026-10-20 screenshots (the HTML tutorial does).
-A new 52-minute version with both (1600x900 = 110 MB, 720p = 82 MB) was made on 2026-10-20 and is kept locally in `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-20\`;
-it is not published yet.
-It is NOT in the git tree, to keep the repository small (an earlier 46-minute version, `docs/tutorial/tutorial_720p.mp4`, is still in the git history; it was removed from the tree on 2026-10-17). This version includes the Vutara biplane scene. Local copies: `C:\Users\cbohr\SimLiveData\tutorial\`.
+## The MP4 (52 min; 720p = 82 MB, full size 1600x900 = 110 MB)
+Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20
+This version (2026-10-20) has the two-copies / stray-spots scene and the 2026-10-20 screenshots. The previous one (48 min, without them, voice ~0.7 s ahead of the picture)
+stays at https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17.
+It is NOT in the git tree, to keep the repository small (an earlier 46-minute version, `docs/tutorial/tutorial_720p.mp4`, is still in the git history; it was removed from the tree on 2026-10-17).
+Local copies: `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-20\` (and the older ones in `C:\Users\cbohr\SimLiveData\tutorial\`).
 The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
 How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):
 1. `tts.py`: exports every sentence of the tutorial and synthesizes one MP3 each (sends the narration text, already public in this repo, to Microsoft's service); writes `beats.json` with durations.
