@@ -19,7 +19,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from simlive.stage6_analysis.localize import locus_distances, score_localization
+from simlive.stage1_chromatin.copies import with_copy
+from simlive.stage6_analysis.localize import locus_distances, match_copies, score_localization
 
 VARIANT_OF_SOURCE = {"tracked_gt_masks": "gt_masks", "tracked_auto_masks": "auto_masks"}
 
@@ -49,9 +50,10 @@ def remap_to_truth(pos: pd.DataFrame, matches: pd.DataFrame) -> tuple[pd.DataFra
 
 
 def true_distances(truth: pd.DataFrame) -> pd.DataFrame:
-    """True locus-locus distance (um) per cell and frame from the truth table (y_um, x_um of locus 0 and 1)."""
-    a = truth[truth.locus_id == 0].set_index(["cell_id", "t"])
-    b = truth[truth.locus_id == 1].set_index(["cell_id", "t"])
+    """True locus-locus distance (um) per cell, copy and frame from the truth table (y_um, x_um of locus 0 and 1)."""
+    truth = with_copy(truth)
+    a = truth[truth.locus_id == 0].set_index(["cell_id", "t", "copy"])
+    b = truth[truth.locus_id == 1].set_index(["cell_id", "t", "copy"])
     j = a.join(b, lsuffix="_a", rsuffix="_b", how="inner")
     return np.hypot(j.y_um_a - j.y_um_b, j.x_um_a - j.x_um_b).rename("dist_true_um").reset_index()
 
@@ -61,10 +63,11 @@ def propagation_scores(pos: pd.DataFrame, matches: pd.DataFrame, truth: pd.DataF
     remapped, book = remap_to_truth(pos, matches)
     if remapped.empty:
         return pd.DataFrame(columns=["cell_id", "t", "locus_id", "err_um", "visible"]), book
+    remapped = match_copies(remapped, truth, px_um)          # the tracked cell's copies -> the true cell's copies
     err, sc = score_localization(remapped, truth, px_um)
     sc = {**book, **sc}
     d = locus_distances(remapped, px_um)
-    d = d.merge(true_distances(truth), on=["cell_id", "t"], how="inner")
+    d = d.merge(true_distances(truth), on=["cell_id", "t", "copy"], how="inner")
     if len(d):
         e = d.dist_um - d.dist_true_um
         sc.update({"distance_rms_um": float(np.sqrt((e ** 2).mean())), "distance_median_um": float(e.abs().median()), "n_distances": int(len(d))})

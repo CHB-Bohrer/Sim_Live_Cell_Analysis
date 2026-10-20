@@ -67,6 +67,7 @@ def _tidy(table: pd.DataFrame) -> pd.DataFrame:
 def _simulate(run: Path, R: dict):
     cfg = R["cfg"]
     cdir = run / "stage3_microscopy" / "calibration"
+    st.session_state["_cal_dir"] = str(cdir)          # for the estimate-vs-truth notes in the figure titles
     with st.status("Simulating calibration acquisitions…", expanded=True) as status:
         cal, table = run_calibration(cfg, entropy_for(int(cfg["seed"])), progress=lambda m: st.write(m))
         cal.save(cdir)
@@ -108,7 +109,8 @@ def _dark_section(cal: Calibration) -> None:
     ax.imshow(np.zeros_like(m["offset"]), cmap="gray", vmin=0, vmax=1)
     ys, xs = np.nonzero(m["hot"])
     ax.plot(xs, ys, "o", mfc="none", mec="red", ms=7)
-    ax.set_title(f"Hot pixels found: {int(m['hot'].sum())}", fontsize=11); ax.axis("off")
+    note = _truth_note(cal, "hot pixels found", ch)
+    ax.set_title(f"Hot pixels found: {int(m['hot'].sum())}" + (f"\n({note})" if note else ""), fontsize=11); ax.axis("off")
     c[2].pyplot(fig, width="stretch"); plt.close(fig)
     v = cal.values[ch]
     style.stat_grid(st, [("Offset", f"{v['offset_adu']:.1f} ADU", "constant counts added by the camera electronics"),
@@ -164,7 +166,7 @@ def _beads_section(cal: Calibration) -> None:
     ax.imshow(img, cmap="gray", vmin=np.percentile(img, 1), vmax=np.percentile(img, 99.9))
     P = np.array(b["bead_positions_px"])
     ax.plot(P[:, 1], P[:, 0], "o", mfc="none", mec="cyan", ms=9)
-    ax.set_title(f"Beads in {CH_SHORT[ch]} ({len(P)} found)", fontsize=11); ax.axis("off")
+    ax.set_title(f"Bead slide, {CH_SHORT[ch]} channel: {len(P)} beads found", fontsize=11); ax.axis("off")
     c[0].pyplot(fig, width="stretch"); plt.close(fig)
     others = [x for x in cal.channels if x != ref]
     if others:
@@ -185,8 +187,13 @@ def _beads_section(cal: Calibration) -> None:
         c[1].pyplot(fig, width="stretch"); plt.close(fig)
     d = np.array(b["drift_px_series"])
     fig, ax = plt.subplots(figsize=(5.4, 4.6))
-    ax.plot(d[:, 1], d[:, 0], "o-", color="#f59e0b")
-    ax.set_xlabel("x drift (px)"); ax.set_ylabel("y drift (px)"); ax.set_title("Stage drift measured from the beads", fontsize=11)
+    ax.plot(d[:, 1], d[:, 0], "-", color="#94a3b8", lw=1)
+    sc_ = ax.scatter(d[:, 1], d[:, 0], c=np.arange(len(d)), cmap="viridis", s=36, zorder=3)
+    ax.annotate("start", (d[0, 1], d[0, 0]), xytext=(6, -10), textcoords="offset points", color="#e5e7eb", fontsize=9)
+    fig.colorbar(sc_, ax=ax, label="frame of the bead series")
+    note = _truth_note(cal, "stage drift (rms error of the estimated path)", "all")
+    ax.set_xlabel("x drift (px)"); ax.set_ylabel("y drift (px)")
+    ax.set_title("Stage drift measured from the beads" + (f"\n({note})" if note else ""), fontsize=11)
     c[2].pyplot(fig, width="stretch"); plt.close(fig)
     rows = []
     for x in cal.channels:
@@ -196,6 +203,22 @@ def _beads_section(cal: Calibration) -> None:
                      "axial σ (µm)": round(b["psf_sigma_z_um"][x], 3) if cal.z_um else None, "fits used": b["n_fits"][x]})
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     st.caption("Shifts are relative to the nuclear channel. The 'fits used' column is the number of bead measurements (beads × frames).")
+
+
+def _truth_note(cal, quantity: str, channel: str) -> str:
+    """The calibration's own estimate-vs-truth note for one quantity (from comparison.csv next to the calibration), or ''."""
+    f = getattr(cal, "_dir", None)
+    try:
+        tab = pd.read_csv(Path(st.session_state.get("_cal_dir", "")) / "comparison.csv") if f is None else pd.read_csv(Path(f) / "comparison.csv")
+    except Exception:  # noqa: BLE001 - no comparison table: say nothing
+        return ""
+    r = tab[(tab.quantity == quantity) & (tab.channel == channel)]
+    if not len(r):
+        return ""
+    note = str(r.note.iloc[0]) if isinstance(r.note.iloc[0], str) else ""
+    if "rms error" in quantity:               # the estimate column already IS the error of the whole path
+        return f"off the true path by {float(r.estimate.iloc[0]):.3f} {r.unit.iloc[0]} rms; " + note
+    return note
 
 
 def _effect_section(run: Path, cal: Calibration) -> None:
@@ -233,11 +256,15 @@ def _effect_section(run: Path, cal: Calibration) -> None:
     corr = cal.correct(raw, ch)
     y0, x0, h = raw.shape[0] // 2 - 80, raw.shape[1] // 2 - 80, 160
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.8))
-    for ax, (title, im_) in zip(axes, [(f"Recorded (frame {t})", raw), ("Dark-subtracted, flat-fielded, hot pixels replaced", corr), ("What the correction changed", corr - raw)]):
+    change = corr - raw
+    off = float(np.median(change))
+    for ax, (title, im_) in zip(axes, [(f"Recorded (frame {t})", raw), ("Dark-subtracted, flat-fielded, hot pixels replaced", corr),
+                                       (f"What the correction changed, beyond the offset ({off:+.0f} ADU everywhere)", change - off)]):
         sub = im_[y0:y0 + h, x0:x0 + h]
-        if title.startswith("What"):
+        if title.startswith("What"):             # the constant offset is not interesting; what varies (flat-field, offset pattern, hot pixels) is
             m = max(np.percentile(np.abs(sub), 99.5), 1e-9)
-            ax.imshow(sub, cmap="RdBu_r", vmin=-m, vmax=m)
+            hh = ax.imshow(sub, cmap="RdBu_r", vmin=-m, vmax=m)
+            fig.colorbar(hh, ax=ax, fraction=0.046, label="ADU (red = raised, blue = lowered)")
         else:
             ax.imshow(sub, cmap="gray", vmin=np.percentile(sub, 1), vmax=np.percentile(sub, 99.8))
         ax.set_title(title, fontsize=11); ax.axis("off")
@@ -268,6 +295,7 @@ def render(st_, run_path: Path, R: dict):
     run = Path(run_path)
     _overview()
     cdir = run / "stage3_microscopy" / "calibration"
+    st.session_state["_cal_dir"] = str(cdir)          # for the estimate-vs-truth notes in the figure titles
     if not (cdir / "calibration.json").exists():
         st.info("No calibration for this run yet.")
         if not (R["cfg"].get("loci")):

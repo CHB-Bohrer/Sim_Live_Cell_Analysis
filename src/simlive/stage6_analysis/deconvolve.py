@@ -31,6 +31,8 @@ import numpy as np
 import pandas as pd
 from numba import njit
 
+from simlive.stage1_chromatin.copies import split_trace_id
+
 
 @dataclass
 class Kernel:
@@ -107,16 +109,38 @@ def noise_points(traces: list[np.ndarray], n_bins: int = 8) -> tuple[np.ndarray,
 
 
 def noise_model(traces: list[np.ndarray], n_bins: int = 8) -> tuple[float, float]:
-    """sigma^2(G) = sigma_b^2 + beta G from the traces (C.U.), fitted by weighted least squares to `noise_points`. Returns (sigma_b, beta)."""
+    """sigma^2(G) = sigma_b^2 + beta G from the traces (C.U.), from `noise_points`. Returns (sigma_b, beta).
+    sigma_b^2 is MEASURED on the low-signal half of the bins (where most frames of a bursty gene are), and beta is then the weighted slope of
+    the remaining variance against the level. The earlier straight-line fit through all bins let one high bin set the slope and pushed the
+    intercept below zero; it was then clipped to the floor (sigma_b = 0.01 Pol II units), and with almost no background noise allowed the
+    sampler explained every small baseline offset with a phantom Pol II (measured: ~1 Pol II everywhere in quiet stretches, 1.6 false
+    starts per true start)."""
     x, y, w = noise_points(traces, n_bins)
     if len(x) == 0:
         return 0.3, 0.0
     if len(x) < 2:
         return float(np.sqrt(y[0])), 0.0
-    A = np.c_[np.ones_like(x), np.clip(x, 0, None)] * np.sqrt(w)[:, None]
-    coef, *_ = np.linalg.lstsq(A, y * np.sqrt(w), rcond=None)
-    s2, beta = float(max(coef[0], 1e-4)), float(max(coef[1], 0.0))
+    order = np.argsort(x)
+    low = order[: max(2, (len(x) + 1) // 2)]
+    s2 = float(np.average(y[low], weights=w[low]))
+    xc = np.clip(x, 0, None)
+    beta = float(np.sum(w * xc * (y - s2)) / max(np.sum(w * xc * xc), 1e-12))
+    beta = max(beta, 0.0)
+    s2 = max(float(np.average(y[low] - beta * xc[low], weights=w[low])), 0.25 * float(y.min()), 1e-4)   # the part of the noise at zero signal
     return float(np.sqrt(s2)), beta
+
+
+def trace_baseline(a: np.ndarray, sb: float, pct: float = 10.0) -> float:
+    """The level a trace sits at when no Pol II is on the gene (C.U.): its `pct` percentile + z sigma_b (z = the same percentile of the
+    standard normal, i.e. the noise around the baseline), assuming the gene is empty in more than `pct`% (x2 to be safe) of the frames: true
+    for bursty genes; a gene that always carries Pol II has its baseline overestimated (the 25th percentile cost a dense gene a fifth of its
+    starts). Texture of the nucleus, stray spots or another copy's MS2 spot near the promoter shift a trace's zero by a roughly constant
+    amount (measured: -0.14 to +0.55 of one Pol II), which the deconvolution would otherwise read as Pol II."""
+    from scipy.stats import norm
+
+    a = np.asarray(a, float)
+    a = a[np.isfinite(a)]
+    return float(np.percentile(a, pct) - norm.ppf(pct / 100.0) * sb) if len(a) else 0.0
 
 
 @njit(cache=True)
@@ -490,6 +514,16 @@ def initial_state(kind: str, p: np.ndarray, rise: np.ndarray, kern: Kernel, rng:
     raise ValueError(f"unknown init {kind!r}; use one of {INITS}")
 
 
+def trace_key(df: pd.DataFrame) -> str:
+    """The column that names one MS2 trace: `trace_id` (one per cell and copy, stage1_chromatin.copies.trace_id) or, in runs made before
+    copies existed, `cell_id` (the same numbers for copy 0)."""
+    return "trace_id" if "trace_id" in df.columns else "cell_id"
+
+
+def _with_trace_id(df: pd.DataFrame) -> pd.DataFrame:
+    return df if "trace_id" in df.columns else df.assign(trace_id=df.cell_id)
+
+
 def burst_calls(counts: np.ndarray, frame_s: float, w_frames: float = 5.0, g_b: float = 2.0) -> np.ndarray:
     """Chen et al. V.4 on every sample: smooth the per-frame initiation counts with exp(-(2 t / w)^4) (normalised) and call ON where the
     smoothed count per frame >= g_b / w. Returns P(ON) per frame (fraction of samples)."""
@@ -507,7 +541,7 @@ def burst_rule_grid(samples: dict, tx: pd.DataFrame, frame_s: float, ws=(1, 2, 3
                     gbs=(0.5, 1, 1.5, 2, 3, 4, 6)) -> pd.DataFrame:
     """Agreement of the burst calls with the true promoter state for a grid of windows w (frames) and thresholds g_b (starts in the window):
     accuracy, sensitivity (ON frames called ON) and specificity (OFF frames called OFF), over all cells. Simulation only (needs the truth)."""
-    truth = {int(c): g.sort_values("t").promoter_on.to_numpy().astype(bool) for c, g in tx.groupby("cell_id")}
+    truth = {int(c): g.sort_values("t").promoter_on.to_numpy().astype(bool) for c, g in tx.groupby(trace_key(tx))}
     rows = []
     for w in ws:
         for gb in gbs:
@@ -524,17 +558,21 @@ def burst_rule_grid(samples: dict, tx: pd.DataFrame, frame_s: float, ws=(1, 2, 3
     return pd.DataFrame(rows)
 
 
-def prepare_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None):
-    """Everything the samplers need from a run's MS2 table: per-cell traces in C.U. {cell_id: array}, the kernel, the frame interval, the
-    prior rate per frame (per s), the noise model (sigma_b, beta) and the unit."""
+def prepare_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None, baseline: str = "none"):
+    """Everything the samplers need from a run's MS2 table: per-trace traces in C.U. {trace_id: array} (trace_id = cell_id for copy 0, so
+    one-copy runs are keyed by cell), the kernel, the frame interval, the prior rate per frame (per s), the noise model (sigma_b, beta) and
+    the unit."""
     col = col if col in tr else "intensity"
     dt = float(cfg["acquisition"]["frame_interval_s"])
     kern = kernel_from_config(cfg, 1.0 if dt >= 1 else dt / 4)
     unit = float(unit) if unit else unit_intensity(cfg)
-    tr = tr.sort_values(["cell_id", "t"])
+    key = trace_key(tr)
+    tr = tr.sort_values([key, "t"])
     T = int(cfg["acquisition"]["n_frames"])
-    traces = {int(c): g.set_index("t")[col].reindex(range(T)).to_numpy(float) / unit for c, g in tr.groupby("cell_id")}
+    traces = {int(c): g.set_index("t")[col].reindex(range(T)).to_numpy(float) / unit for c, g in tr.groupby(key)}
     sb, beta = noise_model(list(traces.values()))
+    if baseline == "auto":                 # every trace's own zero (see trace_baseline), removed before the noise-free model is fitted
+        traces = {c: a - trace_baseline(a, sb) for c, a in traces.items()}
     pop = np.nanmean(np.vstack(list(traces.values())), axis=0)          # population mean activity (C.U.) per frame
     pop = pd.Series(np.clip(pop, 0, None)).rolling(5, center=True, min_periods=1).mean().to_numpy()
     tau = kern.area_s
@@ -544,12 +582,12 @@ def prepare_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", uni
 
 
 def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_corr", unit: float | None = None, n_keep: int = 1000,
-                          seed: int = 0, progress=None, sampler: str = "auto") -> tuple[pd.DataFrame, dict, dict]:
+                          seed: int = 0, progress=None, sampler: str = "auto", baseline: str = "none") -> tuple[pd.DataFrame, dict, dict]:
     """Deconvolve every cell's MS2 trace (table with cell_id, t, and the intensity column). Returns (per-frame table, per-cell samples
     {cell_id: counts}, info: unit, noise model, kernel). sampler "auto" (default): every cell is sampled by gibbs_shift with 4 chains from
     different starts and checked (mcmc_check: R-hat < 1.05, ESS >= 400); the first chain is the result if the check passes, otherwise the cell is
     sampled again with parallel tempering (gibbs_pt). info["checks"] lists per cell which sampler gave the result and why."""
-    traces, kern, dt, prior, sb, beta, unit, col = prepare_traces(tr, cfg, col, unit)
+    traces, kern, dt, prior, sb, beta, unit, col = prepare_traces(tr, cfg, col, unit, baseline)
     tau = kern.area_s
     rows, samples, acc, blocks, checks = [], {}, [], [], []
     for i, (cid, a) in enumerate(traces.items()):
@@ -570,7 +608,7 @@ def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_cor
             else:
                 res = deconvolve_trace(a, kern, dt, prior, sb, beta, n_keep=n_keep, seed=seed + cid, sampler="gibbs_pt")
                 used = "gibbs_pt"
-            checks.append({"cell_id": cid, "sampler_used": used, "plain_converged": bool(chk.converged), "plain_extended": extended,
+            checks.append({"cell_id": split_trace_id(cid)[0], "trace_id": cid, "sampler_used": used, "plain_converged": bool(chk.converged), "plain_extended": extended,
                            "plain_rhat_logpost": chk.rhat_logpost,
                            "plain_rhat_frames_max": chk.rhat_frames_max, "plain_ess_logpost": chk.ess_logpost, "plain_ess_nstarts": chk.ess_nstarts,
                            "plain_reasons": "; ".join(chk.reasons)})
@@ -588,7 +626,9 @@ def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_cor
         if progress:
             progress(f"  cell {cid}: {c.sum(1).mean():.1f} initiations (posterior mean)"
                      + (f", sampler {checks[-1]['sampler_used']}" if checks else "") + f" [{i + 1}/{len(traces)}]")
-    out = pd.DataFrame(rows, columns=["cell_id", "t", "trace_cu", "fit_cu", "n_init_mean", "n_init_sd", "rate_per_min", "p_on", "p_start"])
+    out = pd.DataFrame(rows, columns=["trace_id", "t", "trace_cu", "fit_cu", "n_init_mean", "n_init_sd", "rate_per_min", "p_on", "p_start"])
+    out.insert(0, "cell_id", [split_trace_id(k)[0] for k in out.trace_id])        # the cell and the copy of every trace
+    out.insert(1, "copy", [split_trace_id(k)[1] for k in out.trace_id])
     info = {"unit": unit, "sigma_b_cu": sb, "beta_cu": beta, "kernel_dt_s": kern.dt_fine_s, "kernel_s": len(kern.values) * kern.dt_fine_s,
             "kernel_area_s": tau, "column": col, "n_samples": int(n_keep), "sampler": sampler,
             "acceptance": float(np.mean(acc)) if acc else None, "block_s": [b for b in blocks if b is not None] or None,
@@ -599,7 +639,8 @@ def deconvolve_run_traces(tr: pd.DataFrame, cfg: dict, col: str = "intensity_cor
     return out, samples, info
 
 
-def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int = 1000, sampler: str = "auto", tag: str = "") -> dict:
+def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int = 1000, sampler: str = "auto", tag: str = "",
+                   baseline: str = "none") -> dict:
     """Deconvolve the MS2 traces of a finished run (the calibrated traces if there are any, bleaching-corrected column if present).
     Writes stage6_analysis/<src>/ms2_deconvolution.csv (+ _samples.npz, _info.json) and returns the scores of the truth source."""
     import json
@@ -618,18 +659,22 @@ def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int
         if f is None:
             continue
         progress(f"MS2 deconvolution ({src}, {f.name})")
-        dec, samples, info = deconvolve_run_traces(pd.read_csv(f), cfg, n_keep=n_keep, progress=progress, sampler=sampler)
+        dec, samples, info = deconvolve_run_traces(pd.read_csv(f), cfg, n_keep=n_keep, progress=progress, sampler=sampler, baseline=baseline)
+        info["baseline"] = baseline
         info["trace_file"] = f.name
         dec.to_csv(d6 / f"ms2_deconvolution{tag}.csv", index=False)
         np.savez_compressed(d6 / f"ms2_deconvolution{tag}_samples.npz", **{str(c): v for c, v in samples.items()})
         if src == "truth":
-            ev = pd.read_csv(run / "stage1_chromatin" / "transcription_events.csv")
-            tx = pd.read_csv(run / "stage1_chromatin" / "transcription.csv")
+            ev = _with_trace_id(pd.read_csv(run / "stage1_chromatin" / "transcription_events.csv"))
+            tx = _with_trace_id(pd.read_csv(run / "stage1_chromatin" / "transcription.csv"))
+            if "ms2_labelled" in tx:     # a copy without the MS2 cassette cannot be seen: leave it out of the scores
+                lab = set(tx[tx.ms2_labelled.astype(bool)].trace_id)
+                tx, ev = tx[tx.trace_id.isin(lab)], ev[ev.trace_id.isin(lab)]
             info["scores"] = out = score_deconvolution(dec, {k: v for k, v in samples.items() if isinstance(k, int)}, ev, tx,
                                                        float(cfg["acquisition"]["frame_interval_s"]))
             # how far the microscope-based unit is from the truth (regression of the trace on the true loops / n_loops, through zero)
             n_loops = int((cfg["loci"]["transcription"].get("params") or {}).get("n_loops", 24))
-            j = dec.merge(tx[["cell_id", "t", "ms2_loops"]], on=["cell_id", "t"])
+            j = dec.merge(tx[["trace_id", "t", "ms2_loops"]], on=["trace_id", "t"])
             g = j.ms2_loops.to_numpy() / n_loops
             ok = np.isfinite(j.trace_cu)
             if (g[ok] ** 2).sum() > 0:
@@ -638,15 +683,16 @@ def deconvolve_run(run, sources: tuple = ("truth",), progress=print, n_keep: int
     return out
 
 
-def true_initiations(events: pd.DataFrame, cells: list[int], T: int, frame_s: float) -> pd.DataFrame:
-    """Initiations of the simulation counted per frame interval (t - dt, t], per cell."""
+def true_initiations(events: pd.DataFrame, traces: list[int], T: int, frame_s: float) -> pd.DataFrame:
+    """Initiations of the simulation counted per frame interval (t - dt, t], per trace (trace_id; = cell_id in one-copy runs)."""
+    events = _with_trace_id(events)
     rows = []
-    for c in cells:
-        e = events[events.cell_id == c].init_s.to_numpy()
+    for c in traces:
+        e = events[events.trace_id == c].init_s.to_numpy()
         n = np.ceil(e / frame_s).astype(int)
         cnt = np.bincount(n[(n >= 0) & (n < T)], minlength=T)
         rows += [(c, t, int(cnt[t])) for t in range(T)]
-    return pd.DataFrame(rows, columns=["cell_id", "t", "n_init_true"])
+    return pd.DataFrame(rows, columns=["trace_id", "t", "n_init_true"])
 
 
 def _match(est: np.ndarray, tru: np.ndarray, tol: int) -> int:
@@ -670,11 +716,12 @@ def score_deconvolution(dec: pd.DataFrame, samples: dict, events: pd.DataFrame, 
     inferred / true; also the total (posterior mean vs true), the correlation of the 1-minute rate with the true one, and P(ON) against
     the true promoter state. n_eval samples per cell are used."""
     T = int(dec.t.max()) + 1
-    tru = true_initiations(events, sorted(dec.cell_id.unique()), T, frame_s)
-    j = dec.merge(tru, on=["cell_id", "t"]).merge(tx[["cell_id", "t", "promoter_on"]], on=["cell_id", "t"], how="left")
+    dec, tx = _with_trace_id(dec), _with_trace_id(tx)
+    tru = true_initiations(events, sorted(set(dec.trace_id.unique()) & set(tx.trace_id.unique())), T, frame_s)
+    j = dec.merge(tru, on=["trace_id", "t"]).merge(tx[["trace_id", "t", "promoter_on"]], on=["trace_id", "t"], how="left")
     matched = inferred = 0.0
     n_true = 0
-    for cid, g in j.groupby("cell_id"):
+    for cid, g in j.groupby("trace_id"):
         g = g.sort_values("t")
         te = np.repeat(np.arange(len(g)), g.n_init_true.to_numpy())
         n_true += len(te)
@@ -688,8 +735,8 @@ def score_deconvolution(dec: pd.DataFrame, samples: dict, events: pd.DataFrame, 
             inferred += len(ee) / len(pick)
     k = max(1, int(round(60 / frame_s)))
     sm = lambda v: pd.Series(v).rolling(k, center=True, min_periods=1).sum().to_numpy()  # noqa: E731
-    r_est = np.concatenate([sm(g.sort_values("t").n_init_mean.to_numpy()) for _, g in j.groupby("cell_id")])
-    r_true = np.concatenate([sm(g.sort_values("t").n_init_true.to_numpy()) for _, g in j.groupby("cell_id")])
+    r_est = np.concatenate([sm(g.sort_values("t").n_init_mean.to_numpy()) for _, g in j.groupby("trace_id")])
+    r_true = np.concatenate([sm(g.sort_values("t").n_init_true.to_numpy()) for _, g in j.groupby("trace_id")])
     out = {"n_true": int(n_true), "n_estimated": float(j.n_init_mean.sum()), "found": matched / max(n_true, 1),
            "false_per_true": (inferred - matched) / max(n_true, 1), "tolerance_s": tol_frames * frame_s, "rate_r_1min": float(np.corrcoef(r_est, r_true)[0, 1]) if r_true.std() > 0 and r_est.std() > 0 else np.nan}
     if "promoter_on" in j and j.promoter_on.notna().any():

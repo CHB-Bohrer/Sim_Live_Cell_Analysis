@@ -18,6 +18,7 @@ import tifffile
 
 from simlive.io.runs import run_id_for, stage_dir, write_provenance
 from simlive.stage2_cells.motion import add_z, simulate_cells, z_enabled
+from simlive.stage1_chromatin.copies import copy_settings
 from simlive.stage1_chromatin.library_loci import simulate_library_loci
 from simlive.stage1_chromatin.probes import simulate_probe_occupancy
 from simlive.stage1_chromatin.toy_loci import simulate_toy_loci
@@ -28,11 +29,11 @@ from simlive.stage3_microscopy.render import Imager, entropy_for, save_imaging_t
 from simlive.stage4_segtrack.segment import segment
 from simlive.stage5_linking.celldata import map_cells
 from simlive.stage5_linking.isolate import isolate_cells
-from simlive.stage6_analysis.localize import localize_loci, locus_distances, photons_in_frame, score_localization
+from simlive.stage6_analysis.localize import localize_loci, locus_distances, match_copies, photons_in_frame, score_localization
 from simlive.stage6_analysis.fiducials import (correct_with_beads, correct_with_plane_positions, score_variants, track_fiducials)
 from simlive.stage6_analysis.biplane import estimate_plane_offset
 from simlive.stage6_analysis.localize3d import localize_loci_3d, locus_distances_3d, score_localization_3d
-from simlive.stage6_analysis.ms2 import ms2_trace, ms2_truth, score_ms2
+from simlive.stage6_analysis.ms2 import ms2_trace, ms2_truth, relabel_to_true_copies, score_ms2
 from simlive.stage4_segtrack.trackers import make_tracker
 from simlive.stage7_validation.identity import identity_summary, match_ids
 from simlive.stage7_validation.propagation import VARIANT_OF_SOURCE, propagation_scores
@@ -46,7 +47,10 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     seed = int(cfg["seed"])
     run = Path(out_root) / run_id_for(cfg)
     s2, s3, s4, s7 = (run / n for n in ("stage2_cells", "stage3_microscopy", "stage4_segtrack", "stage7_validation"))
-    ss = np.random.SeedSequence(seed).spawn(8)  # independent streams: motion, rendering, loci, (unused), probes, transcription, cell heights (z), fiducial beads
+    # independent streams: 0 motion, 1 rendering, 2 loci, 3 (unused), 4 probes, 5 transcription, 6 cell heights (z), 7 fiducial beads,
+    # 8 further copies of the promoter-enhancer pair (loci.copies; spawn(10)[k] == spawn(8)[k], so the older streams are unchanged), 9 free
+    ss = np.random.SeedSequence(seed).spawn(10)
+    cps = ss[8].spawn(3)                                  # copies: loci + number of copies, probes, transcription
     progress(f"Run folder: {run}")
 
     progress("Stage 2: simulating cell motion and shape")
@@ -60,27 +64,31 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     cells = pd.read_csv(s2 / "cells.csv")
     truth = occ = spots = None
     if cfg.get("loci"):
-        progress("Stage 1: simulating loci inside each nucleus")
+        n_cp = copy_settings(cfg)
+        progress("Stage 1: simulating loci inside each nucleus" + (f" (up to {n_cp.max_copies} promoter-enhancer pairs per cell)" if n_cp.active else ""))
         stage_dir(run, "stage1_chromatin")
         traces = None
         if cfg["loci"].get("source") == "library":
-            truth, traces = simulate_library_loci(cells, cfg, np.random.default_rng(ss[2]), return_traces=True)
+            truth, traces = simulate_library_loci(cells, cfg, np.random.default_rng(ss[2]), return_traces=True,
+                                                  rng_copies=np.random.default_rng(cps[0]))
         else:
-            truth = simulate_toy_loci(cells, cfg, np.random.default_rng(ss[2]))
+            truth = simulate_toy_loci(cells, cfg, np.random.default_rng(ss[2]), rng_copies=np.random.default_rng(cps[0]))
         truth.to_csv(run / "stage1_chromatin" / "loci_truth.csv", index=False)
-        if truth.attrs.get("pairs_kb"):          # library loci: which simulation and which genomic pair every cell got
-            sims = truth.groupby("cell_id").sim_id.first()
-            pd.DataFrame([(c, sims[c], pr[0], pr[1]) for c, pr in truth.attrs["pairs_kb"].items()],
-                         columns=["cell_id", "sim_id", "promoter_kb", "enhancer_kb"]).to_csv(run / "stage1_chromatin" / "library_pairs.csv", index=False)
+        copies_per_cell = truth.groupby("cell_id")["copy"].nunique()
+        copies_per_cell.rename("n_copies").reset_index().to_csv(run / "stage1_chromatin" / "copies.csv", index=False)
+        if truth.attrs.get("pairs"):             # library loci: which simulation and which genomic pair every copy of every cell got
+            pd.DataFrame(truth.attrs["pairs"], columns=["cell_id", "copy", "sim_id", "promoter_kb", "enhancer_kb"]).to_csv(
+                run / "stage1_chromatin" / "library_pairs.csv", index=False)
         write_provenance(run / "stage1_chromatin", cfg, seed)
         if (cfg["loci"].get("probes") or {}).get("enabled"):
             progress("Stage 1b: stochastic probe binding at the promoter and enhancer (sets each locus' brightness)")
-            occ = simulate_probe_occupancy(cells, cfg, np.random.default_rng(ss[4]))
+            occ = simulate_probe_occupancy(cells, cfg, np.random.default_rng(ss[4]), copies_per_cell.to_dict(), np.random.default_rng(cps[1]))
             occ.to_csv(run / "stage1_chromatin" / "probe_occupancy.csv", index=False)
         if (cfg["loci"].get("transcription") or {}).get("enabled"):
-            progress("Stage 1c: stochastic transcription driven by promoter-enhancer distance (the MS2 signal)")
+            progress("Stage 1c: stochastic transcription driven by promoter-enhancer distance (the MS2 signal)"
+                     + (": every copy has its own promoter" if n_cp.active else ""))
             tx, tx_events = simulate_transcription(cells, traces or traces_from_truth(truth, cfg), cfg,
-                                                   np.random.default_rng(ss[5]))
+                                                   np.random.default_rng(ss[5]), np.random.default_rng(cps[2]))
             tx.to_csv(run / "stage1_chromatin" / "transcription.csv", index=False)
             tx_events.to_csv(run / "stage1_chromatin" / "transcription_events.csv", index=False)
             spots = ms2_spots(tx, truth, cfg)
@@ -200,6 +208,7 @@ class _Analysis:
     zinfo: dict | None
     ana: dict
     iso: dict
+    strays: pd.DataFrame | None = None      # stage3_microscopy/stray_spots.csv (decoy spots), to count picks of a stray
 
     @property
     def s3(self) -> Path:
@@ -225,11 +234,13 @@ class _Analysis:
 def _write_locus_results(A: _Analysis, out6: Path, suffix: str, pos: pd.DataFrame, dist_fn, score_fn=None) -> dict | None:
     """Write loci_positions<suffix>.csv and locus_distances<suffix>.csv (and localization_errors<suffix>.csv when `score_fn` is given);
     returns the scores. Suffixes: '' (2D), '_cal' (calibration applied), '_3d', '_3d_cal'."""
+    if score_fn is not None and len(pos) and "copy" in pos.columns:   # true identities: number the found copies like the true ones
+        pos = match_copies(pos, A.truth, A.px_um)
     pos.to_csv(out6 / f"loci_positions{suffix}.csv", index=False)
     (dist_fn(pos, A.px_um) if len(pos) else pd.DataFrame(columns=EMPTY_DIST)).to_csv(out6 / f"locus_distances{suffix}.csv", index=False)
     if score_fn is None:
         return None
-    err, sc = score_fn(pos, A.truth, A.px_um)
+    err, sc = score_fn(pos, A.truth, A.px_um, strays=A.strays) if score_fn is score_localization else score_fn(pos, A.truth, A.px_um)
     err.to_csv(out6 / f"localization_errors{suffix}.csv", index=False)
     return sc
 
@@ -272,7 +283,9 @@ def _trace_ms2(A: _Analysis, src: str, out5: Path, out6: Path, scores: dict) -> 
     ms2_t = ms2_truth(A.run) if src == "truth" else None
     kw = {k: v for k, v in A.ana.items() if k != "dilate_px"}
     for tag, cdir in (("", None),) + ((("_cal", str(A.cal_dir)),) if A.apply_cal else ()):
-        tr = map_cells(ms2_trace, out5, n_workers=A.n_workers, calib=cdir, **kw)
+        tr = map_cells(ms2_trace, out5, n_workers=A.n_workers, calib=cdir, px_um=A.px_um, **kw)
+        if ms2_t is not None:                 # true identities: number the found copies like the true ones they sit on
+            tr = relabel_to_true_copies(tr, ms2_t, A.px_um)
         tr.to_csv(out6 / f"ms2_traces{tag}.csv", index=False)
         if ms2_t is not None and len(tr):
             scores["ms2" + ("_calibrated" if tag else "")] = score_ms2(tr, ms2_t, A.px_um)[1]
@@ -354,7 +367,8 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
     truth = photons_in_frame(truth, pd.read_csv(itp) if itp.exists() else None)     # true photons per spot and frame, to score intensities
     ej = s3 / "imaging_errors.json"
     zinfo = json.loads(ej.read_text()).get("z_stack") if ej.exists() else None
-    A = _Analysis(cfg, run, progress, cal_dir, px_um, truth, zinfo, cfg.get("locus_analysis", {}), iso)
+    sp = s3 / "stray_spots.csv"
+    A = _Analysis(cfg, run, progress, cal_dir, px_um, truth, zinfo, cfg.get("locus_analysis", {}), iso, pd.read_csv(sp) if sp.exists() else None)
     scores = {}
     for src in sources:
         d, f = ID_SOURCES[src]
@@ -378,7 +392,7 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
     from simlive.stage6_analysis.bleach import bleach_correct_run
 
     scores["bleaching"] = bleach_correct_run(run, tuple(sources))
-    if A.has_transcription:      # MS2 trace -> Pol II initiation events and bursts (Chen et al. 2025)
+    if A.has_transcription and A.ana.get("deconvolve", True):      # MS2 trace -> Pol II initiation events and bursts (Chen et al. 2025)
         from simlive.stage6_analysis.deconvolve import deconvolve_run
 
         progress("Stage 6: deconvolving the MS2 traces into Pol II initiation events (Chen et al. 2025)")

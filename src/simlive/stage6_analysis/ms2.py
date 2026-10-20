@@ -7,6 +7,10 @@ cell: the transcription trace the paper analyses.
 
 `ms2_truth(run)` gives the simulation's true MS2 spot per cell and frame (position = the promoter, drift-corrected; photons = MS2 loops x
 photons per loop x exposure; `photons_frame` after the nuclear channel's bleaching). `score_ms2` compares detections and the trace with it.
+
+Several copies per cell (`locus_analysis.max_copies` > 1): the promoters of all copies are found with the multi-copy linker
+(multicopy.py) and every copy gets its own trace (column `copy`, and `trace_id` = one integer per cell and copy, copies.trace_id). Copies are
+then matched to the true copies before scoring (localize.match_copies).
 """
 from __future__ import annotations
 
@@ -16,10 +20,12 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from simlive.stage1_chromatin.copies import trace_id as _trace_id
 from simlive.stage6_analysis import dog_viterbi as DV
-from simlive.stage6_analysis.localize import analyse_channel, centroid_in_crop, spot_params
+from simlive.stage6_analysis import multicopy as MC
+from simlive.stage6_analysis.localize import EXTRA_COPY, analyse_channel, centroid_in_crop, match_copies, spot_params
 
-COLUMNS = ["cell_id", "t", "detected", "crop_y_px", "crop_x_px", "lab_y_px", "lab_x_px", "snr", "intensity"]
+COLUMNS = ["cell_id", "copy", "trace_id", "t", "detected", "crop_y_px", "crop_x_px", "lab_y_px", "lab_x_px", "snr", "intensity"]
 ERODE_PX = 3       # the nucleus mask is shrunk by this much: the bright nuclear edge would otherwise give DoG candidates along the rim
 
 
@@ -59,7 +65,8 @@ def trace_from_analysis(a: dict, stack: np.ndarray, centre: np.ndarray, p: dict)
 MS2_POSITIONS = ("promoter", "own")
 
 
-def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, ms2_position: str = "promoter", **kw) -> pd.DataFrame:
+def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, ms2_position: str = "promoter", px_um: float = 0.13,
+              **kw) -> pd.DataFrame:
     """The MS2 spot of one isolated cell in every frame: whether a spot was detected, where (crop and lab pixels), its SNR and the ellipsoid
     intensity in the nuclear channel at that position (interpolated where nothing was detected). Keywords: the locus_analysis settings.
     ms2_position: "promoter" (default) = measure at the promoter (locus 0), tracked in its own colour with dog_viterbi (the MS2 spot sits on
@@ -70,23 +77,57 @@ def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, ms2_posi
     ci = ms2_inputs(cell, erode_px, calib)
     p = spot_params(kw)
     kw.pop("method", None)                      # the MS2 spot is always found with dog_viterbi
+    fr = ci["frames"]
+    out = []
+
+    def table(copy, a, det, pos, inten):
+        snr = [f["snr"] if f is not None else np.nan for f in a["fits"]]
+        out.append(pd.DataFrame({"cell_id": cell.cell_id, "copy": copy, "trace_id": _trace_id(cell.cell_id, copy), "t": fr.t.astype(int).to_numpy(),
+                                 "detected": det, "crop_y_px": pos[:, 0], "crop_x_px": pos[:, 1], "lab_y_px": fr.crop_y0.to_numpy() + pos[:, 0],
+                                 "lab_x_px": fr.crop_x0.to_numpy() + pos[:, 1], "snr": snr, "intensity": inten})[COLUMNS])
+
+    def at(pos):
+        return np.array([DV.ellipsoid_intensity(ci["stack"][i], pos[i], p["intensity_inner_px"], p["intensity_outer_px"],
+                                                p["intensity_background"])[0] for i in range(len(pos))])
+
     if ms2_position == "promoter" and "locus0" in cell.channels:
-        from simlive.stage6_analysis.localize import channel_inputs
+        from simlive.stage6_analysis.localize import analyse_cell_copies, channel_inputs
 
         lc = channel_inputs(cell, "locus0", 2, calib)
-        a = analyse_channel(lc["stack"], lc["region"], lc["centre"], "dog_viterbi", **kw)
-        det, pos, _ = trace_from_analysis(a, lc["stack"], lc["centre"], p)
-        pos = pos - np.asarray(lc["shift"], float)                            # locus-0 colour -> nuclear channel coordinates
-        inten = np.array([DV.ellipsoid_intensity(ci["stack"][i], pos[i], p["intensity_inner_px"], p["intensity_outer_px"],
-                                                 p["intensity_background"])[0] for i in range(len(pos))])
+        if MC.multicopy_on(kw) and "locus1" in cell.channels:     # every copy's promoter (paired with its enhancer), one trace per copy
+            res = analyse_cell_copies([lc, channel_inputs(cell, "locus1", 2, calib)], px_um=px_um, **kw)
+            for copy, fits in enumerate(res["copies"]):
+                if 0 not in fits:
+                    continue
+                a = {"fits": fits[0]}
+                det, pos, _ = trace_from_analysis(a, lc["stack"], lc["centre"], p)
+                pos = pos - np.asarray(lc["shift"], float)
+                table(copy, a, det, pos, at(pos))
+        else:
+            a = analyse_channel(lc["stack"], lc["region"], lc["centre"], "dog_viterbi", **kw)
+            det, pos, _ = trace_from_analysis(a, lc["stack"], lc["centre"], p)
+            pos = pos - np.asarray(lc["shift"], float)                            # locus-0 colour -> nuclear channel coordinates
+            table(0, a, det, pos, at(pos))
     else:
         a = analyse_channel(ci["stack"], ci["region"], ci["centre"], "dog_viterbi", **kw)
         det, pos, inten = trace_from_analysis(a, ci["stack"], ci["centre"], p)
-    fr = ci["frames"]
-    snr = [f["snr"] if f is not None else np.nan for f in a["fits"]]
-    return pd.DataFrame({"cell_id": cell.cell_id, "t": fr.t.astype(int).to_numpy(), "detected": det, "crop_y_px": pos[:, 0],
-                         "crop_x_px": pos[:, 1], "lab_y_px": fr.crop_y0.to_numpy() + pos[:, 0], "lab_x_px": fr.crop_x0.to_numpy() + pos[:, 1],
-                         "snr": snr, "intensity": inten})[COLUMNS]
+        table(0, a, det, pos, inten)
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=COLUMNS)
+
+
+def relabel_to_true_copies(trace: pd.DataFrame, truth: pd.DataFrame, px_um: float) -> pd.DataFrame:
+    """MS2 traces of the truth identity source: the found copies renumbered to the true copies they sit on (localize.match_copies on the
+    detected frames; `copy_found` keeps the analysis' number), and trace_id recomputed. One copy everywhere: unchanged."""
+    if trace.empty or "copy" not in truth.columns or truth["copy"].max() == 0 and trace["copy"].max() == 0:
+        return trace
+    det = trace[trace.detected.astype(bool)]
+    m = match_copies(det.drop(columns=[c for c in ("copy_found",) if c in det]), truth.assign(locus_id=0), px_um)
+    mp = m.groupby(["cell_id", "copy_found"])["copy"].first().to_dict()
+    out = trace.copy()
+    out["copy_found"] = out["copy"]
+    out["copy"] = [mp.get((c, f), EXTRA_COPY + int(f)) for c, f in zip(out.cell_id, out.copy_found)]
+    out["trace_id"] = [_trace_id(c, k) for c, k in zip(out.cell_id, out["copy"])]
+    return out
 
 
 def ms2_truth(run: Path) -> pd.DataFrame | None:
@@ -96,14 +137,19 @@ def ms2_truth(run: Path) -> pd.DataFrame | None:
     ti = run / "stage3_microscopy" / "loci_truth_image.csv"
     if not tx_f.exists() or not ti.exists():
         return None
+    from simlive.stage1_chromatin.copies import with_copy
+
     cfg = yaml.safe_load((run / "stage2_cells" / "params.yaml").read_text())
     tc = cfg["loci"]["transcription"]
-    prom = pd.read_csv(ti)
-    keep = ["t", "cell_id", "y_um", "x_um"] + [c for c in ("bleach_nucleus", "in_image") if c in prom.columns]
-    prom = prom[prom.locus_id == 0][keep]       # the MS2 spot is drawn at the promoter, in the nuclear channel
-    tx = pd.read_csv(tx_f)[["t", "cell_id", "ms2_loops", "promoter_on"]]
-    m = prom.merge(tx, on=["t", "cell_id"])
-    m["photons"] = float(tc.get("photons_per_loop_s", 100.0)) * float(cfg["acquisition"]["exposure_s"]) * m.ms2_loops
+    prom = with_copy(pd.read_csv(ti))
+    keep = ["t", "cell_id", "copy", "y_um", "x_um"] + [c for c in ("bleach_nucleus", "in_image") if c in prom.columns]
+    prom = prom[prom.locus_id == 0][keep]       # the MS2 spot is drawn at the promoter of every copy, in the nuclear channel
+    tx = with_copy(pd.read_csv(tx_f))
+    tx = tx[["t", "cell_id", "copy", "ms2_loops", "promoter_on"] + [c for c in ("ms2_labelled",) if c in tx]]
+    m = prom.merge(tx, on=["t", "cell_id", "copy"])
+    m["trace_id"] = [_trace_id(c, k) for c, k in zip(m.cell_id, m["copy"])]
+    lab = m.ms2_labelled.astype(float) if "ms2_labelled" in m else 1.0       # a copy without the MS2 cassette shows nothing
+    m["photons"] = float(tc.get("photons_per_loop_s", 100.0)) * float(cfg["acquisition"]["exposure_s"]) * m.ms2_loops * lab
     it = run / "stage3_microscopy" / "imaging_truth.csv"
     if "bleach_nucleus" in m.columns:          # per-cell bleaching: this cell's own factor
         m["photons_frame"] = m.photons * m.bleach_nucleus.fillna(1.0)
@@ -122,7 +168,8 @@ def score_ms2(trace: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: fl
     the trace alone: intensity > k_call x robust noise of the trace (noise from its median absolute deviation, dominated by OFF frames)."""
     if "in_image" in truth.columns:            # a promoter outside the image (its cell half out of view) cannot be measured
         truth = truth[truth.in_image.astype(bool)]
-    j = trace.merge(truth, on=["cell_id", "t"], how="inner")
+    on = ["cell_id", "t"] + (["copy"] if "copy" in trace.columns and "copy" in truth.columns else [])
+    j = trace.merge(truth, on=on, how="inner")
     if j.empty:
         return j, {}
     j["on"] = j.photons > 0
@@ -165,7 +212,7 @@ def analyse_run_ms2(run: Path, n_workers: int | None = None, progress=print) -> 
     cal = run / "stage3_microscopy" / "calibration"
     res = {}
     for tag, cdir in (("", None),) + ((("_cal", str(cal)),) if (cal / "calibration.json").exists() else ()):
-        tr = map_cells(ms2_trace, run / "stage5_cells" / "truth", n_workers=n_workers, calib=cdir, **ana)
+        tr = relabel_to_true_copies(map_cells(ms2_trace, run / "stage5_cells" / "truth", n_workers=n_workers, calib=cdir, **ana), truth, px_um)
         tr.to_csv(out6 / f"ms2_traces{tag}.csv", index=False)
         res["ms2" + ("_calibrated" if tag else "")] = sc = score_ms2(tr, truth, px_um)[1]
         progress(f"MS2{tag}: ON frames found {sc.get('found_on', 0):.3f} (any detection {sc.get('detected_on', 0):.3f}), OFF frames with a detection {sc.get('false_on_off', 0):.3f}, "

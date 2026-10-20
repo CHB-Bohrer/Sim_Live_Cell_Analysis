@@ -19,7 +19,8 @@ def threshold_watershed(images: np.ndarray, smooth_px: float = 2.0, min_area_px:
     out = np.zeros(images.shape, np.uint16)
     for t, im in enumerate(images):
         sm = gaussian(im, smooth_px)
-        mask = remove_small_objects(sm > threshold_otsu(sm), min_area_px)
+        # objects of fewer than min_area_px pixels go (max_size removes sizes <= its value; the old min_size argument is deprecated)
+        mask = remove_small_objects(sm > threshold_otsu(sm), max_size=int(min_area_px) - 1)
         dist = ndi.distance_transform_edt(mask)
         peaks = peak_local_max(gaussian(dist, 1.0), min_distance=min_distance_px, labels=label(mask),
                                exclude_border=False)

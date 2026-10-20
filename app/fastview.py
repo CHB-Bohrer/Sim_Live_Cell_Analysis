@@ -186,9 +186,15 @@ def cell_composite(nuc: np.ndarray, loci: list, nuc_w: float = 0.35, lims: list 
     return rgb * 255
 
 
+def _spot_tag(locus_id, copy) -> str:
+    c = int(copy)
+    return {0: "P", 1: "E"}.get(int(locus_id), f"L{int(locus_id)}") + (str(c) if c < 50 else "?")
+
+
 def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: list, pos, truth, px_um: float,
-                       target_w: int = 430):
-    """Frames for one cell (`pos`, `truth`: this cell's rows only): [loci on nucleus (+ detected / true markers)] | [the two (or three) locus colours alone, no nucleus, no markers].
+                       target_w: int = 430, strays=None):
+    """Frames for one cell (`pos`, `truth`, `strays`: this cell's rows only): [loci on nucleus (+ detected / true markers, labelled P/E + copy;
+    stray spots as pink squares)] | [the two (or three) locus colours alone, no nucleus, no markers].
     The right panel uses one brightness scale per colour for the WHOLE movie, so the spots' brightness and shape changes through time are real."""
     n, S = mask.shape[0], mask.shape[1]
     nuc = channels["nucleus"]
@@ -203,21 +209,30 @@ def single_cell_frames(channels: dict, mask: np.ndarray, frames_df, loc_names: l
         a = Image.fromarray(comp.astype(np.uint8))
         d = ImageDraw.Draw(a)
         # PIL puts integer coordinates on pixel CORNERS; positions here are array indices (pixel centres), hence the + 0.5
+        multi = pos is not None and len(pos) and "copy" in pos.columns and pos["copy"].max() > 0
         if pos is not None and len(pos):
             for q in pos[pos.t == t].itertuples():
                 x, y = q.crop_x_px + 0.5, q.crop_y_px + 0.5
                 d.line([x - 7, y, x + 7, y], fill=(255, 255, 255), width=2)
                 d.line([x, y - 7, x, y + 7], fill=(255, 255, 255), width=2)
+                if multi:          # several copies: say which spot is which
+                    d.text((x + 6, y - 6), _spot_tag(q.locus_id, getattr(q, "copy", 0)), fill=(255, 255, 255), font=FONT, anchor="lb",
+                           stroke_width=1, stroke_fill=(0, 0, 0))
+        fr = frames_df.iloc[i]
         if truth is not None:
-            fr = frames_df.iloc[i]
             for q in truth[truth.t == t].itertuples():
                 x, y = q.x_um / px_um - fr.crop_x0 + 0.5, q.y_um / px_um - fr.crop_y0 + 0.5
                 d.ellipse([x - 8, y - 8, x + 8, y + 8], outline=(0, 255, 255), width=1)
+        if strays is not None and len(strays):
+            for q in strays[(strays.t == t) & strays.channel.str.startswith("locus")].itertuples():
+                x, y = q.x_drawn_um / px_um - fr.crop_x0 + 0.5, q.y_drawn_um / px_um - fr.crop_y0 + 0.5
+                d.rectangle([x - 6, y - 6, x + 6, y + 6], outline=(240, 171, 252), width=1)
         ov = np.zeros((S, S, 3))
         for k, c in enumerate(chs):
             ov[..., k] = np.clip((c[i] - lims[k][0]) / (lims[k][1] - lims[k][0]), 0, 1)
         names = " + ".join(f"{c} ({['red', 'green', 'blue'][k]})" for k, c in enumerate(loc_names[:3]))
-        out.append(hstack([titled(a, "Loci on nucleus  (+ found, o true)" if truth is not None else "Loci on nucleus  (+ found)", scale),
+        title = "Loci on nucleus  (+ found" + (", o true" if truth is not None else "") + (", □ stray spot" if strays is not None and len(strays) else "") + ")"
+        out.append(hstack([titled(a, title, scale),
                            titled(Image.fromarray((ov * 255).astype(np.uint8)).resize((S * 3, S * 3), Image.BICUBIC), "Colour overlay: " + names, scale / 3)]))
         labels.append(f"frame {t}  ({i + 1}/{n} of this cell)")
     return out, labels

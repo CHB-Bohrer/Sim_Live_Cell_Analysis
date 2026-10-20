@@ -204,8 +204,9 @@ class _NucleusModel:
         self.spots_by_t = {}
         if spots is not None and len(spots):
             for t, g in spots[spots.photons > 0].groupby("t"):
+                ids = g.cell_id.to_numpy() if "cell_id" in g else np.arange(len(g))
                 self.spots_by_t[int(t)] = dict(
-                    ids=g.cell_id.to_numpy() if "cell_id" in g else np.arange(len(g)),
+                    ids=ids, keys=_object_keys(ids, g["copy"].to_numpy() if "copy" in g else None),
                     y=g.y_um.to_numpy() / self.px_um, x=g.x_um.to_numpy() / self.px_um,
                     z=g.z_um.to_numpy() if "z_um" in g else np.zeros(len(g)), ph=g.photons.to_numpy())
 
@@ -298,8 +299,17 @@ class _NucleusModel:
         return vol, lab
 
 
+def _object_keys(ids, copies=None) -> np.ndarray:
+    """One integer per drawn object that is the same in every frame: the cell id for copy 0, cell_id + COPY_STRIDE x copy otherwise
+    (stage1_chromatin.copies.trace_id), so a cell's several copies of a locus are matched frame to frame."""
+    from simlive.stage1_chromatin.copies import COPY_STRIDE
+
+    ids = np.asarray(ids).astype(np.int64)
+    return ids if copies is None else ids + COPY_STRIDE * np.asarray(copies).astype(np.int64)
+
+
 class _LocusModel:
-    """One locus colour channel: diffraction-limited point sources at the true locus positions."""
+    """One locus colour channel: diffraction-limited point sources at the true locus positions (one per copy of the locus in each cell)."""
 
     def __init__(self, truth: pd.DataFrame, cfg: dict, locus_id: int, occupancy: pd.DataFrame | None):
         lc, acq, opt = cfg["loci"], cfg["acquisition"], cfg["optics"]
@@ -309,12 +319,15 @@ class _LocusModel:
         attached, per_probe = None, 0.0
         if occupancy is not None:
             o = occupancy[occupancy.locus_id == locus_id]
-            attached = dict(zip(zip(o.t, o.cell_id), o.mean_attached))
+            oc = o["copy"].to_numpy() if "copy" in o else np.zeros(len(o), int)
+            attached = dict(zip(zip(o.t, o.cell_id, oc), o.mean_attached))
             per_probe = lc["probes"]["photons_per_probe_s"] * acq["exposure_s"]
         self.by_t = {}
         for t, g in truth[truth.locus_id == locus_id].groupby("t"):
-            ph = np.array([pps if attached is None else per_probe * attached[(t, c)] for c in g.cell_id])
-            self.by_t[int(t)] = dict(ids=g.cell_id.to_numpy(), y=g.y_um.to_numpy() / self.px_um, x=g.x_um.to_numpy() / self.px_um,
+            cp = g["copy"].to_numpy() if "copy" in g else np.zeros(len(g), int)
+            ph = np.array([pps if attached is None else per_probe * attached[(t, c, k)] for c, k in zip(g.cell_id, cp)])
+            self.by_t[int(t)] = dict(ids=g.cell_id.to_numpy(), copy=cp, keys=_object_keys(g.cell_id.to_numpy(), cp),
+                                     y=g.y_um.to_numpy() / self.px_um, x=g.x_um.to_numpy() / self.px_um,
                                      z=g.z_um.to_numpy() if "z_um" in g else np.zeros(len(g)), ph=ph)
 
 
@@ -359,6 +372,7 @@ class Imager:
         if fiducials is not None and len(fiducials):
             self.fid = dict(y=fiducials.y_um.to_numpy() / self.px_um, x=fiducials.x_um.to_numpy() / self.px_um, z=fiducials.z_um.to_numpy(),
                             ph=np.full(len(fiducials), float((cfg.get("fiducials") or {}).get("photons", 20000.0))))
+        self.cells = cells
         self.nucleus = _NucleusModel(cells, cfg, self.entropy, spots) if cells is not None else None
         if self.nucleus is not None and self.nz and "z_um" not in cells.columns:
             raise ValueError("z-stack imaging needs cells with z positions (stage2_cells.motion.add_z)")
@@ -641,9 +655,9 @@ class Imager:
                     continue
                 cy = dict(zip(g.cell_id.to_numpy(), g.y_um.to_numpy() / self.px_um))
                 cx = dict(zip(g.cell_id.to_numpy(), g.x_um.to_numpy() / self.px_um))
-                for i, y, x in zip(d["ids"], d["y"], d["x"]):
+                for i, key, y, x in zip(d["ids"], d["keys"], d["y"], d["x"]):
                     if int(i) in cy:
-                        rel[(int(t), int(i))] = (y - cy[int(i)], x - cx[int(i)])
+                        rel[(int(t), int(key))] = (y - cy[int(i)], x - cx[int(i)])
             inc = [np.subtract(rel[(t + 1, i)], v) for (t, i), v in rel.items() if (t + 1, i) in rel]
             self._memo[key] = float(np.mean(np.square(inc))) if inc else 0.0
         return self._memo[key]
@@ -663,8 +677,8 @@ class Imager:
         y, x = d["y"].astype(float).copy(), d["x"].astype(float).copy()
         nxt = self.loci[k].by_t.get(int(t) + 1)
         if nxt is not None:
-            pos = {int(i): j for j, i in enumerate(nxt["ids"])}
-            for j, i in enumerate(d["ids"]):
+            pos = {int(i): j for j, i in enumerate(nxt["keys"])}
+            for j, i in enumerate(d["keys"]):
                 q = pos.get(int(i))
                 if q is not None:
                     y[j] += f * (nxt["y"][q] - y[j])
@@ -690,6 +704,90 @@ class Imager:
         df = pd.DataFrame(cols)
         df.index = pd.MultiIndex.from_tuples(df.index, names=["t", "cell_id"])
         return df.reset_index().sort_values(["t", "cell_id"])
+
+    # ------------------------------------------------------------------ stray spots (decoys inside the nuclei)
+    def _stray_reference(self, channel: str) -> float:
+        """Photons of the object a stray spot is compared with: the mean drawn locus spot of that colour, or one fully loaded Pol II's MS2
+        signal in the nuclear channel (photons_per_loop_s x n_loops x exposure)."""
+        if channel.startswith("locus"):
+            k = int(channel[5:])
+            if k < len(self.loci):
+                ph = np.concatenate([d["ph"] for d in self.loci[k].by_t.values()]) if self.loci[k].by_t else np.zeros(0)
+                ph = ph[ph > 0]
+                if len(ph):
+                    return float(ph.mean())
+            return float((self.cfg.get("loci") or {}).get("photons_per_locus_s", 6000.0)) * self.exposure_s
+        tc = (self.cfg.get("loci") or {}).get("transcription") or {}
+        n_loops = float((tc.get("params") or {}).get("n_loops", 24))
+        return float(tc.get("photons_per_loop_s", 100.0)) * n_loops * self.exposure_s
+
+    def stray_spots(self, E: ErrorSet | None = None) -> pd.DataFrame:
+        """Every stray spot of the movie (source `stray_spots`): per cell and colour, spots are born at random times (Poisson, rate_per_min),
+        live an exponential time (lifetime_s, at least one frame), start at a uniformly random place inside the nucleus (within 0.85 of its
+        radius, nucleus frame, so they move and rotate with it) and diffuse there (D_um2_s, reflected at 0.9 of the radius); brightness =
+        brightness x the colour's reference (`_stray_reference`) x a log-normal factor of mean 1, constant over the spot's life.
+        Deterministic per (session, colour, cell). Columns: t, cell_id, stray_id, channel, y_um, x_um, [z_um], photons (lab frame, no drift).
+        Empty if the source is off."""
+        E = E or self.E
+        cols = ["t", "cell_id", "stray_id", "channel", "y_um", "x_um"] + (["z_um"] if self.nz else []) + ["photons"]
+        if not E.on("stray_spots") or self.cells is None or not len(self.cells):
+            return pd.DataFrame(columns=cols)
+        P = E.params["stray_spots"]
+        key = ("stray", tuple(sorted((k, str(v)) for k, v in P.items())))
+        if key in E.cache:
+            return E.cache[key]
+        from simlive.stage2_cells.motion import nucleus_to_lab_um
+
+        dt = float(self.acq["frame_interval_s"])
+        p_birth = float(P["rate_per_min"]) * dt / 60.0                  # expected births per frame
+        mean_life = max(float(P["lifetime_s"]) / dt, 1e-6)               # frames
+        cv2 = np.log1p(float(P["brightness_cv"]) ** 2)
+        rows = []
+        cells = self.cells.sort_values("t")
+        for ch in [c for c in P["channels"] if c in self.channels]:
+            ref = self._stray_reference(ch)
+            for cid, g in cells.groupby("cell_id"):
+                r = ERR.rng_fixed(self.session, "stray_spots", self.channel_index[ch], extra=int(cid))
+                g = g[g.t < self.T]
+                live = []                                               # [stray_id, xn, yn, zn, photons, frames left]
+                n_made = 0
+                for row in g.itertuples():
+                    step = np.sqrt(2.0 * float(P["D_um2_s"]) * dt) / float(row.radius_um)    # per axis, nuclear radii
+                    for q in live:                                     # wander (reflected inside 0.9 of the radius)
+                        q[1:4] = q[1:4] + r.normal(0, step, 3) * np.array([1.0, 1.0, 1.0 if self.nz else 0.0])
+                        rad = float(np.linalg.norm(q[1:3]))
+                        if rad > 0.9:
+                            q[1:3] = q[1:3] * (1.8 - rad) / rad
+                        q[3] = float(np.clip(q[3], -0.8, 0.8))
+                    for _ in range(int(r.poisson(p_birth))):
+                        ang, rad = r.uniform(0, 2 * np.pi), 0.85 * np.sqrt(r.random())
+                        life = max(1, int(np.ceil(r.exponential(mean_life))))
+                        ph = float(P["brightness"]) * ref * float(r.lognormal(-0.5 * cv2, np.sqrt(cv2)))
+                        live.append(np.array([n_made, rad * np.cos(ang), rad * np.sin(ang),
+                                              r.uniform(-0.6, 0.6) if self.nz else 0.0, ph, life], float))
+                        n_made += 1
+                    for q in live:
+                        y, x = nucleus_to_lab_um(row, q[1], q[2])
+                        rows.append((int(row.t), int(cid), int(q[0]), ch, float(y), float(x))
+                                    + ((float(row.z_um + q[3] * row.z_semi_um),) if self.nz else ()) + (float(q[4]),))
+                        q[5] -= 1
+                    live = [q for q in live if q[5] > 0]
+        out = pd.DataFrame(rows, columns=cols)
+        E.cache[key] = out
+        return out
+
+    def _strays_at(self, channel: str, t: int, E: ErrorSet):
+        """(cell ids, y px, x px, z um, photons) of the stray spots of `channel` in frame t, or None."""
+        if not E.on("stray_spots"):
+            return None
+        key = ("stray_by_t", channel)
+        if key not in E.cache:
+            df = self.stray_spots(E)
+            df = df[df.channel == channel]
+            E.cache[key] = {int(tt): (g.cell_id.to_numpy(), g.y_um.to_numpy() / self.px_um, g.x_um.to_numpy() / self.px_um,
+                                      g.z_um.to_numpy() if "z_um" in g else np.zeros(len(g)), g.photons.to_numpy())
+                            for tt, g in df.groupby("t")}
+        return E.cache[key].get(int(t))
 
     # ------------------------------------------------------------------ fixed fields (instrument / sample)
     def _flat(self, channel: str, E: ErrorSet) -> np.ndarray | None:
@@ -726,8 +824,9 @@ class Imager:
         Y, X, Z = (np.tile(d[k], (max(self.nz, 1), 1)) for k in ("y", "x", "z"))
         if self.nz and E.on("slice_skew") and self.slice_time_s > 0 and (int(t) + 1) in model_by_t:
             nxt = model_by_t[int(t) + 1]
-            pos = {int(i): j for j, i in enumerate(nxt["ids"])}
-            idx = np.array([pos.get(int(i), -1) for i in d["ids"]])
+            kk = "keys" if "keys" in d else "ids"
+            pos = {int(i): j for j, i in enumerate(nxt[kk])}
+            idx = np.array([pos.get(int(i), -1) for i in d[kk]])
             ok = idx >= 0
             frac = (self.time_index(t, E) * self.slice_time_s / float(self.acq["frame_interval_s"]))[:, None]
             for arr, key in ((Y, "y"), (X, "x"), (Z, "z")):
@@ -772,6 +871,11 @@ class Imager:
             if E.on("cytoplasm") and self.nucleus is not None:     # free probes / dye in the cell bodies of this colour
                 cyto = self.nucleus.cytoplasm(t, (dy + cy, dx + cx), float(E.par("cytoplasm", "radius_factor")), None, rel_bright=False)
                 ph = ph + float(E.par("cytoplasm", "locus_photons")) * (gaussian_filter(cyto, sig) if sig > 0 else cyto)
+        st = self._strays_at(channel, t, E)
+        if st is not None:                    # stray spots: the same dye as the channel, so they bleach and shift with it
+            w = self.bleach_of(channel, t, st[0], E) if per_cell else bleach
+            sy, sx = (cy, cx) if channel != "nucleus" else (0.0, 0.0)
+            ph = ph + _spots_from_arrays(self.shape, st[1] + dy + sy, st[2] + dx + sx, st[4] * w, sig)
         if self.fid is not None:
             ph = ph + _spots_from_arrays(self.shape, self.fid["y"] + dy + cy, self.fid["x"] + dx + cx, self.fid["ph"], sig)
         if E.on("haze"):
@@ -830,6 +934,12 @@ class Imager:
             else:
                 w = self.bleach_of(channel, t, self.loci[k].by_t[int(t)]["ids"], E) if per_cell else bleach
                 ph = _points3d(self.shape, zk, P[0] + dy + cy + off[:, :1], P[1] + dx + cx + off[:, 1:], P[2] + dz, P[3] * w, sig, sz, fh, sig_h, sz_h)
+        st = self._strays_at(channel, t, E)
+        if st is not None:
+            w = self.bleach_of(channel, t, st[0], E) if per_cell else bleach
+            sy, sx = (cy, cx) if channel != "nucleus" else (0.0, 0.0)
+            Y, X, Z = (np.tile(v, (nz, 1)) for v in (st[1] + dy + sy, st[2] + dx + sx, st[3] + dz))
+            ph = ph + _points3d(self.shape, zk, Y + off[:, :1], X + off[:, 1:], Z, st[4] * w, sig, sz, fh, sig_h, sz_h)
         if self.fid is not None:
             nb = len(self.fid["ph"])
             Y, X = np.tile(self.fid["y"] + dy + cy, (nz, 1)) + off[:, :1], np.tile(self.fid["x"] + dx + cx, (nz, 1)) + off[:, 1:]
@@ -914,10 +1024,11 @@ class Imager:
         return pd.DataFrame(rows)
 
     def locus_photons(self) -> pd.DataFrame:
-        """Photons of every locus spot per exposure before bleaching and illumination (t, cell_id, locus_id, photons). 0 = nothing was drawn
-        (the probe model can leave a locus with no probe attached for a whole exposure), so a localizer cannot find it."""
-        rows = [(int(t), int(c), k, float(p)) for k, L in enumerate(self.loci) for t, d in L.by_t.items() for c, p in zip(d["ids"], d["ph"])]
-        return pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "photons"])
+        """Photons of every locus spot per exposure before bleaching and illumination (t, cell_id, locus_id, copy, photons). 0 = nothing was
+        drawn (the probe model can leave a locus with no probe attached for a whole exposure), so a localizer cannot find it."""
+        rows = [(int(t), int(c), k, int(q), float(p)) for k, L in enumerate(self.loci) for t, d in L.by_t.items()
+                for c, q, p in zip(d["ids"], d["copy"], d["ph"])]
+        return pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "copy", "photons"])
 
     def static_truth(self) -> dict:
         """Constant imaging properties: per-channel shift and blur, pixel size, z-stack geometry, which sources were on and their parameters."""
@@ -958,6 +1069,22 @@ def truth_in_image(truth: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: floa
     return out
 
 
+def stray_truth_in_image(sp: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: float, channel_shift_px: dict) -> pd.DataFrame:
+    """Stray spots moved into image coordinates like the loci (`truth_in_image`): y_um / x_um (/ z_um) + stage drift, and y_drawn_um /
+    x_drawn_um = where they are drawn (+ the chromatic shift of their colour; none in the nuclear channel)."""
+    if not len(sp):
+        return sp
+    d = imaging_truth.set_index("t")
+    sp = sp.copy()
+    sp["y_um"] = sp.y_um + d.loc[sp.t, "drift_y_px"].to_numpy() * px_um
+    sp["x_um"] = sp.x_um + d.loc[sp.t, "drift_x_px"].to_numpy() * px_um
+    sh = np.array([channel_shift_px.get(c, (0.0, 0.0)) if c != "nucleus" else (0.0, 0.0) for c in sp.channel], float) * px_um
+    sp["y_drawn_um"], sp["x_drawn_um"] = sp.y_um + sh[:, 0], sp.x_um + sh[:, 1]
+    if "z_um" in sp.columns and "drift_z_um" in d.columns:
+        sp["z_um"] = sp.z_um + d.loc[sp.t, "drift_z_um"].to_numpy()
+    return sp
+
+
 def cells_in_image(cells: pd.DataFrame, imaging_truth: pd.DataFrame, px_um: float) -> pd.DataFrame:
     """cells.csv with positions moved by the stage drift, i.e. where the nuclei really are in the image."""
     d = imaging_truth.set_index("t")
@@ -988,9 +1115,13 @@ def save_imaging_truth(imager: Imager, cells: pd.DataFrame, truth: pd.DataFrame 
         bt = imager.bleach_truth()          # per-cell bleaching (each cell by its own light dose), empty unless bleaching.per_cell is on
         if len(bt):
             bt.to_csv(s3 / "bleach_cells.csv", index=False)
+        sp = stray_truth_in_image(imager.stray_spots(), it, px_um, st_truth["channel_shift_px"])
+        if len(sp):                          # decoy spots inside the nuclei, in image coordinates (+ stage drift; + chromatic shift: *_drawn_um)
+            sp.to_csv(s3 / "stray_spots.csv", index=False)
         if truth is not None:      # + photons per spot, so scoring can tell a missed spot from a locus that had no light at all
+            truth = truth if "copy" in truth.columns else truth.assign(copy=0)
             tim = truth_in_image(truth, it, px_um, st_truth["channel_shift_px"], (st_truth.get("z_stack") or {}).get("channel_shift_z_um")).merge(
-                imager.locus_photons(), on=["t", "cell_id", "locus_id"], how="left")
+                imager.locus_photons(), on=["t", "cell_id", "locus_id", "copy"], how="left")
             ny, nx = imager.shape                                   # cells can be partly or wholly outside the field (geometry.outside_um)
             yd, xd = (tim[c] if c in tim else tim[c.replace("_drawn", "")] for c in ("y_drawn_um", "x_drawn_um"))
             tim["in_image"] = (yd / px_um >= 0) & (yd / px_um <= ny - 1) & (xd / px_um >= 0) & (xd / px_um <= nx - 1)

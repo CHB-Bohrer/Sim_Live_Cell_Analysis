@@ -77,7 +77,8 @@ def stage_dir(run: Path, name: str) -> Path:
 
 def _git(*args: str) -> str:
     try:
-        return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True).stdout
+        # explicit UTF-8: with text=True alone Windows decodes with cp1252, and a diff holding other characters made stdout None
+        return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout or ""
     except OSError:
         return ""
 

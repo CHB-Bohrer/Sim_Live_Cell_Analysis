@@ -65,6 +65,10 @@ FIXES: dict[str, list[tuple[str, str, dict]]] = {
                    {"calib": "movie", "parts": ("offset", "flat"), "background_stat": "median"}),
                   ("movie", "background map from the movie: low percentile, noise-corrected (robust to cell bodies) + shell",
                    {"calib": "movie", "parts": ("offset", "flat")})],
+    "stray_spots": [("none", "brightest spot in each frame, frame by frame", {"method": "brightest", "max_copies": 1, "pair_gate_um": None}),
+                    ("one_path", "one Viterbi path per colour (the one-copy finder: no coverage test, no pairing, no pair gate)",
+                     {"max_copies": 1, "pair_gate_um": None}),
+                    ("analysis", "multi-copy linker: several paths, coverage test, promoter-enhancer pairing, pair gate (the run's settings)", {})],
     "crosstalk": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {}),
                   ("movie", "bleed-through fraction measured in the movie and subtracted (unmixing) + shell", {"calib": "movie", "parts": ("crosstalk",)})],
     "dark_current": [("none", "no local background (camera offset only)", BG_NONE), ("analysis", "shell background", {})],
@@ -137,6 +141,12 @@ HOW = {
                             "LOW end of each pixel's nucleus-free frames (20th percentile, corrected for the pixel's own noise), i.e. the level the "
                             "pixel returns to when no cell is there, instead of the median, which a passing cell body raises. The illumination "
                             "fit subtracts each nucleus' local surroundings, so the cytoplasm there is removed with the background."),
+    "stray_spots": dict(analysis="A path through the whole movie prefers the spot that is there in every frame and moves like a locus; a stray "
+                                 "spot lives about a minute. With several copies the linker keeps a second path only if it covers at least half the "
+                                 "frames, pairs every promoter path with an enhancer path within 1.5 um, and re-runs each path with candidates far "
+                                 "from its partner penalised (pair gate). A stray right next to the locus can still be taken for a frame or two.",
+                        images="(Sample light: nothing to calibrate.)",
+                        movie="(The movie is what the linker uses: duration, motion, and the partner colour.)"),
     "crosstalk": dict(analysis="The shell subtracts the smooth ghost of the nucleus under each spot, but NOT a bright MS2 spot leaking into the "
                                  "promoter's colour: it sits exactly on the promoter.",
                       images="Single-colour samples would give the bleed-through fractions (not simulated here).",
@@ -166,7 +176,7 @@ HOW = {
 }
 assert set(HOW) == set(ERR.SOURCES) - set(ONLY_3D)
 # what each source mainly damages (the dashboard highlights these columns)
-KEY_METRIC = {"sequential_colour": "dist_rms_nm", "cytoplasm": "intensity_err_pct", "chromatic_shift": "dist_rms_nm", "hot_pixels": "frac_far", "cosmic_rays": "frac_far", "bleaching": "late_early",
+KEY_METRIC = {"stray_spots": "frac_far", "sequential_colour": "dist_rms_nm", "cytoplasm": "intensity_err_pct", "chromatic_shift": "dist_rms_nm", "hot_pixels": "frac_far", "cosmic_rays": "frac_far", "bleaching": "late_early",
               "flat_field": "intensity_err_pct", "prnu": "intensity_err_pct", "flicker": "intensity_err_pct", "haze": "intensity_err_pct",
               "background": "intensity_err_pct", "autofluorescence": "intensity_err_pct", "crosstalk": "intensity_err_pct",
               "dark_current": "intensity_err_pct", "dsnu": "intensity_err_pct", "row_noise": "median_err_nm", "defocus": "median_err_nm",
@@ -206,8 +216,9 @@ def render_variant(im, E, s3: Path, progress=None) -> None:
 
 def _distance_errors(j: pd.DataFrame, px_um: float) -> tuple[float, float]:
     """Bias and rms (nm) of the measured promoter-enhancer distance, frames where both were found within 0.5 um of the truth."""
-    a = j[j.locus_id == 0].set_index(["cell_id", "t"])
-    b = j[j.locus_id == 1].set_index(["cell_id", "t"])
+    keys = ["cell_id", "t"] + (["copy"] if "copy" in j.columns else [])          # promoter and enhancer of the same copy
+    a = j[j.locus_id == 0].set_index(keys)
+    b = j[j.locus_id == 1].set_index(keys)
     k = a.index.intersection(b.index)
     if len(k) < 5:
         return np.nan, np.nan
@@ -236,11 +247,15 @@ def _intensity_metrics(I: np.ndarray, P: np.ndarray, t: np.ndarray) -> dict:
 def score(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, col: str = "intensity", far_um: float = 0.5) -> dict:
     from simlive.stage6_analysis.localize import _visible
 
-    tr = truth.assign(visible=_visible(truth))
+    from simlive.stage1_chromatin.copies import with_copy
+    from simlive.stage6_analysis.localize import match_copies
+
+    tr = with_copy(truth).assign(visible=_visible(truth))
     n_vis = int(tr.visible.sum())
     if not len(pos):
         return {"found": 0.0}
-    j = pos.merge(tr, on=["cell_id", "t", "locus_id"], how="inner")
+    pos = match_copies(pos, tr, px_um)
+    j = pos.merge(tr, on=["cell_id", "t", "locus_id", "copy"], how="inner")
     j["err_um"] = np.hypot(j.lab_y_px * px_um - j.y_um, j.lab_x_px * px_um - j.x_um)
     vis = j[j.visible]
     near = vis[vis.err_um <= far_um]
@@ -257,7 +272,7 @@ def score(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, col: str = "inte
 
 
 def _ms2_r(tr: pd.DataFrame, mt: pd.DataFrame, col: str) -> float:
-    j = tr.merge(mt, on=["cell_id", "t"])
+    j = tr.merge(mt, on=["cell_id", "t"] + (["copy"] if "copy" in tr.columns and "copy" in mt.columns else []))
     j = j[np.isfinite(j[col])]
     return float(np.corrcoef(j[col], j.photons)[0, 1]) if len(j) > 20 and j.photons.std() > 0 else np.nan
 

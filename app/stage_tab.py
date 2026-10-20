@@ -67,6 +67,7 @@ def _piezo_section(run: Path, cfg: dict) -> None:
         ax[1].plot(dn.index, dn.values, "o-", color="#60a5fa", label="down-scans (average)")
     ax[1].axhline(0, color="#999", lw=0.8); ax[1].set_xlabel("plane number"); ax[1].set_ylabel("average error (nm)")
     ax[1].set_title("The systematic part: bow and hysteresis"); ax[1].legend(fontsize=9)
+    fig.tight_layout(w_pad=3.0)                 # room between the colour bar and the right panel's axis label
     st.pyplot(fig, width="stretch"); plt.close(fig)
     comp = _components(pz)
     p = (cfg.get("imaging_errors") or {}).get("piezo") or {}

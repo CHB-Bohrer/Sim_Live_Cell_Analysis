@@ -56,7 +56,8 @@ def truth_with_photons(run: Path) -> pd.DataFrame:
         from simlive.stage3_microscopy.render import imager_for_run
 
         ph = imager_for_run(run, run_config(run)).locus_photons()
-        truth = truth.merge(ph, on=["t", "cell_id", "locus_id"], how="left")
+        truth = truth.merge(ph.drop(columns=[c for c in ("copy",) if c not in truth.columns]), on=["t", "cell_id", "locus_id"]
+                            + (["copy"] if "copy" in truth.columns else []), how="left")
     it = s3 / "imaging_truth.csv"
     return photons_in_frame(truth, pd.read_csv(it) if it.exists() else None)
 
@@ -100,7 +101,10 @@ def compare(run: Path, keys: list[str] | None = None, n_workers: int | None = No
                 err, sc = score_localization_3d(pos, truth, px_um) if len(pos) else (pd.DataFrame(), {"n_detections": 0})
             name = f"{key}{'_cal' if cal else ''}{'_3d' if dim == '3d' else ''}"
             if len(err):
-                err.merge(pos, on=["cell_id", "t", "locus_id"], how="left").to_csv(s6 / "comparison" / f"{name}.csv", index=False)
+                from simlive.stage6_analysis.localize import match_copies
+
+                err.merge(match_copies(pos, truth, px_um), on=["cell_id", "t", "locus_id"] + (["copy"] if "copy" in err.columns else []),
+                          how="left").to_csv(s6 / "comparison" / f"{name}.csv", index=False)
             rows.append({"variant": key, "dim": dim, "calibrated": cal, "label": label, "settings": json.dumps(over),
                          **{c: sc.get(c) for c in SCORE_COLS}, "n_detections": sc.get("n_detections"), "seconds": round(time.time() - t0, 1)})
             progress(f"{name:>22}: detected {sc.get('detection_rate', 0):.3f}, median {1000 * (sc.get('median_error_um') or 0):.0f} nm, "

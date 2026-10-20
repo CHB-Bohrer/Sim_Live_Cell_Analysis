@@ -24,8 +24,9 @@ from simlive.stage5_linking.celldata import load_cell
 from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 from simlive.stage6_analysis.compare import VARIANTS, VARIANTS_3D, truth_with_photons
-from simlive.stage6_analysis.localize import analyse_channel, channel_inputs, spot_params
-from simlive.stage6_analysis.ms2 import ERODE_PX, ms2_inputs, ms2_truth, trace_from_analysis
+from simlive.stage6_analysis import multicopy as MC
+from simlive.stage6_analysis.localize import analyse_cell_copies, analyse_channel, channel_inputs, copy_params, match_copies, spot_params
+from simlive.stage6_analysis.ms2 import ERODE_PX, ms2_inputs, ms2_truth, relabel_to_true_copies, trace_from_analysis
 
 CHEN_URL = "https://doi.org/10.1038/s41594-025-01615-4"
 CHEN_ARXIV = "https://arxiv.org/abs/2304.08770"
@@ -85,6 +86,45 @@ def _analyse(sdir: str, cid: int, name: str, params: str, calib: str | None, dil
     _, pos, inten = trace_from_analysis(a, ci["stack"], ci["centre"], spot_params(json.loads(params)))
     df["trace_y"], df["trace_x"], df["trace_intensity"] = pos[:, 0], pos[:, 1], inten      # every frame, interpolated where nothing was found
     return df, cands, a.get("D_px2")
+
+
+def _rows(fr, fits, choice, cands, shift) -> pd.DataFrame:
+    """One row per frame of one spot (as _analyse), from fits / chosen candidate indices."""
+    sy, sx = shift
+    rows = []
+    for i, r in enumerate(fr.itertuples()):
+        f, c = fits[i], cands[i]
+        rows.append({"i": i, "t": int(r.t), "crop_y0": int(r.crop_y0), "crop_x0": int(r.crop_x0), "thr_frame": np.nan, "thr": np.nan,
+                     "n_candidates": 0 if c is None else len(c["peaks"]), "chosen": choice[i],
+                     "found": f is not None, "y_crop": f["pos"][0] - sy if f else np.nan, "x_crop": f["pos"][1] - sx if f else np.nan,
+                     "snr": f["snr"] if f else np.nan, "fit_ok": f["fit_ok"] if f else None, "sigma_fit_px": f["sigma_fit_px"] if f else np.nan,
+                     "intensity": f["intensity"] if f else np.nan})
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(show_spinner="Running the multi-copy linker on this cell (all colours together)…", max_entries=8)
+def _analyse_copies(sdir: str, cid: int, params: str, calib: str | None, dilate_px: int, px_um: float, n_loci: int):
+    """The multi-copy linker (multicopy.py) on all locus colours of one cell. Returns {(colour, found copy): rows per frame}, the candidates of
+    every colour, and the paths it tried with their features."""
+    kw = json.loads(params)
+    ins = [_inputs(sdir, cid, f"locus{k}", calib, dilate_px) for k in range(n_loci)]
+    a = analyse_cell_copies(ins, px_um=px_um, **kw)
+    fr = ins[0]["frames"]
+    tr = a["track"]
+    dfs = {}
+    for c, cp in enumerate(tr["copies"]):
+        for k, ch in cp.items():
+            df = _rows(fr, a["copies"][c][k], ch, a["candidates"][k], ins[k]["shift"])
+            thr = [cc["values"].min() if cc is not None and len(cc["values"]) else np.nan for cc in a["candidates"][k]]
+            df["thr"] = df["thr_frame"] = np.nanmin(thr) if np.isfinite(thr).any() else np.nan
+            dfs[(k, c)] = df
+    cands = {k: [None if cc is None else cc["peaks"] for cc in a["candidates"][k]] for k in range(n_loci)}
+    paths = {k: [{kk: v for kk, v in p.items()} for p in tr["paths"][k]] for k in tr["paths"]}
+    used = {k: {} for k in range(n_loci)}
+    for c, cp in enumerate(tr["copies"]):
+        for k in cp:
+            used[k][c] = cp[k]
+    return dfs, cands, paths, tr["pairs"], used, fr[["t", "crop_y0", "crop_x0"]].reset_index(drop=True)
 
 
 def _frame_steps(sdir: str, cid: int, name: str, params: dict, calib: str | None, dilate_px: int, i: int, thr: float):
@@ -200,13 +240,35 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
         truth = mt if truth is None else pd.concat([truth, mt], ignore_index=True)
     name = c2.radio("Spot", chans, format_func=lambda c: CH_SHORT.get(c, c), horizontal=True, key="spt_ch",
                     help="The two locus colours, and (runs with the transcription model) the MS2 spot at the promoter, in the nuclear channel")
-    df, cands, D = _analyse(str(sdir), int(cid), name, json.dumps(params, sort_keys=True), calib, dil)
     lid = -1 if name == "nucleus" else int(name[5:])
+    cp = copy_params(p_run)
+    multi = MC.multicopy_on(cp) and name != "nucleus"
+    n_loci = len([c for c in chans if c.startswith("locus")])
+    true_copies = sorted(truth[(truth.cell_id == cid)]["copy"].unique()) if truth is not None and "copy" in truth else [0]
+    copy_true = 0
+    if multi:                  # the run's own linker: several paths per colour, paired into copies; numbered like the true copies they follow
+        dfs, cands_all, paths, pairs, used, frc = _analyse_copies(str(sdir), int(cid), json.dumps({**params, **cp}, sort_keys=True), calib, dil,
+                                                                   px_um, n_loci)
+        mapping = _copy_mapping(dfs, truth, cid, px_um) if truth is not None else {}
+        found = sorted({c for (k, c) in dfs if k == lid})
+        if not found:
+            st.warning("The linker found no copy of this colour in this cell.")
+            return
+        lab = lambda c: f"found copy {c}" + (f" = true copy {mapping[c]}" if c in mapping else " (no true copy: a stray or noise)" if truth is not None else "")  # noqa: E731
+        cf = st.radio("Copy", found, format_func=lab, horizontal=True, key="spt_copy",
+                      help="The cell's promoter-enhancer copies as the linker found them (part 2b shows every path it tried)") if len(found) > 1 else found[0]
+        df, cands, D = dfs[(lid, cf)], cands_all[lid], None
+        copy_true = mapping.get(cf, -1)
+    else:
+        df, cands, D = _analyse(str(sdir), int(cid), name, json.dumps(params, sort_keys=True), calib, dil)
+        if len(true_copies) > 1:          # the MS2 spot (own track, one path) or a one-copy finder: compare with one chosen true copy
+            copy_true = st.radio("Compare with true copy", true_copies, horizontal=True, key="spt_copy_true")
     if name == "nucleus":
         st.info("MS2 spot: one spot per nucleus while the promoter is ON, nothing while it is OFF. 'Found' below counts ON frames; the trace "
                 "plot underneath shows the intensity measured at the tracked position in every frame against the true MS2 signal.")
     if truth is not None:
-        tr = truth[(truth.cell_id == cid) & (truth.locus_id == lid)].set_index("t")
+        tq = truth[(truth.cell_id == cid) & (truth.locus_id == lid)]
+        tr = (tq[tq["copy"] == copy_true] if "copy" in tq else tq).set_index("t")
         df["y_true"] = tr.reindex(df.t).y_um.to_numpy() / px_um - df.crop_y0
         df["x_true"] = tr.reindex(df.t).x_um.to_numpy() / px_um - df.crop_x0
         df["visible"] = (tr.reindex(df.t).photons.to_numpy() > 0) if "photons" in tr else True
@@ -252,8 +314,109 @@ def _part_steps(run: Path, cfg: dict, p_run: dict, truth: pd.DataFrame | None):
     _steps_figure(res, region, row, cands[i], params)
     _time_figure(df, i, cands, px_um)
     if name == "nucleus" and "photons_frame" in df:
-        prom = _ms2_promoter(str(sdir), int(cid), json.dumps(params, sort_keys=True), calib)
+        prom = _ms2_promoter(str(sdir), int(cid), json.dumps({**params, **cp}, sort_keys=True), calib, str(run), px_um)
+        prom = prom[prom["copy"] == copy_true].drop(columns="copy") if "copy" in prom else prom
         _ms2_trace_figure(df.merge(prom, on="t", how="left"), i, float(((cfg.get("loci") or {}).get("transcription") or {}).get("photons_per_loop_s", 100)))
+    if multi:
+        _part_copies(run, cid, paths, pairs, used, frc, cands_all, truth, px_um, mapping)
+
+
+def _copy_mapping(dfs: dict, truth: pd.DataFrame, cid: int, px_um: float) -> dict:
+    """found copy -> true copy for one cell (localize.match_copies on the found spots)."""
+    rows = [df[df.found].assign(locus_id=k, copy=c, cell_id=cid, lab_y_px=lambda d: d.y_crop + d.crop_y0, lab_x_px=lambda d: d.x_crop + d.crop_x0)
+            for (k, c), df in dfs.items()]
+    rows = [r for r in rows if len(r)]
+    if not rows:
+        return {}
+    m = match_copies(pd.concat(rows)[["cell_id", "t", "locus_id", "copy", "lab_y_px", "lab_x_px"]], truth[truth.cell_id == cid], px_um)
+    return {int(f): int(c) for f, c in m.groupby("copy_found")["copy"].first().items() if c < 50}
+
+
+def _classify(cands: list, frc: pd.DataFrame, truth: pd.DataFrame | None, strays: pd.DataFrame | None, cid: int, k: int, px_um: float,
+              tol_px: float = 3.0) -> list:
+    """What every candidate of colour k is, frame by frame: 'copy 0', 'copy 1', ... (within tol_px of that true locus), 'stray', or 'noise'."""
+    out = []
+    tq = truth[(truth.cell_id == cid) & (truth.locus_id == k)] if truth is not None else None
+    sq = strays[(strays.cell_id == cid) & (strays.channel == f"locus{k}")] if strays is not None else None
+    for i, pk in enumerate(cands):
+        if pk is None or not len(pk):
+            out.append([])
+            continue
+        t = int(frc.t[i])
+        y = np.asarray(pk)[:, -2] + frc.crop_y0[i]
+        x = np.asarray(pk)[:, -1] + frc.crop_x0[i]
+        lab = ["noise"] * len(y)
+        best = np.full(len(y), tol_px)
+        if sq is not None:
+            for q in sq[sq.t == t].itertuples():
+                d = np.hypot(y - q.y_drawn_um / px_um, x - q.x_drawn_um / px_um)
+                for j in np.nonzero(d < best)[0]:
+                    lab[j], best[j] = "stray", d[j]
+        if tq is not None:
+            for q in tq[tq.t == t].itertuples():
+                yy, xx = (q.y_drawn_um, q.x_drawn_um) if hasattr(q, "y_drawn_um") else (q.y_um, q.x_um)
+                d = np.hypot(y - yy / px_um, x - xx / px_um)
+                for j in np.nonzero(d < best)[0]:
+                    lab[j], best[j] = f"copy {int(getattr(q, 'copy', 0))}", d[j]
+        out.append(lab)
+    return out
+
+
+def _part_copies(run: Path, cid: int, paths: dict, pairs: list, used: dict, frc: pd.DataFrame, cands: dict, truth, px_um: float, mapping: dict):
+    """What the multi-copy linker did in this cell: every path it tried in each colour, coloured by what it followed."""
+    st.markdown("### 2b · Copies and stray spots: what the linker did in this cell")
+    sp_f = run / "stage3_microscopy" / "stray_spots.csv"
+    strays = pd.read_csv(sp_f) if sp_f.exists() else None
+    st.markdown("The linker finds several paths per colour (each through the candidates the earlier ones left), keeps those that look like a "
+                "locus (most frames covered, about as bright as the best path, as slow), and pairs every promoter path with an enhancer path that "
+                "stays within 1.5 µm of it. Each row below is one path; every dot is the candidate it took in that frame, coloured by what that "
+                "candidate really was in the simulation. A good result: the kept paths are one solid colour from start to end.")
+    cat_col = {"copy 0": "#e5e7eb", "copy 1": "#2dd4bf", "copy 2": "#f59e0b", "copy 3": "#a78bfa", "stray": "#f0abfc", "noise": "#64748b"}
+    cls = {k: _classify(cands[k], frc, truth, strays, cid, k, px_um) for k in cands}
+    nk = len(paths)
+    fig, axes = plt.subplots(1, nk, figsize=(17, 0.55 * (max(len(paths[k]) for k in paths) + len(pairs)) + 1.9), squeeze=False)
+    rows = []
+    for k in sorted(paths):
+        ax = axes[0][k]
+        copy_of_path = {pr[0 if k == 0 else 1]: c for c, pr in enumerate(pairs)} if k in (0, 1) else {}
+        show = [(f"path {r}", pth["choice"], f"→ copy {copy_of_path[r]}" if r in copy_of_path else "dropped", r in copy_of_path)
+                for r, pth in enumerate(paths[k])]
+        for c, ch in used[k].items():          # the pair prior re-ran the copy's path: show the result where it differs from the first pass
+            r0 = next((r for r, cc in copy_of_path.items() if cc == c), None)
+            if r0 is None or paths[k][r0]["choice"] != ch:
+                show.append((f"copy {c}, final", ch, "after the pair prior", True))
+        for y, (_, choice, tag, kept) in enumerate(show):
+            for cat in cat_col:
+                ts = [int(frc.t[i]) for i, j in enumerate(choice) if j is not None and cls[k][i] and cls[k][i][j] == cat]
+                if ts:
+                    ax.plot(ts, np.full(len(ts), y), "|", color=cat_col[cat], ms=11, mew=2.2)
+            ax.text(1.01, y, tag, transform=ax.get_yaxis_transform(), va="center", fontsize=9, color="#4ade80" if kept else "#94a3b8")
+        for r, pth in enumerate(paths[k]):
+            whats = pd.Series([cls[k][i][j] for i, j in enumerate(pth["choice"]) if j is not None and cls[k][i]]).value_counts(normalize=True)
+            rows.append({"colour": {0: "promoter (locus 0)", 1: "enhancer (locus 1)"}.get(k, f"locus {k}"), "path": r,
+                         "frames covered": pth["coverage"], "median SNR": pth.get("snr_median"), "D (px²/frame)": pth["D_px2"],
+                         "used as": f"found copy {copy_of_path[r]}" if r in copy_of_path else "dropped",
+                         "followed": ", ".join(f"{w} {100 * v:.0f}%" for w, v in whats.items())})
+        ax.set_yticks(range(len(show)))
+        ax.set_yticklabels([n for n, *_ in show])
+        ax.invert_yaxis()
+        ax.set_xlabel("frame")
+        ax.set_title({0: "Promoter colour", 1: "Enhancer colour"}.get(k, f"locus {k}"))
+    from matplotlib.lines import Line2D
+
+    present = [c for c in cat_col if any(c in row for k in cls for row in cls[k])]
+    axes[0][-1].legend([Line2D([], [], color=cat_col[c], lw=3) for c in present], present, fontsize=9, loc="upper left",
+                       bbox_to_anchor=(1.12, 1.0), title="candidate was", title_fontsize=9)
+    fig.tight_layout()
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)
+    if rows:
+        st.dataframe(pd.DataFrame(rows).round(2), hide_index=True, width="stretch")
+    if pairs:
+        st.caption("Pairs (promoter path, enhancer path, median distance): " + "; ".join(f"({i}, {j}, {d:.2f} µm)" for i, j, d in pairs)
+                   + (". Found copy → true copy: " + ", ".join(f"{a} → {b}" for a, b in mapping.items()) if mapping else "")
+                   + ". A dropped path that follows a true copy for most frames would be a missed copy; a kept path that turns pink or grey part "
+                     "of the time took a stray or a noise peak in those frames.")
 
 
 def _steps_figure(res: dict, region: np.ndarray, row, cand: np.ndarray | None, params: dict):
@@ -381,12 +544,16 @@ def _time_figure(df: pd.DataFrame, i: int, cands: list, px_um: float):
 
 
 @st.cache_data(show_spinner="Measuring the MS2 signal at the tracked promoter…", max_entries=12)
-def _ms2_promoter(sdir: str, cid: int, params: str, calib: str | None) -> pd.DataFrame:
-    """The MS2 trace measured at the promoter (locus 0, tracked in its own colour): t, intensity_at_promoter."""
+def _ms2_promoter(sdir: str, cid: int, params: str, calib: str | None, run: str = "", px_um: float = 0.13) -> pd.DataFrame:
+    """The MS2 trace measured at the promoter (locus 0, tracked in its own colour) of every copy: t, copy (numbered like the true copies),
+    intensity_at_promoter."""
     from simlive.stage6_analysis.ms2 import ms2_trace
 
-    tr = ms2_trace(load_cell(sdir, cid), calib=calib, ms2_position="promoter", **json.loads(params))
-    return tr[["t", "intensity"]].rename(columns={"intensity": "intensity_at_promoter"})
+    tr = ms2_trace(load_cell(sdir, cid), calib=calib, ms2_position="promoter", px_um=px_um, **json.loads(params))
+    mt = ms2_truth(Path(run)) if run else None
+    if mt is not None and "copy" in tr:
+        tr = relabel_to_true_copies(tr, mt, px_um)
+    return tr[["t"] + (["copy"] if "copy" in tr else []) + ["intensity"]].rename(columns={"intensity": "intensity_at_promoter"})
 
 
 def _ms2_trace_figure(df: pd.DataFrame, i: int, per_loop: float = 100.0):
@@ -447,9 +614,14 @@ def _part_scores(run: Path):
                          "median error (nm)": 1000 * s["median_error_um"], "95th pct (nm)": 1000 * s["p95_error_um"],
                          "rms of good ones (nm)": 1000 * s["rms_error_near_um"] if s.get("rms_error_near_um") is not None else None,
                          "spots with no light": s.get("n_false_on_dark"),
+                         "on a stray spot": s.get("frac_on_stray"), "on the other copy": s.get("frac_on_other_copy"),
+                         "cells with the right number of copies": s.get("copy_number_right"),
+                         "copies missed / extra": f"{s.get('missed_copies')} / {s.get('extra_copies')}" if "missed_copies" in s else None,
                          "intensity r (locus 0 / 1)": " / ".join(f"{s[k]:.2f}" for k in ("intensity_r_locus0", "intensity_r_locus1") if k in s) or None})
     if rows:
         st.dataframe(pd.DataFrame(rows).round(3), hide_index=True, width="stretch")
+        st.caption("'On a stray spot' / 'on the other copy' = share of detections more than 0.5 µm from their own locus and within 0.5 µm of a "
+                   "stray spot of that colour / of the same locus of another copy (copies matched to the true ones per cell).")
     mrows = []
     for k, lab in (("ms2", "2D"), ("ms2_calibrated", "2D, calibrated")):
         m = sc.get(k)
@@ -473,11 +645,20 @@ def _part_scores(run: Path):
     if ef.exists():
         def draw():
             e = pd.read_csv(ef)
+            e = e[e.visible.astype(bool)] if "visible" in e else e
+            nm = 1000 * e.err_um.clip(lower=1e-3)
             fig, ax = plt.subplots(figsize=(17, 3.4))
-            ax.hist(np.log10(1000 * e.err_um.clip(lower=1e-3)), bins=60, color="#14b8a6")
-            ax.axvline(np.log10(1000 * FAR_UM), color="#f87171", lw=1.2)
-            ax.set_xlabel("error (nm, log scale: 1 = 10 nm, 2 = 100 nm, 3 = 1 µm)")
-            ax.set_title("All 2D detections of the run (true cell IDs)")
+            ax.hist(nm, bins=np.geomspace(max(float(nm.min()), 1.0), max(float(nm.max()), 2000.0), 70), color="#14b8a6")
+            ax.set_xscale("log")
+            ax.axvline(1000 * FAR_UM, color="#f87171", lw=1.2)
+            far = int((nm > 1000 * FAR_UM).sum())
+            extra = ""
+            if "on_stray" in e:
+                extra = f": {int(e.on_stray.sum())} on a stray spot, {int(e.on_other_copy.sum())} on the other copy"
+            ax.text(1000 * FAR_UM, 0.95, f"  wrong object: {far} of {len(e)}{extra}", color="#f87171", transform=ax.get_xaxis_transform(), va="top", fontsize=10)
+            ax.set_xlabel("distance of each detection from its true locus (nm, log scale)")
+            ax.set_ylabel("detections")
+            ax.set_title(f"All 2D detections of the run (true cell IDs): median {float(nm.median()):.0f} nm")
             return fig
 
         style.cached_figure(st, ("spt_hist", str(ef), ef.stat().st_mtime), draw)
@@ -676,6 +857,54 @@ def _part_ms2_sweep():
                "pixel value with the camera offset removed.")
 
 
+def _part_copies_sweep():
+    st.markdown("### 3e · Several copies and stray spots: does the linker keep them apart? (sweep over many movies)")
+    f = DATA_ROOT / "sweeps" / "copies_strays" / "results.csv"
+    if not f.exists():
+        st.info("No sweep yet: `scripts\\run.cmd python scripts\\sweep_copies_strays.py` (about 3 minutes per movie, 25 movies).")
+        return
+    d = pd.read_csv(f)
+    n_seeds = d.groupby(["stray_rate_per_min", "analysis"]).seed.nunique().min()
+    st.markdown("Every movie: polymer-library loci, half the cells with two promoter-enhancer copies (copy 1 bursting twice as often), stray "
+                "spots in all three colours at the rate on the x axis (each lives ~1 min, so the rate is also about how many of each colour sit in "
+                f"a nucleus at once), true cell IDs. The same movie is analysed four ways. Points = mean over {n_seeds} seeds, bars = range.")
+    styles = {"one_path": ("one path per colour (Chen et al.)", "#f87171"), "multi": ("multi-copy linker, no pair prior", "#94a3b8"),
+              "multi_gate": ("multi-copy + flat pair gate (default)", "#2dd4bf"), "multi_gauss": ("multi-copy + smooth pair prior", "#a78bfa")}
+    panels = [("copy_number_right", "cells with the right number of copies", 1, (0, 1.05)),
+              ("detection_rate", "loci found (of visible)", 1, (0, 1.05)),
+              ("frac_on_stray", "detections on a stray spot (%)", 100, None),
+              ("frac_on_other_copy", "detections on the OTHER copy (%)", 100, None),
+              ("dist_rms_nm", "promoter-enhancer distance error, rms (nm)", 1, None)]
+
+    def draw():
+        fig, axes = plt.subplots(1, len(panels), figsize=(18, 3.9))
+        for ax, (col, title, sc_, ylim) in zip(axes, panels):
+            for a, (lab, colr) in styles.items():
+                g = d[d.analysis == a].groupby("stray_rate_per_min")[col]
+                if not len(g):
+                    continue
+                m, lo, hi = sc_ * g.mean(), sc_ * g.min(), sc_ * g.max()
+                ax.errorbar(m.index + {"one_path": -0.06, "multi": -0.02, "multi_gate": 0.02, "multi_gauss": 0.06}[a], m,
+                            yerr=[m - lo, hi - m], marker="o", ms=4, color=colr, capsize=2, lw=1.4, label=lab)
+            ax.set_title(title, fontsize=11)
+            ax.set_xlabel("stray spots per nucleus per minute")
+            if ylim:
+                ax.set_ylim(*ylim)
+        axes[0].legend(fontsize=8, loc="lower left")
+        fig.tight_layout()
+        return fig
+
+    style.cached_figure(st, ("copysweep", str(f), f.stat().st_mtime), draw)
+    tab = d.groupby(["stray_rate_per_min", "analysis"]).agg(**{"movies": ("seed", "size"), "copies right": ("copy_number_right", "mean"),
+                                                             "found": ("detection_rate", "mean"), "on stray": ("frac_on_stray", "mean"),
+                                                             "on other copy": ("frac_on_other_copy", "mean"), "distance rms (nm)": ("dist_rms_nm", "mean"),
+                                                             "distance bias (nm)": ("dist_bias_nm", "mean"),
+                                                             "MS2 copies traced": ("ms2_copies_traced", "mean"), "MS2 trace r": ("ms2_r", "mean")}).reset_index()
+    st.dataframe(tab.round(3), hide_index=True, width="stretch")
+    st.caption("'One path per colour' follows ONE spot per colour, so in a two-copy cell it finds one copy at best and jumps between the "
+               "copies where they come close. The distance error counts every frame where both loci of a copy were found, wrong picks included.")
+
+
 def _part_compare(run: Path):
     st.markdown("### 4 · Compare methods on this run")
     st.caption("Re-runs only the spot finding (stage 6) on this run's saved single-cell crops with each variant below and scores it against the truth. "
@@ -757,4 +986,5 @@ def render(st_, run_path: Path, R: dict):
     _part_bleach(run)
     _part_flat(run)
     _part_ms2_sweep()
+    _part_copies_sweep()
     _part_compare(run)

@@ -15,7 +15,8 @@ coordinates are mapped into the nucleus frame (so they rotate / deform / move wi
   - time: one saved block = `block_duration_s` seconds (from the MSD calibration: an ASSUMED single-locus D until the user supplies a measured MSD); frame k reads polymer time `offset + k * frame_interval_s / block_duration_s` (blocks, interpolated), where
     `offset` is random per cell so cells do not all start at the same polymer state.
 
-Output has the same columns as `toy_loci` (xn, yn, zn in units of the nuclear radius) plus `sim_id` and `zn`: t, cell_id, locus_id, xn, yn, zn, y_um, x_um, sim_id.
+Output has the same columns as `toy_loci` (xn, yn, zn in units of the nuclear radius) plus `sim_id` and `zn`: t, cell_id, locus_id, copy, xn, yn, zn,
+y_um, x_um, sim_id. `copy` numbers the promoter-enhancer pairs of a cell (`loci.copies`; 0 only, unless copies are switched on).
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ import pandas as pd
 
 from simlive.calibration.polymer import scale_from_config
 from simlive.stage1_chromatin import library as lib
+from simlive.stage1_chromatin.copies import copy_settings, draw_copy_numbers, extra_centre
 from simlive.stage1_chromatin.rotation import random_rotation
 from simlive.stage1_chromatin.toy_loci import R_MAX
 from simlive.stage1_chromatin.transcription import pingpong
@@ -62,40 +64,50 @@ def draw_pair(rng: np.random.Generator, n_monomers: int, beads: np.ndarray, sepa
     return pair
 
 
-def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator, return_traces: bool = False):
+def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator, return_traces: bool = False,
+                          rng_copies: np.random.Generator | None = None):
     """Loci of every cell from its own saved simulation. Frame k is read at polymer time k x frame_interval_s (any frame interval
     works: positions are interpolated between saved blocks). `loci.positions_kb` is a list [promoter, enhancer] (the same pair in every cell) or the
     word "random": every cell then draws its own pair (`draw_pair`: `loci.pair_separation_kb` default 100, `loci.pair_margin_kb` default 1000); the
-    pairs are in the result's `df.attrs["pairs_kb"]` = {cell_id: [promoter_kb, enhancer_kb]}. If the movie is longer than the saved trajectory the trajectory is
+    pairs are in the result's `df.attrs["pairs_kb"]` = {cell_id: [promoter_kb, enhancer_kb]} (copy 0) and `df.attrs["pairs"]` = rows
+    (cell_id, copy, sim_id, promoter_kb, enhancer_kb) of every copy. If the movie is longer than the saved trajectory the trajectory is
     repeated forwards/backwards (no jump at the seams) and a warning is raised.
-    With return_traces=True also returns {cell_id: {"dt_block_s", "d_nm", "looped"}}: the 3D distance between locus 0 (promoter) and
-    locus 1 (enhancer) at full polymer-block resolution, starting at the cell's first frame (for the transcription model)."""
+    Copies (`loci.copies`): copy 0 is exactly the one-copy result; every further copy of a cell gets another simulation of the library (a
+    different chromosome, so a different trajectory; drawn from `rng_copies`), its own pair, rotation, time offset and territory, at least
+    `min_separation_um` from the cell's other copies in the image plane.
+    With return_traces=True also returns {cell_id: {"dt_block_s", "d_nm", "looped"}} (copy 0; key (cell_id, copy) for further copies): the 3D
+    distance between locus 0 (promoter) and locus 1 (enhancer) at full polymer-block resolution, starting at the cell's first frame (for the
+    transcription model)."""
     lc = cfg["loci"]
     random_pair = isinstance(lc["positions_kb"], str)
     if random_pair and lc["positions_kb"] != "random":
         raise ValueError(f"loci.positions_kb must be a list [promoter_kb, enhancer_kb] or 'random', not {lc['positions_kb']!r}")
     positions = None if random_pair else list(lc["positions_kb"])
-    pairs = {}
+    pairs, pair_rows = {}, []
     nm_per_unit, block_s, scale_source = scale_from_config(lc)
     dt = float(cfg["acquisition"]["frame_interval_s"])
     cell_ids = sorted(cells.cell_id.unique())
     assigned = lib.assign_simulations(lc["library"], cell_ids, rng, replace=bool(lc.get("replace", False)),
                                       pool=lc.get("sim_ids"), pinned=lc.get("pin"))
+    cs = copy_settings(cfg)
+    n_copies = draw_copy_numbers(cell_ids, cfg, rng_copies)
+    pool = sorted(str(x) for x in lc.get("sim_ids") or lib.list_library(lc["library"]).sim_id) if cs.active else []
     three_d = "z_um" in cells.columns
     rows, traces = [], {}
-    for cid, g in cells.sort_values("t").groupby("cell_id"):
-        sim = lib.library_dir(lc["library"]) / assigned[int(cid)]
+
+    def place(cid, g, copy, sim_name, r, others):
+        """One copy of one cell: its polymer trajectory mapped into the nucleus. Returns (positions (frames, n_loci, 3) in nuclear radii,
+        territory centre, beads used, base trajectory, looped)."""
+        sim = lib.library_dir(lc["library"]) / sim_name
         meta = json.loads((sim / "meta.json").read_text())
         pos_kb = positions
         if random_pair:
-            pos_kb = draw_pair(rng, int(meta["n_monomers"]), np.load(sim / "tracked_beads.npy"),
+            pos_kb = draw_pair(r, int(meta["n_monomers"]), np.load(sim / "tracked_beads.npy"),
                                float(lc.get("pair_separation_kb", 100.0)), float(lc.get("pair_margin_kb", 1000.0)))
         traj, beads_used = lib.locus_trajectories(sim, pos_kb)                 # (T, n_loci, 3) polymer units
-        pairs[int(cid)] = [int(b) for b in beads_used]
-        radius = float(meta["confinement_radius"])
         tau = (g.t.to_numpy() - g.t.min()) * dt / block_s                       # polymer time of each frame, in blocks
         need = int(np.ceil(tau.max())) + 2
-        offset = int(rng.integers(0, max(1, len(traj) - need)))
+        offset = int(r.integers(0, max(1, len(traj) - need)))
         base = traj[offset:]
         ext, looped = pingpong(base, need)
         if looped:
@@ -106,19 +118,37 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
         w = (tau - i0)[:, None, None]
         pos = (1 - w) * ext[i0] + w * ext[i0 + 1]                               # linear interpolation between blocks
         nuc_um = float(g.radius_um.min())                                       # smallest nuclear radius of this cell
-        p = (pos[..., None, :] * random_rotation(rng)).sum(-1) * (nm_per_unit / 1000.0 / nuc_um)   # nuclear radii; no BLAS call here
-        p += _territory_centre(p, rng, cid)
-        for i, r in enumerate(g.itertuples()):
-            y, x = nucleus_to_lab_um(r, p[i, :, 0], p[i, :, 1])
-            for k in range(p.shape[1]):
-                zk = r.z_um + p[i, k, 2] * r.z_semi_um if three_d else np.nan   # z-stacks: polymer z scaled into the (flattened) nucleus
-                rows.append((r.t, cid, k, p[i, k, 0], p[i, k, 1], p[i, k, 2], y[k], x[k], assigned[int(cid)], zk))
-        if return_traces and base.shape[1] >= 2:
-            traces[int(cid)] = {"dt_block_s": block_s, "looped": bool(looped),
-                                "d_nm": np.linalg.norm(base[:, 0] - base[:, 1], axis=1) * nm_per_unit}
-    df = pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "xn", "yn", "zn", "y_um", "x_um", "sim_id", "z_um"])
+        p = (pos[..., None, :] * random_rotation(r)).sum(-1) * (nm_per_unit / 1000.0 / nuc_um)   # nuclear radii; no BLAS call here
+        if copy == 0:
+            c = _territory_centre(p, r, cid)
+        else:
+            c = extra_centre(r, others, cs.min_separation_um / nuc_um, R_MAX, fits=lambda q: np.linalg.norm(p + q, axis=-1).max() <= R_MAX)
+        return p + c, c, beads_used, base, looped
+
+    for cid, g in cells.sort_values("t").groupby("cell_id"):
+        sims, centres = [assigned[int(cid)]], []
+        for copy in range(n_copies.get(int(cid), 1)):
+            r = rng if copy == 0 else rng_copies
+            if copy > 0:                        # another chromosome: a simulation this cell does not use yet (if the library has one)
+                free = [s for s in pool if s not in sims] or pool
+                sims.append(str(free[int(r.integers(len(free)))]))
+            p, c, beads_used, base, looped = place(cid, g, copy, sims[copy], r, centres)
+            centres.append(c)
+            if copy == 0:
+                pairs[int(cid)] = [int(b) for b in beads_used]
+            pair_rows.append((int(cid), copy, sims[copy], *[int(b) for b in beads_used]))
+            for i, rr in enumerate(g.itertuples()):
+                y, x = nucleus_to_lab_um(rr, p[i, :, 0], p[i, :, 1])
+                for k in range(p.shape[1]):
+                    zk = rr.z_um + p[i, k, 2] * rr.z_semi_um if three_d else np.nan   # z-stacks: polymer z scaled into the (flattened) nucleus
+                    rows.append((rr.t, cid, k, copy, p[i, k, 0], p[i, k, 1], p[i, k, 2], y[k], x[k], sims[copy], zk))
+            if return_traces and base.shape[1] >= 2:
+                traces[int(cid) if copy == 0 else (int(cid), copy)] = {
+                    "dt_block_s": block_s, "looped": bool(looped), "d_nm": np.linalg.norm(base[:, 0] - base[:, 1], axis=1) * nm_per_unit}
+    df = pd.DataFrame(rows, columns=["t", "cell_id", "locus_id", "copy", "xn", "yn", "zn", "y_um", "x_um", "sim_id", "z_um"])
     if not three_d:
         df = df.drop(columns="z_um")
     df.attrs["pairs_kb"] = pairs
+    df.attrs["pairs"] = pair_rows
     df.attrs["scale"] = {"nm_per_unit": nm_per_unit, "block_duration_s": block_s, "source": scale_source}
     return (df, traces) if return_traces else df

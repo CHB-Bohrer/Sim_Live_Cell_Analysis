@@ -150,6 +150,21 @@ SOURCES: dict[str, dict] = {
         params={"radius_factor": (1.8, "", "cell body radius / nuclear radius"),
                 "nucleus_fraction": (0.08, "", "cytoplasm brightness in the nuclear channel, relative to that cell's nucleus"),
                 "locus_photons": (2.0, "photons/px", "cytoplasm level in each locus colour (free probes, dyes), per exposure")}),
+    "stray_spots": dict(
+        group="Background", title="Stray spots (decoys in the nucleus)", baseline=False,
+        what="Real nuclei also hold spots that are not the labelled loci: probe or MCP-GFP aggregates, probes stuck to other sites, dye "
+             "clusters. They appear at random places inside a nucleus, wander a little, and disappear again after some time.",
+        effect="Extra candidate spots of the same colour and similar brightness inside the cell, moving with the nucleus. A spot finder that "
+               "takes the brightest spot, or a path that has lost its locus for a few frames, can jump onto one; telling them apart needs "
+               "their short life, their motion and (for promoter and enhancer) whether a partner of the other colour sits next to them. "
+               "The truth of every stray spot is saved (stage3_microscopy/stray_spots.csv), so picks of a stray are counted.",
+        params={"rate_per_min": (1.0, "1/min", "new stray spots per nucleus per minute, in each colour listed in `channels`"),
+                "lifetime_s": (60.0, "s", "mean time a stray spot lasts (exponential)"),
+                "D_um2_s": (0.01, "um^2/s", "diffusion of a stray spot inside the nucleus (it also moves with the nucleus)"),
+                "brightness": (0.7, "", "mean brightness relative to a locus spot of that colour (nuclear channel: relative to one fully "
+                                       "loaded Pol II's MS2 signal)"),
+                "brightness_cv": (0.5, "", "spread of the brightness between stray spots (log-normal)"),
+                "channels": (["locus0", "locus1", "nucleus"], "", "colours with stray spots (nucleus = MCP-GFP aggregates in the MS2 colour)")}),
     "crosstalk": dict(
         group="Background", title="Colour cross-talk (bleed-through)", baseline=False,
         what="A fluorophore's emission is not confined to its own channel: some of its light leaks into a neighbouring colour.",
@@ -212,7 +227,7 @@ SOURCES: dict[str, dict] = {
 
 # physical order in which a frame is degraded (used for the cumulative build-up in the dashboard)
 ORDER = ["stage_drift", "chromatic_shift", "sequential_colour", "slice_skew", "piezo", "biplane_registration", "psf_blur", "defocus", "exposure_motion", "haze", "bleaching", "flat_field", "flicker",
-         "background", "autofluorescence", "cytoplasm", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
+         "background", "autofluorescence", "cytoplasm", "stray_spots", "crosstalk", "qe", "shot_noise", "dark_current", "hot_pixels", "cosmic_rays", "prnu",
          "read_noise", "row_noise", "dsnu", "adc"]
 assert set(ORDER) == set(SOURCES)
 
@@ -234,6 +249,7 @@ BRIEF = {
     "background": "Stray light adds a constant level (and its noise) to every pixel.",
     "autofluorescence": "Cells and medium glow faintly and unevenly on their own.",
     "cytoplasm": "A dim cell body around each nucleus (leaky nuclear label, free probes) that moves with the cell.",
+    "stray_spots": "Short-lived decoy spots (probe / MCP aggregates) appear inside nuclei and wander, so the spot finder must ignore them.",
     "crosstalk": "Light from one colour leaks into another, e.g. a faint copy of the nucleus in the locus channels.",
     "qe": "The camera detects only a fraction of the photons that reach it.",
     "shot_noise": "Photon counts fluctuate randomly (Poisson), the main noise for faint spots.",
@@ -249,7 +265,7 @@ BRIEF = {
 assert set(BRIEF) == set(SOURCES)
 # Random-stream numbers. Frozen: a source keeps its number when others are inserted into ORDER, so images made before a new source existed are
 # still reproduced bit for bit. New sources get the next free number.
-_LATER = ["piezo", "cytoplasm", "sequential_colour", "biplane_registration"]          # added after the first version, in this order: they get the next numbers
+_LATER = ["piezo", "cytoplasm", "sequential_colour", "biplane_registration", "stray_spots"]          # added after the first version, in this order: they get the next numbers
 INDEX = {s: i + 1 for i, s in enumerate([x for x in ORDER if x not in _LATER])}
 for _s in _LATER:
     INDEX[_s] = len(INDEX) + 1

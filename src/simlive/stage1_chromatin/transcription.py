@@ -97,8 +97,12 @@ class TranscriptionParams:
         return (self.cassette_kb + self.gene_kb) * 60.0 / self.elongation_kb_min
 
 
-def params_from_config(cfg: dict) -> TranscriptionParams:
-    return TranscriptionParams.from_dict((cfg["loci"].get("transcription") or {}).get("params"))
+def params_from_config(cfg: dict, copy: int = 0) -> TranscriptionParams:
+    """The gene's parameters (loci.transcription.params), with the per-copy overrides of loci.copies.transcription[copy] on top."""
+    from simlive.stage1_chromatin.copies import copy_settings
+
+    base = dict((cfg["loci"].get("transcription") or {}).get("params") or {})
+    return TranscriptionParams.from_dict({**base, **copy_settings(cfg).tx_overrides(copy)})
 
 
 # ----------------------------------------------------------------------------- coupling
@@ -307,43 +311,70 @@ def standin_distance(n: int, dt_s: float, rng: np.random.Generator, contact_frac
 
 
 # ----------------------------------------------------------------------------- the movie pipeline
-def simulate_transcription(cells: pd.DataFrame, traces: dict, cfg: dict, rng: np.random.Generator):
-    """Run the model for every cell. `traces`: {cell_id: {"dt_block_s": float, "d_nm": array}} (distance series starting at the
-    cell's first frame). Returns (frames table, events table); frame rows carry t (frame index), cell_id and the model state."""
+def _trace_key(k) -> tuple[int, int]:
+    """traces dict key -> (cell_id, copy): an int is copy 0, a tuple (cell_id, copy) any copy."""
+    return (int(k[0]), int(k[1])) if isinstance(k, tuple) else (int(k), 0)
+
+
+def simulate_transcription(cells: pd.DataFrame, traces: dict, cfg: dict, rng: np.random.Generator,
+                           rng_copies: np.random.Generator | None = None):
+    """Run the model for every cell and copy. `traces`: {cell_id: {"dt_block_s": float, "d_nm": array}} (distance series starting at the
+    cell's first frame) for copy 0, and {(cell_id, copy): ...} for further copies (loci.copies): each copy has its own promoter driven by its
+    own promoter-enhancer distance, with loci.copies.transcription[copy] overriding the gene's parameters. Copy 0 uses `rng` exactly as a
+    one-copy run; further copies draw from `rng_copies`. Returns (frames table, events table); frame rows carry t (frame index), cell_id,
+    copy, trace_id (copies.trace_id), ms2_labelled (does this copy carry the MS2 cassette) and the model state."""
+    from simlive.stage1_chromatin.copies import copy_settings, trace_id
+
     dt, expo = float(cfg["acquisition"]["frame_interval_s"]), float(cfg["acquisition"]["exposure_s"])
-    p = params_from_config(cfg)
+    cs = copy_settings(cfg)
+    extra = {}
+    for k in traces:
+        cid, c = _trace_key(k)
+        if c > 0:
+            extra.setdefault(cid, []).append(c)
     fr, ev = [], []
     for cid, g in cells.sort_values("t").groupby("cell_id"):
         ts = g.t.to_numpy()
-        tr = traces[int(cid)]
-        c = simulate_cell(p, tr["d_nm"], tr["dt_block_s"], (ts - ts.min()) * dt, expo, int(rng.integers(2**31)))
-        f = c.frames.copy()
-        f.insert(0, "t", ts); f.insert(1, "cell_id", cid); f["looped_distance"] = c.looped
-        e = c.events.copy(); e.insert(0, "cell_id", cid)
-        fr.append(f); ev.append(e)
+        for copy in [0] + sorted(extra.get(int(cid), [])):
+            tr = traces[int(cid) if copy == 0 else (int(cid), copy)]
+            r = rng if copy == 0 else rng_copies
+            c = simulate_cell(params_from_config(cfg, copy), tr["d_nm"], tr["dt_block_s"], (ts - ts.min()) * dt, expo, int(r.integers(2**31)))
+            f = c.frames.copy()
+            f.insert(0, "t", ts); f.insert(1, "cell_id", cid); f.insert(2, "copy", copy); f.insert(3, "trace_id", trace_id(cid, copy))
+            f["ms2_labelled"] = cs.labelled(copy)
+            f["looped_distance"] = c.looped
+            e = c.events.copy(); e.insert(0, "cell_id", cid); e.insert(1, "copy", copy); e.insert(2, "trace_id", trace_id(cid, copy))
+            fr.append(f); ev.append(e)
     return pd.concat(fr, ignore_index=True), pd.concat(ev, ignore_index=True)
 
 
 def traces_from_truth(truth: pd.DataFrame, cfg: dict) -> dict:
     """Distance series for the toy (non-polymer) loci: 2D lab-frame distance between locus 0 and locus 1 at every frame (nm),
-    piecewise constant over a frame. Used only when loci come from `toy_loci` (no polymer simulation to read from)."""
+    piecewise constant over a frame, per cell (key cell_id for copy 0, (cell_id, copy) for further copies). Used only when loci come from
+    `toy_loci` (no polymer simulation to read from)."""
     dt, out = float(cfg["acquisition"]["frame_interval_s"]), {}
-    for cid, g in truth.groupby("cell_id"):
+    t = truth if "copy" in truth.columns else truth.assign(copy=0)
+    for (cid, copy), g in t.groupby(["cell_id", "copy"]):
         a = g[g.locus_id == 0].sort_values("t"); b = g[g.locus_id == 1].sort_values("t")
-        out[int(cid)] = {"dt_block_s": dt, "looped": False,
-                         "d_nm": np.sqrt((a.y_um.to_numpy() - b.y_um.to_numpy()) ** 2 + (a.x_um.to_numpy() - b.x_um.to_numpy()) ** 2
-                                         + ((a.z_um.to_numpy() - b.z_um.to_numpy()) ** 2 if "z_um" in a else 0.0)) * 1000.0}
+        out[int(cid) if copy == 0 else (int(cid), int(copy))] = {
+            "dt_block_s": dt, "looped": False,
+            "d_nm": np.sqrt((a.y_um.to_numpy() - b.y_um.to_numpy()) ** 2 + (a.x_um.to_numpy() - b.x_um.to_numpy()) ** 2
+                            + ((a.z_um.to_numpy() - b.z_um.to_numpy()) ** 2 if "z_um" in a else 0.0)) * 1000.0}
     return out
 
 
 def ms2_spots(tx: pd.DataFrame, truth: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Where and how bright the MS2 spots are: at the promoter (locus 0), photons = photons_per_loop_s x exposure x MS2 loops."""
+    """Where and how bright the MS2 spots are: at the promoter (locus 0) of every copy, photons = photons_per_loop_s x exposure x MS2 loops
+    (0 for a copy without the MS2 cassette, loci.copies.ms2: first)."""
     tc = cfg["loci"]["transcription"]
     zc = ["z_um"] if "z_um" in truth.columns else []
-    prom = truth[truth.locus_id == 0][["t", "cell_id", "y_um", "x_um", *zc]]
-    m = prom.merge(tx[["t", "cell_id", "ms2_loops"]], on=["t", "cell_id"])
-    m["photons"] = float(tc.get("photons_per_loop_s", 100.0)) * float(cfg["acquisition"]["exposure_s"]) * m.ms2_loops
-    return m[["t", "cell_id", "y_um", "x_um", *zc, "photons"]]
+    truth = truth if "copy" in truth.columns else truth.assign(copy=0)
+    tx = tx if "copy" in tx.columns else tx.assign(copy=0)
+    prom = truth[truth.locus_id == 0][["t", "cell_id", "copy", "y_um", "x_um", *zc]]
+    m = prom.merge(tx[["t", "cell_id", "copy", "ms2_loops"] + (["ms2_labelled"] if "ms2_labelled" in tx else [])], on=["t", "cell_id", "copy"])
+    lab = m.ms2_labelled.astype(float) if "ms2_labelled" in m else 1.0
+    m["photons"] = float(tc.get("photons_per_loop_s", 100.0)) * float(cfg["acquisition"]["exposure_s"]) * m.ms2_loops * lab
+    return m[["t", "cell_id", "copy", "y_um", "x_um", *zc, "photons"]]
 
 
 def check_sampling(p: TranscriptionParams, frame_interval_s: float, exposure_s: float) -> list[tuple[str, str]]:

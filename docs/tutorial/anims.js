@@ -507,3 +507,79 @@ A.biplane = (stage) => {
   });
   return { instant: false, phase(n) { S.ph = n; if (n === 2) S.pos.set(10, this.instant); if (n >= 3) S.pos.set(10, true); if (n < 2) S.pos.set(0, true); S.reg.set(n >= 5 ? 1 : 0, this.instant); return this; }, destroy() { cv.destroy(); } };
 };
+
+/* ================================================================ 6b. several copies per cell, stray spots, and the multi-copy linker */
+A.copies = (stage) => {
+  const r = rng(91), S = { ph: 0, show: new Tween(0) };
+  const NX = 330, NY = 370, RX = 250, RY = 200;                          // nucleus (top view)
+  const copies = [{ cx: -105, cy: -40, ph: 0.3 }, { cx: 95, cy: 55, ph: 2.1 }];
+  const strays = Array.from({ length: 7 }, (_, i) => ({ x: (r() - 0.5) * 1.5 * RX, y: (r() - 0.5) * 1.4 * RY, col: i % 2 ? PAL.green : PAL.red,
+    born: r() * 12, life: 1.5 + r() * 2.5 }));
+  const T_ = 40, rows = [                                                // what the paths of one colour followed, frame by frame (synthetic)
+    { name: "path 0", seq: Array.from({ length: T_ }, (_, i) => (i < 26 ? 0 : 1)), keep: true },
+    { name: "path 1", seq: Array.from({ length: T_ }, (_, i) => (i < 26 ? 1 : 0)), keep: true },
+    { name: "path 2", seq: Array.from({ length: T_ }, () => (r() < 0.35 ? "s" : r() < 0.85 ? "n" : null)), keep: false },
+    { name: "path 3", seq: Array.from({ length: T_ }, () => (r() < 0.25 ? "s" : r() < 0.8 ? "n" : null)), keep: false }];
+  const catCol = { 0: "#e5e7eb", 1: PAL.teal, s: PAL.pink, n: PAL.grey };
+  const titles = ["Some cells carry two promoter-enhancer pairs", "Each copy has its own chromatin and bursts on its own", "Stray spots come and go inside the nucleus",
+    "The linker tries several paths per colour", "Only paths that look like a locus are kept, then paired", "Untangling and the pair prior keep the copies apart"];
+  const cv = new Canvas(stage, (c, t, dt) => {
+    S.show.step(dt, 2);
+    txt(c, titles[S.ph] || "", 640, 46, { size: 27, weight: 700, align: "center" });
+    panel(c, 40, 80, 580, 600, "One nucleus (top view)", PAL.line);
+    c.beginPath(); c.ellipse(NX, NY, RX, RY, 0, 0, 7); c.fillStyle = "rgba(96,165,250,.12)"; c.fill(); c.strokeStyle = PAL.blue; c.lineWidth = 3; c.stroke();
+    copies.forEach((k, i) => {                                          // each copy: promoter (red) and enhancer (green) wandering near its territory
+      const px = NX + k.cx + 18 * Math.sin(t * 0.9 + i), py = NY + k.cy + 14 * Math.cos(t * 0.7 + 2 * i);
+      const ex = px + 38 * Math.cos(t * 0.6 + i * 1.7), ey = py + 30 * Math.sin(t * 0.8 + i);
+      c.globalAlpha = 0.25; circ(c, NX + k.cx, NY + k.cy, 78, null, i ? PAL.teal : "#e5e7eb", 2); c.globalAlpha = 1;
+      if (S.ph >= 1) {                                                   // independent bursts: MS2 glow at this copy's promoter
+        const on = Math.sin(t * (i ? 1.35 : 0.8) + k.ph) > 0.55;
+        if (on) for (let j = 5; j >= 1; j--) { c.globalAlpha = 0.12; circ(c, px, py, 7 * j, "#ffffff"); }
+        c.globalAlpha = 1;
+      }
+      line(c, px, py, ex, ey, "#94a3b8", 1.5, [5, 5]);
+      circ(c, px, py, 9, PAL.red, "#fff", 1.5); circ(c, ex, ey, 9, PAL.green, "#fff", 1.5);
+      txt(c, "P" + i, px - 30, py - 12, { size: 16, weight: 700, color: PAL.red }); txt(c, "E" + i, ex + 12, ey + 22, { size: 16, weight: 700, color: PAL.green });
+    });
+    if (S.ph >= 2) strays.forEach((s) => {                               // decoys: born, wander, fade
+      const age = ((t - s.born) % 9 + 9) % 9;
+      if (age > s.life) return;
+      const a = Math.sin(Math.PI * age / s.life);
+      c.globalAlpha = 0.85 * a; circ(c, NX + s.x + 10 * Math.sin(t + s.born), NY + s.y + 8 * Math.cos(t * 1.3 + s.born), 7, s.col); c.globalAlpha = 1;
+      c.globalAlpha = 0.9 * a; rrect(c, NX + s.x - 13 + 10 * Math.sin(t + s.born), NY + s.y - 13 + 8 * Math.cos(t * 1.3 + s.born), 26, 26, 4, null, PAL.pink, 1.5); c.globalAlpha = 1;
+    });
+    if (S.ph >= 2) txt(c, "□ stray spot: lives about a minute", 70, 655, { size: 16, color: PAL.pink });
+    if (S.ph === 1) {                                                    // two independent MS2 traces
+      panel(c, 660, 80, 580, 600, "MS2 signal of each copy", PAL.line);
+      for (let i = 0; i < 2; i++) {
+        const y0 = 230 + i * 220;
+        txt(c, "copy " + i, 690, y0 - 70, { size: 18, color: i ? PAL.teal : "#e5e7eb", weight: 700 });
+        c.beginPath();
+        for (let x = 0; x <= 500; x += 4) { const tt = t * 0.25 + x / 120 + i * 1.7, v = Math.max(0, Math.sin(tt * (i ? 2.2 : 1.3)) - 0.45) * 90; const yy = y0 + 60 - v; x ? c.lineTo(700 + x, yy) : c.moveTo(700 + x, yy); }
+        c.strokeStyle = i ? PAL.teal : "#e5e7eb"; c.lineWidth = 2.5; c.stroke();
+      }
+      txt(c, "bursts at different times; copy 1 here twice as often", 950, 660, { size: 17, color: PAL.muted, align: "center" });
+    }
+    if (S.ph >= 3) {                                                     // the paths of one colour, coloured by what each spot really was
+      panel(c, 660, 80, 580, 600, "Promoter colour: every path the linker tried", PAL.line);
+      const X0 = 760, X1 = 1180;
+      rows.forEach((rw, j) => {
+        const y = 170 + j * 70;
+        txt(c, rw.name, 690, y + 6, { size: 16, color: PAL.muted });
+        rw.seq.forEach((k, i) => {
+          if (k === null) return;
+          let kk = k;
+          if (S.ph >= 5 && rw.keep && i >= 26) kk = j;                    // untangled: each kept path one colour from start to end
+          line(c, X0 + (i / (T_ - 1)) * (X1 - X0), y - 12, X0 + (i / (T_ - 1)) * (X1 - X0), y + 12, catCol[kk], 4);
+        });
+        if (S.ph >= 4) txt(c, rw.keep ? "kept" : "dropped", X1 + 14, y + 6, { size: 15, color: rw.keep ? PAL.green : PAL.muted, weight: 700 });
+      });
+      const legend = [["copy 0", "#e5e7eb"], ["copy 1", PAL.teal], ["stray", PAL.pink], ["noise", PAL.grey]];
+      legend.forEach(([l, col], i) => { line(c, 700 + i * 130, 470, 730 + i * 130, 470, col, 6); txt(c, l, 738 + i * 130, 476, { size: 15, color: PAL.muted }); });
+      if (S.ph === 3) txt(c, "each path takes the candidates the earlier ones left", 950, 540, { size: 17, color: PAL.muted, align: "center" });
+      if (S.ph === 4) txt(c, "kept = covers most frames, as bright and as slow as the best path;\nthen each promoter path is paired with an enhancer path ≤ 1.5 µm away", 950, 530, { size: 16, color: PAL.green, align: "center" });
+      if (S.ph >= 5) txt(c, "a swap between two paths (frame 26) costs two big jumps:\nexchanging their tails removes both; the partner colour decides when copies touch", 950, 530, { size: 16, color: PAL.green, align: "center" });
+    }
+  });
+  return { instant: false, phase(n) { S.ph = n; return this; }, destroy() { cv.destroy(); } };
+};

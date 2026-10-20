@@ -11,6 +11,9 @@ import numpy as np
 import pandas as pd
 import streamlit as _st
 import style
+from style import PALETTE
+
+PALETTE_WARN = PALETTE["warn"]
 import tifffile
 from PIL import Image
 
@@ -20,8 +23,20 @@ from simlive.stage5_linking.celldata import load_cell
 
 SRC_LABEL = {"truth": "True cell IDs (ground truth)", "tracked_gt_masks": "Tracked IDs (tracker on ground-truth masks)",
              "tracked_auto_masks": "Tracked IDs (tracker on automatic segmentation)"}
-COLORS = ["tab:red", "tab:green", "tab:blue"]
+COLORS = ["#f87171", "#4ade80", "#60a5fa"]          # locus colours as in the images (red, green, blue), light enough for the dark theme
 COLOR_NAMES = ["red", "green", "blue"]
+COPY_COLORS = ["#e5e7eb", "#2dd4bf", "#f59e0b", "#a78bfa"]       # one colour per promoter-enhancer copy
+LOCUS_LETTER = {0: "P", 1: "E"}                                    # promoter, enhancer
+
+
+def tag(locus_id, copy) -> str:
+    """Short name of one spot: P0 = promoter of copy 0, E1 = enhancer of copy 1 (copies >= 50: found copies that match no true copy)."""
+    c = int(copy)
+    return f"{LOCUS_LETTER.get(int(locus_id), f'L{int(locus_id)}')}{c if c < 50 else '?'}"
+
+
+def with_copy(df):
+    return df if df is None or not len(df) or "copy" in df.columns else df.assign(copy=0)
 
 
 def read_frame(path: Path, i: int) -> np.ndarray:
@@ -84,8 +99,14 @@ def render(st, run_path: Path, cfg: dict):
     tr_f = run_path / "stage3_microscopy" / "loci_truth_image.csv"       # truth in image coordinates (moved by the stage drift)
     if not tr_f.exists():
         tr_f = run_path / "stage1_chromatin" / "loci_truth.csv"          # runs made before the image-error model
-    truth =pd.read_csv(tr_f) if (src == "truth" and tr_f.exists()) else None
+    truth = with_copy(pd.read_csv(tr_f)) if (src == "truth" and tr_f.exists()) else None
+    pos, dist = with_copy(pos), with_copy(dist)
+    sp_f = run_path / "stage3_microscopy" / "stray_spots.csv"
+    strays = pd.read_csv(sp_f) if sp_f.exists() else None             # decoy spots (image error source stray_spots), image coordinates
+    err_f = run_path / "stage6_analysis" / src / "localization_errors.csv"
+    errs = with_copy(pd.read_csv(err_f)) if (src == "truth" and err_f.exists()) else None
     T_all = int(summ.last_t.max()) + 1
+    n_cp = pd.read_csv(run_path / "stage1_chromatin" / "copies.csv").set_index("cell_id").n_copies if (run_path / "stage1_chromatin" / "copies.csv").exists() else None
 
     st.caption(f"{len(summ)} cells isolated. Each cell is a fixed {S}×{S} px window ({S * px_um:.1f} µm) that follows "
                "its centroid. Channels: nucleus (grey)" + "".join(
@@ -128,7 +149,8 @@ def render(st, run_path: Path, cfg: dict):
     # ---- one cell in detail
     st.subheader("One cell through time")
     by_id = summ.set_index("cell_id")
-    cid = st.selectbox("Cell", summ.cell_id.tolist(), format_func=lambda c: f"cell {c}  ({int(by_id.n_frames[c])} frames)")
+    cid = st.selectbox("Cell", summ.cell_id.tolist(), format_func=lambda c: f"cell {c}  ({int(by_id.n_frames[c])} frames"
+                       + (f", {int(n_cp[c])} promoter-enhancer cop{'y' if int(n_cp[c]) == 1 else 'ies'}" if n_cp is not None and src == "truth" and c in n_cp.index else "") + ")")
     row = by_id.loc[cid]
     cdir = sdir / "cells" / f"cell_{cid:04d}"
     frames = pd.read_csv(cdir / "frames.csv")
@@ -149,7 +171,8 @@ def render(st, run_path: Path, cfg: dict):
                 cd = load_cell(sdir, cid)
                 pc_ = pos[pos.cell_id == cid] if len(pos) else None
                 tc_ = truth[truth.cell_id == cid] if truth is not None else None      # this cell's loci only (neighbours' loci can fall in the crop)
-                fr_list, lb_list = single_cell_frames(cd.channels, cd.mask, cd.frames, loc_ch, pc_, tc_, px_um)
+                sc_ = strays[strays.cell_id == cid] if strays is not None and src == "truth" else None
+                fr_list, lb_list = single_cell_frames(cd.channels, cd.mask, cd.frames, loc_ch, pc_, tc_, px_um, strays=sc_)
             show_player(fr_list, lb_list, fps=10, column_width_px=800, key="onecell")
     ci = st.slider("Frame (this cell)", 0, len(frames) - 1, 0, key="cell_idx")
     t_now, fr_now = int(frames.t.iloc[ci]), frames.iloc[ci]
@@ -168,7 +191,7 @@ def render(st, run_path: Path, cfg: dict):
         for q in pos[(pos.cell_id == cid) & (pos.t == t_now)].itertuples():
             axes[1].plot(q.crop_x_px, q.crop_y_px, "+", color="white", ms=16, mew=2)
             left = int(q.locus_id) % 2 == 0           # alternate sides (and heights) so the labels of two close loci do not overlap
-            axes[1].annotate(f"locus{q.locus_id}", (q.crop_x_px, q.crop_y_px), color="white", fontsize=10, fontweight="bold",
+            axes[1].annotate(tag(q.locus_id, q.copy), (q.crop_x_px, q.crop_y_px), color="white", fontsize=10, fontweight="bold",
                              xytext=(-10, 14) if left else (10, -18), textcoords="offset points", ha="right" if left else "left",
                              arrowprops={"arrowstyle": "-", "color": "white", "lw": 0.8, "alpha": 0.7},
                              bbox={"boxstyle": "round,pad=0.15", "fc": "black", "ec": "none", "alpha": 0.55})
@@ -178,50 +201,106 @@ def render(st, run_path: Path, cfg: dict):
                          mec="cyan", ms=14, mew=1.5)
             if hasattr(q, "x_drawn_um") and (abs(q.x_drawn_um - q.x_um) + abs(q.y_drawn_um - q.y_um)) > 1e-9:
                 axes[1].plot(q.x_drawn_um / px_um - fr_now.crop_x0, q.y_drawn_um / px_um - fr_now.crop_y0, "x", color="red", ms=9, mew=1.5)
+        if strays is not None:
+            for q in strays[(strays.cell_id == cid) & (strays.t == t_now) & strays.channel.str.startswith("locus")].itertuples():
+                axes[1].plot(q.x_drawn_um / px_um - fr_now.crop_x0, q.y_drawn_um / px_um - fr_now.crop_y0, "s", mfc="none",
+                             mec="#f0abfc", ms=11, mew=1.3)
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)
-    st.caption("White + = locus found by the analysis" + ("; cyan ○ = true locus position (simulation, drift-corrected); red × = where that colour's spot is really drawn "
-                                                  "(true position + chromatic shift: the gap between ○ and × is an error no analysis can remove "
-                                                  "without a calibration)." if truth is not None
-               else ". (True positions are only available for true cell IDs.)"))
+    st.caption("White + = spot found by the analysis, labelled P (promoter) / E (enhancer) + copy number"
+               + ("; cyan ○ = true locus position (simulation, drift-corrected); red × = where that colour's spot is really drawn "
+                  "(true position + chromatic shift: the gap between ○ and × is an error no analysis can remove without a calibration); "
+                  "pink □ = a stray spot (a decoy the finder must ignore)." if truth is not None
+                  else ". (True positions are only available for true cell IDs.)"))
 
     if len(pos):
         pc = pos[pos.cell_id == cid]
         cen = frames.set_index("t")
-        fig, axes = plt.subplots(1, 3, figsize=(16, 4.2))
-        for k in sorted(pc.locus_id.unique()):
-            q = pc[pc.locus_id == k]
-            ex = (q.lab_x_px.to_numpy() - cen.loc[q.t, "cx_px"].to_numpy()) * px_um
-            ey = (q.lab_y_px.to_numpy() - cen.loc[q.t, "cy_px"].to_numpy()) * px_um
-            axes[0].plot(q.t, ex, color=COLORS[k % 3], label=f"locus{k} (estimated)")
-            axes[1].plot(q.t, ey, color=COLORS[k % 3])
-            if truth is not None:
-                tq = truth[(truth.cell_id == cid) & (truth.locus_id == k)].set_index("t")
-                tt = tq.index.intersection(cen.index)
-                axes[0].plot(tt, tq.loc[tt, "x_um"] - cen.loc[tt, "cx_px"] * px_um, "k:", lw=1)
-                axes[1].plot(tt, tq.loc[tt, "y_um"] - cen.loc[tt, "cy_px"] * px_um, "k:", lw=1)
-        axes[0].set_title("Locus x relative to cell centre (µm)")
-        axes[1].set_title("Locus y relative to cell centre (µm)")
-        axes[0].legend(fontsize=8)
+        tc = truth[truth.cell_id == cid] if truth is not None else None
         dd = dist[dist.cell_id == cid] if len(dist) else dist
-        if len(dd):
-            axes[2].plot(dd.t, dd.dist_um, color="#e5e7eb", label="estimated")
-        if truth is not None:
-            a = truth[(truth.cell_id == cid) & (truth.locus_id == 0)].set_index("t")
-            b = truth[(truth.cell_id == cid) & (truth.locus_id == 1)].set_index("t")
-            j = a.join(b, lsuffix="_a", rsuffix="_b", how="inner")
-            axes[2].plot(j.index, np.hypot(j.y_um_a - j.y_um_b, j.x_um_a - j.x_um_b), "r:", label="true")
-        axes[2].set_title("Distance between locus 0 and locus 1 (µm)")
-        axes[2].legend(fontsize=8)
-        for ax in axes:
-            ax.axvline(t_now, color="orange", lw=1)
-            ax.set_xlabel("frame")
-            ax.grid(alpha=0.3)
+        cps = sorted(set(dd["copy"]) if len(dd) else []) or [0]
+        # top row: position errors (wide) + offsets from the truth; bottom row: the promoter-enhancer distance, one panel per copy
+        fig = plt.figure(figsize=(17, 8.6))
+        gs = fig.add_gridspec(2, 3, height_ratios=[1, 0.85])
+        ax = {"path": fig.add_subplot(gs[0, 2])}
+        if errs is not None:
+            ax["err"] = fig.add_subplot(gs[0, :2])
+        else:
+            ax["path"].remove()
+            ax["path"] = fig.add_subplot(gs[0, :])
+        sub = gs[1, :].subgridspec(1, len(cps))
+        dist_axes = {c: fig.add_subplot(sub[0, i]) for i, c in enumerate(cps)}
+        if errs is not None:                       # how far each found spot is from its true locus, frame by frame
+            e = errs[(errs.cell_id == cid) & errs.visible.astype(bool)]
+            a = ax["err"]
+            for (k, c), g in e.groupby(["locus_id", "copy"]):
+                g = g.sort_values("t")
+                a.plot(g.t, 1000 * g.err_um, color=COLORS[int(k) % 3], ls="-" if int(c) == 0 else "--", lw=1.2, label=tag(k, c))
+                if "on_stray" in g:
+                    s_ = g[g.on_stray.astype(bool)]
+                    a.plot(s_.t, 1000 * s_.err_um, "s", mfc="none", mec="#f0abfc", ms=7)
+                if "on_other_copy" in g:
+                    o_ = g[g.on_other_copy.astype(bool)]
+                    a.plot(o_.t, 1000 * o_.err_um, "D", mfc="none", mec=PALETTE_WARN, ms=7)
+            a.axhline(500, color="#94a3b8", lw=0.8, ls=":")
+            a.text(0.01, 500, " 0.5 µm: above = a wrong object was picked", color="#94a3b8", fontsize=8, va="bottom", transform=a.get_yaxis_transform())
+            a.set_yscale("log")
+            a.set_ylim(max(1.0, float(1000 * e.err_um.min()) * 0.7) if len(e) else 1.0, max(3000.0, float(1000 * e.err_um.max()) * 1.5) if len(e) else 3000.0)
+            a.set_ylabel("distance from the true locus (nm)")
+            a.set_title("Position error of every found spot")
+            a.legend(fontsize=8, ncol=4, loc="lower right")
+        for c, a in dist_axes.items():               # the experiment's quantity: the promoter-enhancer distance of every copy
+            col = COPY_COLORS[int(c) % 4] if c < 50 else "#f87171"
+            if tc is not None and c in set(tc["copy"]):  # truth first, thick and faint, so the found curve on top shows where they differ
+                pv = tc[tc["copy"] == c].pivot_table(index="t", columns="locus_id", values=["y_um", "x_um"])
+                if ("y_um", 1) in pv.columns:
+                    a.plot(pv.index, np.hypot(pv[("y_um", 0)] - pv[("y_um", 1)], pv[("x_um", 0)] - pv[("x_um", 1)]), color=col, lw=4, alpha=0.3,
+                           label="true")
+            g = dd[dd["copy"] == c].sort_values("t") if len(dd) else dd
+            if len(g):
+                a.plot(g.t, g.dist_um, color=col, lw=1.1, label="found")
+            a.set_ylabel("µm")
+            a.set_xlabel("frame")
+            a.set_title(f"Promoter-enhancer distance, copy {c if c < 50 else '? (matches no true copy)'}")
+            a.legend(fontsize=8, loc="upper right")
+            a.axvline(t_now, color="#f59e0b", lw=1)
+        a = ax["path"]
+        if tc is not None:                          # every found spot minus its true position: the cloud's width = precision, its centre = bias
+            j = pc.merge(tc[["t", "locus_id", "copy", "y_um", "x_um"]], on=["t", "locus_id", "copy"])
+            for (k, c), g in j.groupby(["locus_id", "copy"]):
+                dx, dy = 1000 * (g.lab_x_px * px_um - g.x_um), 1000 * (g.lab_y_px * px_um - g.y_um)
+                ok = np.hypot(dx, dy) <= 500
+                a.plot(dx[ok], dy[ok], "o" if int(c) == 0 else "^", ms=3, alpha=0.45, color=COLORS[int(k) % 3], label=f"{tag(k, c)} ({(~ok).sum()} beyond 500 nm)")
+                if ok.any():
+                    a.plot(dx[ok].mean(), dy[ok].mean(), "+", color=COLORS[int(k) % 3], ms=16, mew=2.5)
+            a.axhline(0, color="#94a3b8", lw=0.6); a.axvline(0, color="#94a3b8", lw=0.6)
+            a.set_aspect("equal", adjustable="datalim")
+            a.set_xlabel("found − true, x (nm)")
+            a.set_ylabel("found − true, y (nm)")
+            a.set_title("Offsets from the truth (+ = mean: a colour shift shows here)")
+            a.legend(fontsize=8, loc="upper right")
+        else:                                       # no truth (tracked IDs): the paths in a short window around the frame shown
+            for (k, c), g in pc.groupby(["locus_id", "copy"]):
+                g = g[(g.t - t_now).abs() <= 15].sort_values("t")
+                g = g[g.t.isin(cen.index)]
+                x = (g.lab_x_px.to_numpy() - cen.loc[g.t, "cx_px"].to_numpy()) * px_um
+                y = (g.lab_y_px.to_numpy() - cen.loc[g.t, "cy_px"].to_numpy()) * px_um
+                a.plot(x, y, color=COLORS[int(k) % 3], ls="-" if int(c) == 0 else "--", lw=1.0, marker=".", ms=4, label=tag(k, c))
+            a.set_aspect("equal", adjustable="datalim")
+            a.invert_yaxis()
+            a.set_xlabel("x from the nucleus centre (µm)"); a.set_ylabel("y (µm)")
+            a.set_title("Paths inside the nucleus (±15 frames around the frame shown)")
+            a.legend(fontsize=8)
+        if "err" in ax:
+            ax["err"].axvline(t_now, color="#f59e0b", lw=1)
+            ax["err"].set_xlabel("frame")
         fig.tight_layout()
         st.pyplot(fig, width="stretch")
         plt.close(fig)
-        st.caption("Dotted lines = true values from the simulation (true cell IDs only). Orange line = frame shown above.")
+        st.caption("Solid = copy 0, dashed = copy 1; colours as in the image (red promoter, green enhancer). "
+                   + ("Pink □ = the spot found was a stray spot; orange ◇ = it was the other copy's locus. " if errs is not None else "")
+                   + "Orange line = the frame shown above. Copies are numbered like the true ones for true cell IDs (matched per cell).")
     sc_f = run_path / "stage6_analysis" / "scores.json"
     if sc_f.exists():
         with st.expander("Analysis quality and memory use for this run"):

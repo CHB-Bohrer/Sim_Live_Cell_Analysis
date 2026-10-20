@@ -14,6 +14,8 @@ loci cannot change) and the height after removing the constant offset.
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import tifffile
@@ -51,10 +53,42 @@ def track_fiducials(stack_path, z_um=None, seg_path=None, dilate_px: int = 8, ha
     good = np.isfinite(res[:, :, 0]).mean(axis=0) >= min_fraction
     res = res[:, good]
     rel = res - res[:1]
-    shifts = pd.DataFrame({"t": np.arange(T), "dy_px": np.nanmedian(rel[:, :, 0], axis=1) if res.shape[1] else 0.0,
-                           "dx_px": np.nanmedian(rel[:, :, 1], axis=1) if res.shape[1] else 0.0,
-                           "dz_um": np.nanmedian(rel[:, :, 3], axis=1) if (three_d and res.shape[1]) else 0.0, "n_beads": int(res.shape[1])})
-    return shifts, res
+    keep = consistent_beads(rel, three_d)
+    res, rel = res[:, keep], rel[:, keep]
+    cols = {"dy_px": 0, "dx_px": 1} | ({"dz_um": 3} if three_d else {})
+    shifts = pd.DataFrame({"t": np.arange(T), "n_beads": int(res.shape[1])})
+    for name, c in cols.items():
+        with warnings.catch_warnings():             # frames in which no kept bead was fitted give NaN here (interpolated below)
+            warnings.simplefilter("ignore", RuntimeWarning)
+            v = np.nanmedian(rel[:, :, c], axis=1) if res.shape[1] else np.zeros(T)
+        ok = np.isfinite(v)
+        if ok.any() and not ok.all():               # frames where no good bead was fitted: interpolated from the neighbouring frames
+            v = np.interp(np.arange(T), np.nonzero(ok)[0], v[ok])
+        shifts[name] = np.where(np.isfinite(v), v, 0.0)
+    if not three_d:
+        shifts["dz_um"] = 0.0
+    shifts["n_beads_fitted"] = np.isfinite(res[:, :, 0]).sum(axis=1) if res.shape[1] else 0
+    return shifts[["t", "dy_px", "dx_px", "dz_um", "n_beads", "n_beads_fitted"]], res
+
+
+def consistent_beads(rel: np.ndarray, three_d: bool, max_xy_px: float = 0.5, max_z_um: float = 0.2) -> np.ndarray:
+    """Which beads move like the others. All beads lie on the slide, so in every frame they share one displacement; a bead whose own track
+    keeps disagreeing with the median of the beads (median absolute difference over frames above max_xy_px or max_z_um, and 3x the most
+    consistent bead) is badly fitted: e.g. a bead whose axial profile is cut off by the lowest plane, whose height fit then wanders by
+    micrometres (measured: one of three beads did this and, with so few beads, the frame medians jumped by up to 4 um). With fewer than three
+    beads there is no majority to judge by, and all are kept."""
+    n = rel.shape[1]
+    if n < 3:
+        return np.ones(n, bool)
+    keep = np.ones(n, bool)
+    for c, lim in [(0, max_xy_px), (1, max_xy_px)] + ([(3, max_z_um)] if three_d else []):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            med = np.nanmedian(rel[:, :, c], axis=1, keepdims=True)
+            dev = np.nanmedian(np.abs(rel[:, :, c] - med), axis=0)
+        best = np.nanmin(dev) if np.isfinite(dev).any() else 0.0
+        keep &= ~((dev > lim) & (dev > 3 * best))
+    return keep if keep.any() else np.ones(n, bool)
 
 
 def correct_with_beads(pos: pd.DataFrame, shifts: pd.DataFrame) -> pd.DataFrame:
@@ -85,8 +119,11 @@ def correct_with_plane_positions(pos: pd.DataFrame, plane_log: pd.DataFrame, z_n
 
 
 def _distances(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
-    a = pos[pos.locus_id == 0].set_index(["cell_id", "t"])
-    b = pos[pos.locus_id == 1].set_index(["cell_id", "t"])
+    from simlive.stage1_chromatin.copies import with_copy
+
+    pos = with_copy(pos)
+    a = pos[pos.locus_id == 0].set_index(["cell_id", "t", "copy"])
+    b = pos[pos.locus_id == 1].set_index(["cell_id", "t", "copy"])
     j = a.join(b, lsuffix="_a", rsuffix="_b", how="inner")
     d = np.sqrt((px_um * (j.lab_y_px_a - j.lab_y_px_b)) ** 2 + (px_um * (j.lab_x_px_a - j.lab_x_px_b)) ** 2 + (j.z_um_a - j.z_um_b) ** 2)
     dz = j.z_um_a - j.z_um_b
@@ -98,12 +135,17 @@ def score_variants(variants: dict, truth: pd.DataFrame, px_um: float) -> pd.Data
     columns cell_id, t, locus_id, y_um, x_um, z_um). For each variant: median absolute error of the 3D distance between locus 0 and 1, of their
     height difference, and of the height of each locus after the constant offset is removed (a shift common to the
     whole movie is not an error an analysis can or needs to fix)."""
-    tt = truth.assign(lab_y_px=truth.y_um / px_um, lab_x_px=truth.x_um / px_um)[["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um"]]
+    from simlive.stage1_chromatin.copies import with_copy
+    from simlive.stage6_analysis.localize import match_copies
+
+    truth = with_copy(truth)
+    tt = truth.assign(lab_y_px=truth.y_um / px_um, lab_x_px=truth.x_um / px_um)[["cell_id", "t", "locus_id", "copy", "lab_y_px", "lab_x_px", "z_um"]]
     td = _distances(tt, px_um)
     rows = []
     for name, pos in variants.items():
+        pos = match_copies(pos, truth, px_um)
         d = _distances(pos, px_um).join(td, rsuffix="_true", how="inner")
-        j = pos.merge(truth[["cell_id", "t", "locus_id", "z_um"]], on=["cell_id", "t", "locus_id"], suffixes=("", "_true"))
+        j = pos.merge(truth[["cell_id", "t", "locus_id", "copy", "z_um"]], on=["cell_id", "t", "locus_id", "copy"], suffixes=("", "_true"))
         ez = j.z_um - j.z_um_true
         ez = ez - ez.median()
         med = lambda v: 1000 * float(np.median(np.abs(v)))               # typical error: robust against the placeholder detector's rare wrong detections

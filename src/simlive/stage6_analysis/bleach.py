@@ -249,7 +249,7 @@ def _scores(run: Path, s6: Path) -> dict:
             import yaml
 
             px = yaml.safe_load((run / "stage2_cells" / "params.yaml").read_text())["optics"]["pixel_size_nm"] / 1000.0
-            j = pos.merge(tr, on=["cell_id", "t", "locus_id"])
+            j = pos.merge(tr, on=["cell_id", "t", "locus_id"] + (["copy"] if "copy" in pos and "copy" in tr else []))
             j = j[np.hypot(j.lab_y_px * px - j.y_um, j.lab_x_px * px - j.x_um) <= 0.5]
             for k, g in j.groupby("locus_id"):
                 out[f"locus{int(k)}_r"] = _r(g, "photons")
@@ -262,7 +262,7 @@ def _scores(run: Path, s6: Path) -> dict:
             if mt is not None:
                 tr = pd.read_csv(f)
                 if "intensity_corr" in tr:
-                    out["ms2_r"] = _r(tr.merge(mt, on=["cell_id", "t"]), "photons")
+                    out["ms2_r"] = _r(tr.merge(mt, on=["cell_id", "t"] + (["copy"] if "copy" in tr and "copy" in mt else [])), "photons")
             break
     return out
 

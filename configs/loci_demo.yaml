@@ -65,6 +65,12 @@ loci:                       # STAND-IN for stage 1 (polychrom): confined diffusi
     photons_per_probe_s: 300 # PLACEHOLDER photons per attached probe per second of exposure
     promoter: {n_probes: 30, k_bind: 0.05, k_scan: 0.5, k_unbind: 0.1, k_off: 0.1, capacity: null}    # rates in 1/s
     enhancer: {n_probes: 30, k_bind: 0.03, k_scan: 0.3, k_unbind: 0.1, k_off: 0.05, capacity: null}
+  copies:                    # several promoter-enhancer pairs per cell (stage1_chromatin/copies.py; user 2026-10-19). Absent = one pair per cell
+    n: [1, 2]                # possible numbers of pairs per cell (e.g. 2 = both homologous alleles labelled, 4 = after replication) ...
+    weights: [0.5, 0.5]      # ... and the share of cells with each (PLACEHOLDER: half the cells show two pairs)
+    min_separation_um: 2.5   # the pairs' territories at least this far apart in the image plane (PLACEHOLDER; homologs are often several um apart)
+    ms2: all                 # which pairs carry the MS2 cassette: all | first (the others still transcribe, unlabelled)
+    transcription: [{}, {k_on: 0.00167}]   # per-pair overrides of transcription.params: separate bursting dynamics (PLACEHOLDER: pair 1 bursts twice as often)
   transcription:             # stage 1c: promoter switching + Pol II + MS2; the rate can depend on promoter-enhancer distance
     enabled: false           # true: MS2 spots appear at the promoter, in the SAME channel as the nuclear NLS-GFP
     photons_per_loop_s: 100  # PLACEHOLDER photons per MS2 loop per second of exposure (one Pol II with all 24 loops = 24x this)
@@ -103,7 +109,7 @@ locus_analysis:             # stage 6 spot finder: src/simlive/stage6_analysis/d
   dog_sigma_px: [1.0, 3.0]  # difference of Gaussians: inner ~ PSF sigma, outer 3x (px)
   dog_sigma_z: [0.8, 2.0]   # z-stacks: the same along z (planes)
   dog_snr: 3.0              # candidate threshold (x noise of the DoG image): low on purpose, the Viterbi path picks the spot
-  max_candidates: 5         # candidates kept per frame
+  max_candidates: 8         # candidates kept per frame (5 for one copy without stray spots; 8 leaves room for two copies + strays)
   min_sep_px: 4             # min distance between candidates (px)
   viterbi_miss_cost: 2.0    # cost of a frame without a spot (nats)
   viterbi_max_gap: 5        # longest run of frames without a spot that a path may bridge
@@ -116,6 +122,14 @@ locus_analysis:             # stage 6 spot finder: src/simlive/stage6_analysis/d
   intensity_inner_px: [7, 7, 5]
   intensity_outer_px: [19, 19, 7]
   intensity_background: median   # median of the shell (robust to a cosmic ray in it) | mean (Chen et al. 2025)
+  # several copies per cell and stray spots (multicopy.py): paths per colour, the loci among them by coverage, promoter paired with enhancer
+  max_copies: 2             # most promoter-enhancer copies a cell can have (1 = the one-copy finder of Chen et al.)
+  extra_tracks: 2           # paths tried per colour beyond max_copies, so loci can be found among stray spots
+  min_track_coverage: 0.5   # a second or later path is a locus only if it has a spot in >= this share of the frames (strays live ~1 min)
+  pair_max_um: 1.5          # promoter and enhancer paths of one copy: median distance at most this
+  pair_prior: gate          # how the other colour of a copy helps choose spots: gate (flat window) | gauss (smooth; biases distances) | none
+  pair_gate_um: 1.5         # candidates farther than this from the other colour's spot of the same copy are penalised (null = off)
+  gate_softness_px: 2.0
 
 segmentation:
   method: cellpose
@@ -158,6 +172,7 @@ imaging_errors:
   background: {enabled: true}          # Constant background light
   autofluorescence: {enabled: true, photons: 6.0, cv: 0.3, correlation_um: 10.0}
   cytoplasm: {enabled: true, radius_factor: 1.8, nucleus_fraction: 0.08, locus_photons: 2.0}   # PLACEHOLDER cell bodies (2D only)
+  stray_spots: {enabled: true, rate_per_min: 1.0, lifetime_s: 60.0, D_um2_s: 0.01, brightness: 0.7, brightness_cv: 0.5, channels: ["locus0", "locus1", "nucleus"]}   # PLACEHOLDER decoy spots (probe / MCP aggregates) inside nuclei
   crosstalk: {enabled: true, pairs: [["nucleus", "locus0", 0.02], ["locus0", "locus1", 0.02]]}
   # ---- Detection
   qe: {enabled: true}          # Quantum efficiency

@@ -17,6 +17,7 @@ import yaml
 
 import style
 from simlive.io.runs import DATA_ROOT, REPO_ROOT
+from simlive.stage1_chromatin.copies import trace_label
 from simlive.stage6_analysis import deconvolve as DC
 
 RUNS = DATA_ROOT / "runs"
@@ -42,6 +43,8 @@ def _load(path: str, stamp: float, tag: str = ""):
     s1 = run / "stage1_chromatin"
     ev = pd.read_csv(s1 / "transcription_events.csv") if (s1 / "transcription_events.csv").exists() else None
     tx = pd.read_csv(s1 / "transcription.csv") if (s1 / "transcription.csv").exists() else None
+    # one trace per cell and promoter-enhancer copy: `key` = trace_id (= cell_id for copy 0, so runs made before copies existed are unchanged)
+    dec, ev, tx = (None if d is None else d.assign(key=d["trace_id"] if "trace_id" in d else d["cell_id"]) for d in (dec, ev, tx))
     return cfg, dec, info, samples, fine, ev, tx
 
 
@@ -170,7 +173,7 @@ def _step3(dec, info):
        "Before deconvolving, the method needs to know how much of the trace is noise. Camera noise changes from frame to frame, while the "
        "signal changes slowly (a Pol II stays several minutes), so half the squared change between consecutive frames measures the noise. "
        "Brighter spots are noisier (photon noise grows with the light), so the noise is modelled as sigma² = sigma_b² + beta × signal.")
-    traces = [g.sort_values("t").trace_cu.to_numpy() for _, g in dec.groupby("cell_id")]
+    traces = [g.sort_values("t").trace_cu.to_numpy() for _, g in dec.groupby("key")]
     x, y, w = DC.noise_points(traces)
 
     def draw():
@@ -199,19 +202,20 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
        "fraction of histories with a start in that second; its area over an interval = the expected number of starts there), true starts as "
        "white ticks; (3) the same summed per frame, with its spread; (4) the probability that the gene is in a burst, from Chen et al.'s rule, "
        "with the true promoter-ON periods shaded.")
-    cells = sorted(dec.cell_id.unique())
+    cells = sorted(dec.key.unique())
     T_all = int(dec.t.max()) + 1
-    n_true = ev[(ev.init_s > -dt) & (ev.init_s <= T_all * dt)].groupby("cell_id").size() if ev is not None else pd.Series(dtype=int)   # during the movie
+    n_true = ev[(ev.init_s > -dt) & (ev.init_s <= T_all * dt)].groupby("key").size() if ev is not None else pd.Series(dtype=int)   # during the movie
     best = int((n_true - n_true.median()).abs().idxmin()) if len(n_true) else int(cells[0])     # a typical cell (median number of starts)
     c = st.columns([2, 2, 2, 3])
-    cid = c[0].selectbox("Cell", cells, index=cells.index(best) if best in cells else 0, key="dc_cell",
-                         format_func=lambda i: f"cell {i} ({int(n_true.get(i, 0))} true starts)" if len(n_true) else f"cell {i}")
+    cid = c[0].selectbox("Cell (and copy)", cells, index=cells.index(best) if best in cells else 0, key="dc_cell",
+                         format_func=lambda i: f"{trace_label(i)} ({int(n_true.get(i, 0))} true starts)" if len(n_true) else trace_label(i),
+                         help="One trace per cell and promoter-enhancer copy (a cell with two copies has two MS2 traces)")
     w = c[1].slider("Burst window w (frames)", 1.0, 30.0, 5.0, 1.0, key="dc_w", help="Chen et al.: 5 frames (~50 s). The rate is smoothed over this window.")
     gb = c[2].slider("Starts needed in the window (g_b)", 0.5, 6.0, 2.0, 0.5, key="dc_gb",
                      help="Chen et al.: 2 initiations within the window = ON. Lower it for genes that start Pol II rarely.")
     c[3].caption("Chen et al.'s rule needs bursts of frequent starts (their fly genes start Pol II every few seconds while ON). For a gene that "
                  "starts one Pol II every few minutes, widen the window and/or lower g_b; step 5 shows the agreement with the truth for the setting chosen.")
-    g = dec[dec.cell_id == cid].sort_values("t")
+    g = dec[dec.key == cid].sort_values("t")
     s = samples[int(cid)]
     p_on = DC.burst_calls(s, dt, w, gb)
     T = len(g)
@@ -221,7 +225,7 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
     zoom = st.slider("Show minutes (zoom in to see single Pol II starts)", 0.0, t_end, (0.0, t_end), 0.5, key="dc_zoom")
     fig, ax = plt.subplots(4, 1, figsize=(17, 10.6), sharex=True, gridspec_kw={"height_ratios": [3, 1.8, 1.8, 1.2]})
     if tx is not None:
-        q = tx[tx.cell_id == cid].sort_values("t")
+        q = tx[tx.key == cid].sort_values("t")
         ax[0].plot(q.t * dt / 60, q.ms2_loops / n_loops, color=TRUE_C, lw=1.4, ls="--", label="true signal (loops / loops per Pol II)")
         on = q.promoter_on.to_numpy().astype(bool)
         for a in ax:
@@ -232,7 +236,7 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
     ax[0].set_ylabel("Pol II units"); ax[0].legend(loc="lower left", bbox_to_anchor=(0, 1.0), fontsize=11, ncol=3)    # legends sit above the panels, not on the data
     e = np.zeros(0)
     if ev is not None:
-        e = ev[ev.cell_id == cid].init_s.to_numpy() / 60
+        e = ev[ev.key == cid].init_s.to_numpy() / 60
         e = e[(e >= -dt / 60) & (e <= t_min[-1])]
     if pf is not None:
         tf = (info.get("fine_t0_s", 0.0) + np.arange(len(pf)) * info.get("kernel_dt_s", 1.0)) / 60
@@ -254,8 +258,8 @@ def _step4(dec, samples, fine, info, ev, tx, dt, n_loops, kern):
     st.pyplot(fig, width="stretch")
     plt.close(fig)
     true_n = int(n_true.get(cid, 0)) if len(n_true) else None
-    st.caption(f"Cell {cid}: {s.sum(1).mean():.1f} ± {s.sum(1).std():.1f} Pol II starts found" + (f" (true: {true_n})" if true_n is not None else "")
-               + f"; in a burst {100 * (p_on >= 0.5).mean():.0f}% of frames" + (f" (true promoter ON: {100 * tx[tx.cell_id == cid].promoter_on.mean():.0f}%)" if tx is not None else "")
+    st.caption(f"{trace_label(cid).capitalize()}: {s.sum(1).mean():.1f} ± {s.sum(1).std():.1f} Pol II starts found" + (f" (true: {true_n})" if true_n is not None else "")
+               + f"; in a burst {100 * (p_on >= 0.5).mean():.0f}% of frames" + (f" (true promoter ON: {100 * tx[tx.key == cid].promoter_on.mean():.0f}%)" if tx is not None else "")
                + ". Yellow = the promoter is truly ON (it can be ON for a while before the first Pol II starts).")
 
 
@@ -269,12 +273,12 @@ def _step5(dec, samples, ev, tx, dt, info, run):
     w, gb = float(st.session_state.get("dc_w", 5.0)), float(st.session_state.get("dc_gb", 2.0))
     calls, truth = [], []
     for cid, s in samples.items():
-        q = tx[tx.cell_id == cid].sort_values("t")
+        q = tx[tx.key == cid].sort_values("t")
         calls.append(DC.burst_calls(s, dt, w, gb)[: len(q)] >= 0.5)
         truth.append(q.promoter_on.to_numpy().astype(bool)[: len(calls[-1])])
     calls, truth = np.concatenate(calls), np.concatenate(truth)
-    per = dec.groupby("cell_id").n_init_mean.sum().rename("found (posterior mean)").to_frame()
-    per["true"] = ev[ev.init_s >= -dt].groupby("cell_id").size().reindex(per.index).fillna(0).astype(int)
+    per = dec.groupby("key").n_init_mean.sum().rename("found (posterior mean)").to_frame()
+    per["true"] = ev[ev.init_s >= -dt].groupby("key").size().reindex(per.index).fillna(0).astype(int)
     style.stat_grid(st, [("True Pol II starts", f"{sc.get('n_true', int(per.true.sum()))}", "in all cells, during the movie"),
                          ("Found (posterior mean)", f"{sc.get('n_estimated', per.iloc[:, 0].sum()):.1f}", "sum over cells of the expected number of starts"),
                          ("True starts found", f"{100 * sc.get('found', np.nan):.0f} %", "a true start with an inferred one within 3 frames"),

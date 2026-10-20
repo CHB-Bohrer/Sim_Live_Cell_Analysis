@@ -158,10 +158,12 @@ def estimate_D(rel: list, choice: list, D_min: float = 0.25, max_gap: int = 5) -
 
 def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap: int = 5, viterbi_miss_cost: float = 2.0,
                   viterbi_D_px2: float | None = None, viterbi_iterations: int = 3, z_scale: float = 1.0, search_volume: float | None = None,
-                  **_) -> tuple[list, float]:
+                  reward_offset: list | None = None, **_) -> tuple[list, float]:
     """Step 4. `peaks[i]`: candidate positions of frame i (crop px; (z, y, x) for stacks, z in planes), `snr[i]` their DoG signal-to-noise,
     `centre[i]` the nucleus centroid (y, x) in crop px; `z_scale` = plane spacing / pixel size, so distances are isotropic;
-    `search_volume` = area (px^2) or volume (px^3, z scaled) of the cell region where candidates can appear.
+    `search_volume` = area (px^2) or volume (px^3, z scaled) of the cell region where candidates can appear; `reward_offset[i]` (optional,
+    one value per candidate of frame i, nats) is added to the node rewards, e.g. the pair gate of multicopy.py (a candidate far from the
+    other colour's spot of the same copy is penalised).
     A candidate left off the path must be explained as a false one, which appear uniformly over the region at (mean candidates per frame
     - 1) per frame: each node's reward therefore includes log(search_volume / false candidates per frame), the usual clutter term of a
     track likelihood. Without it, skipping a frame is cheaper than keeping a well-placed but faint spot.
@@ -181,6 +183,8 @@ def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap
     false_per_frame = max(float(np.mean(counts)) - 1.0, 0.1) if counts else 1.0
     clutter = np.log(max(float(search_volume), 1.0) / false_per_frame) if search_volume else 0.0
     reward = [np.log(np.maximum(np.asarray(s, float), 1.0001)) + clutter for s in snr]
+    if reward_offset is not None:
+        reward = [r + np.asarray(o, float) for r, o in zip(reward, reward_offset)]
     reacq = float(np.log(max(float(search_volume), 1.0))) if search_volume else None
     if viterbi_D_px2:
         return _viterbi_once(rel, reward, float(viterbi_D_px2), int(viterbi_max_gap), float(viterbi_miss_cost), reacq), float(viterbi_D_px2)

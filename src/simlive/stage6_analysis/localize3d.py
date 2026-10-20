@@ -23,7 +23,7 @@ from scipy.ndimage import gaussian_filter, shift
 from simlive.stage6_analysis import dog_viterbi as DV
 from simlive.stage6_analysis import spots as SP
 
-COLUMNS = ["cell_id", "t", "locus_id", "lab_y_px", "lab_x_px", "z_um", "snr", "n_candidates", "fit_ok", "intensity"]
+COLUMNS = ["cell_id", "t", "locus_id", "copy", "lab_y_px", "lab_x_px", "z_um", "snr", "n_candidates", "fit_ok", "intensity"]
 
 
 def _crop3d(vol, y0: int, x0: int, S: int, pad_value: float) -> np.ndarray:
@@ -70,7 +70,8 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
     With `calib` (folder of a saved Calibration) the crops are dark/flat/hot-pixel corrected and the measured chromatic shift (lateral and
     axial) of the colour is subtracted from the detected position. `axial_sigma_um`: {channel: nominal axial PSF sigma} for median_z: auto.
     `plane_shift_px` = (dy, dx): biplane registration offset of the second plane of every pair (stage6_analysis/biplane.py); it is undone when the volume is cut out."""
-    from simlive.stage6_analysis.localize import _load_calibration, centroid_in_crop, spot_params
+    from simlive.stage6_analysis import multicopy as MC
+    from simlive.stage6_analysis.localize import _load_calibration, centroid_in_crop, copy_params, spot_params
 
     cal = _load_calibration(calib) if calib else None
     chans = cell.locus_channels[:n_loci]
@@ -83,6 +84,8 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
     step = float(np.mean(np.diff(z))) if len(z) > 1 else 1.0
     p = spot_params(kw)
     rows = []
+    multi = method == "dog_viterbi" and MC.multicopy_on(kw)
+    pending = {}                    # multi-copy: colour -> (refined candidates per frame, settings), linked after all colours are read
     for k, name in enumerate(chans):
         st = tifffile.memmap(stacks[name], mode="r")
         pad = float(np.percentile(np.asarray(st[0, len(z) // 2]), 1))
@@ -112,6 +115,9 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
                     q["intensity"] = DV.ellipsoid_intensity(v, q["pos"], inner, outer, ibg)[0]
                 refined.append(rr)
             vol = float(np.mean(reg.sum(axis=(-2, -1)))) * len(z) * pz["z_scale"]      # where candidates can appear, z in pixel units
+            if multi:
+                pending[k] = (refined, {**pz, "search_volume": vol})
+                continue
             choice, _ = DV.viterbi_track([np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in refined],
                                          [np.array([q["snr"] for q in rr]) for rr in refined], centroid_in_crop(fr, S),
                                          **{**pz, "search_volume": vol})
@@ -119,22 +125,44 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
                     for rr, j in zip(refined, choice)]
         else:
             raise ValueError(f"unknown locus_analysis.method {method!r}")
-        for i, d in enumerate(dets):
-            if d is None:
-                continue
-            r = frames[i]
-            y, x, zz = r.crop_y0 + d[1], r.crop_x0 + d[2], z[0] + d[0] * step
-            if cal is not None:
-                sy, sx = cal.shift_px(name)
-                y, x, zz = y - sy, x - sx, zz - cal.shift_z_um(name)
-            rows.append((cell.cell_id, int(r.t), k, y, x, zz, d[3], d[4], bool(d[5]), d[6]))
+        _emit3d(rows, cell, frames, k, 0, dets, z, step, cal, name)
+    if multi and pending:          # several copies per cell / stray spots: link all colours together (multicopy.py), 3D distances
+        ks = sorted(pending)
+        refined = [pending[k][0] for k in ks]
+        pz = pending[ks[0]][1]
+        res = MC.track_copies([[np.array([q["pos"] for q in rr]) if rr else np.zeros((0, 3)) for rr in ref] for ref in refined],
+                              [[np.array([q["snr"] for q in rr]) for rr in ref] for ref in refined], centroid_in_crop(fr, S),
+                              np.array([True] * len(fr)), px_um=px_um, **copy_params(kw), **pz)
+        for copy, cp in enumerate(res["copies"]):
+            for a, ch in cp.items():
+                k = ks[a]
+                rr = refined[a]
+                dets = [None if j is None else (*rr[i][j]["pos"], rr[i][j]["snr"], rr[i][j]["n_candidates"], rr[i][j]["fit_ok"], rr[i][j]["intensity"])
+                        for i, j in enumerate(ch)]
+                _emit3d(rows, cell, frames, k, copy, dets, z, step, cal, chans[k])
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
+def _emit3d(rows: list, cell, frames: list, k: int, copy: int, dets: list, z: np.ndarray, step: float, cal, name: str) -> None:
+    """Detections of colour k (one copy) -> table rows in lab pixels and um (chromatic shift removed when calibrated)."""
+    for i, d in enumerate(dets):
+        if d is None:
+            continue
+        r = frames[i]
+        y, x, zz = r.crop_y0 + d[1], r.crop_x0 + d[2], z[0] + d[0] * step
+        if cal is not None:
+            sy, sx = cal.shift_px(name)
+            y, x, zz = y - sy, x - sx, zz - cal.shift_z_um(name)
+        rows.append((cell.cell_id, int(r.t), k, copy, y, x, zz, d[3], d[4], bool(d[5]), d[6]))
+
+
 def locus_distances_3d(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
-    """3D distance between locus 0 and locus 1 per cell and frame (frames where both were found), in um."""
-    a = pos[pos.locus_id == 0].set_index(["cell_id", "t"])
-    b = pos[pos.locus_id == 1].set_index(["cell_id", "t"])
+    """3D distance between locus 0 and locus 1 of the same copy per cell and frame (frames where both were found), in um."""
+    from simlive.stage1_chromatin.copies import with_copy
+
+    pos = with_copy(pos)
+    a = pos[pos.locus_id == 0].set_index(["cell_id", "t", "copy"])
+    b = pos[pos.locus_id == 1].set_index(["cell_id", "t", "copy"])
     j = a.join(b, lsuffix="_a", rsuffix="_b", how="inner")
     d = np.sqrt((px_um * (j.lab_y_px_a - j.lab_y_px_b)) ** 2 + (px_um * (j.lab_x_px_a - j.lab_x_px_b)) ** 2 + (j.z_um_a - j.z_um_b) ** 2)
     return d.rename("dist_um").reset_index()
@@ -143,15 +171,18 @@ def locus_distances_3d(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
 def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: float = 0.5) -> tuple[pd.DataFrame, dict]:
     """Compare 3D detections with the true positions (same cell, frame, locus; truth in image coordinates, i.e. drift-corrected).
     err_um = 3D error, err_xy_um = lateral error, err_z_um = signed axial error. Rates and far fraction as in `score_localization`."""
-    from simlive.stage6_analysis.localize import _visible, intensity_scores
+    from simlive.stage1_chromatin.copies import with_copy
+    from simlive.stage6_analysis.localize import _visible, copy_scores, intensity_scores, match_copies
 
+    truth = with_copy(truth)
+    pos = match_copies(pos, truth, px_um)            # found copies -> true copies (lateral positions), as in 2D
     est = pos.assign(est_y_um=pos.lab_y_px * px_um, est_x_um=pos.lab_x_px * px_um)
     tr = truth.assign(visible=_visible(truth))
-    j = est.merge(tr, on=["cell_id", "t", "locus_id"], how="inner", suffixes=("", "_true"))
+    j = est.merge(tr, on=["cell_id", "t", "locus_id", "copy"], how="inner", suffixes=("", "_true"))
     j["err_xy_um"] = np.hypot(j.est_y_um - j.y_um, j.est_x_um - j.x_um)
     j["err_z_um"] = j.z_um - j.z_um_true
     j["err_um"] = np.sqrt(j.err_xy_um**2 + j.err_z_um**2)
-    err = j[["cell_id", "t", "locus_id", "err_um", "err_xy_um", "err_z_um", "visible"]]
+    err = j[["cell_id", "t", "locus_id", "copy", "err_um", "err_xy_um", "err_z_um", "visible"]]
     if err.empty:
         return err, {"n_detections": 0}
     ok = err[err.visible]
@@ -163,4 +194,4 @@ def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, 
                  "p95_error_um": float(ok.err_um.quantile(0.95)), "rms_xy_um": float(np.sqrt((ok.err_xy_um ** 2).mean())),
                  "rms_z_um": float(np.sqrt((ok.err_z_um ** 2).mean())), "median_z_um": float(ok.err_z_um.median()),
                  "frac_far": float((~near).mean()), "rms_error_near_um": float(np.sqrt((ok.err_um[near] ** 2).mean())) if near.any() else np.nan,
-                 **intensity_scores(j, j.err_um <= far_um)}
+                 **copy_scores(pos, truth), **intensity_scores(j, j.err_um <= far_um)}

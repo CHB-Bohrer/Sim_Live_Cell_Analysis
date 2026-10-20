@@ -33,14 +33,16 @@ SC("chromatin", "Page: Chromatin", shot({ shot: "pg_chrom", label: "🧬 Chromat
 
 /* ================================================================== 6 */
 T.chapter("6 · Finding the loci");
-SC("cells", "Page: Cells", shot({ shot: "pg_cells", label: "🔬 Cells" }), [
+SC("cells", "Page: Cells", shot({ sets: { main: "pg_cells", copies: "pg_cells_copies" }, label: "🔬 Cells" }), [
   ["Stage five cuts every cell out of the movie. Each cell becomes a fixed-size window that follows its centre, with the nucleus and one channel per locus. The Cells page shows them.", f("intro", "One small movie per cell")],
   ["First choose which identities to use: the true cell IDs from the simulation, or the tracker's. Running the same analysis on both is how tracking errors are carried into locus results.", f("ident", "True IDs or tracker IDs")],
   ["The summary table lists each cell's lifetime, gaps, border contact and nearest neighbour. Clean tracks are the ones to trust.", f("table", "Cell summary")],
   ["All cells at one frame shows every window side by side, and a player runs them together.", f(["playall", "allframe", "grid"], "All cells", { multi: true })],
   ["Then pick one cell to watch through time, with its located loci. White plus signs are what the analysis found, cyan circles are the truth, and red crosses are where each colour is really drawn.", f(["onecell", "cellsel"], "One cell through time", { multi: true })],
-  ["The plots below compare the estimated positions and the distance between the two loci with the truth, in dotted lines. The orange line marks the frame you are looking at.", f("traces", "Estimated vs true")],
-], ["Open Cells and choose True cell IDs", "Pick cell 1 and play its movie", "Compare the estimated distance with the dotted truth"]);
+  ["Some cells now carry two promoter-enhancer pairs. Each found spot is labelled P for promoter or E for enhancer, plus its copy number, and pink squares mark stray spots, the decoys the finder has to ignore.", (s) => { s.use("copies"); s.focus("legend", "P0, E0, P1, E1 and stray spots"); }],
+  ["The figure underneath is built to answer three questions. Top left: how far is every found spot from its true locus, frame by frame? A pink square there means the spot found was a stray, a diamond means it was the other copy.", (s) => { s.use("copies"); s.focus("fig", "Errors, offsets, distances"); }],
+  ["Top right: every found position minus the true one. The width of the cloud is the precision, and its centre is the bias, for example an uncorrected colour shift. Below: the promoter-enhancer distance of each copy, found against true.", (s) => { s.use("copies"); s.focus("fig", "Precision, bias and each copy's distance"); }],
+], ["Open Cells and choose True cell IDs", "Pick a cell with 2 promoter-enhancer copies", "Find the frames with a pink square in the error plot, and look at them in the image above"]);
 
 SC("trellis", "How a spot is found", (st) => A.trellis(st), [
   ["Stage six finds each locus in each cell, following Chen, Levo, Zoller and Gregor, two thousand twenty-five. In every frame we have a set of bright blobs, and one of them is the locus.", (a) => a.step(0)],
@@ -50,15 +52,26 @@ SC("trellis", "How a spot is found", (st) => A.trellis(st), [
   ["If a frame has no candidate at all, the path can bridge the gap, paying a miss cost, and even pick the spot up again after a long gap. Then a Gaussian fit refines the position.", (a) => a.step(4)],
 ]);
 
-SC("spots", "Page: Spot finding", shot({ shot: "pg_spots", label: "🔎 Spot finding" }), [
+SC("copies", "Two copies and stray spots", (st) => A.copies(st), [
+  ["Real cells are rarely as tidy as one promoter and one enhancer. A diploid cell can show both alleles, so the simulation can give a cell two promoter-enhancer pairs. Half the cells get two in the example settings.", (a) => a.phase(0)],
+  ["Each copy has its own chromatin trajectory, from its own polymer simulation, and its own promoter, so each one bursts on its own, driven by its own promoter-enhancer distance. A copy can even get different rates, here twice as many bursts.", (a) => a.phase(1)],
+  ["And every nucleus holds stray spots: probe or M S two aggregates that appear somewhere, wander, and vanish after about a minute. They are as bright as a locus, so a finder that takes the brightest spot will pick them.", (a) => a.phase(2)],
+  ["The one-path finder follows one spot per colour, so it can never see two copies. The multi-copy linker extracts several paths per colour, each through the candidates the earlier ones left.", (a) => a.phase(3)],
+  ["A path is kept only if it looks like a locus: there in most frames, about as bright as the best path, and as slow. Paths through noise and strays fail that test. Then each promoter path is paired with an enhancer path that stays within one and a half microns of it.", (a) => a.phase(4)],
+  ["When two copies come close, two paths can swap identities. Exchanging their tails wherever that makes the steps shorter undoes it, and a pair prior anchors each promoter to its own enhancer. In the sweep over many movies, the copy number was right in every cell.", (a) => a.phase(5)],
+]);
+
+SC("spots", "Page: Spot finding", shot({ sets: { main: "pg_spots", copies: "pg_spots_copies" }, label: "🔎 Spot finding" }), [
   ["The Spot finding page shows how stage six works. It has four parts: the method, every step on one cell, the results for this run, and a comparison of methods.", f("intro", "How loci are found")],
   ["Part one lays out the method next to the paper, step by step: one stack per nucleus, the median filter, the difference of Gaussians, the Viterbi trajectory, the position, and the intensity measured in an ellipsoid minus the ring around it.", f(["method", "table"], "Method and where it comes from", { multi: true })],
   ["Part two shows every intermediate image. Choose a cell, a colour, which is the promoter, the enhancer or the M S two spot, and a frame, or jump to a problem frame. Change the settings, press Apply, and watch what each step does.", f(["step2", "cellsel", "spotsel"], "Every step on one cell", { multi: true })],
-  ["Part three is the result for this run: the error of every frame against the truth, with detection rates, and the M S two trace at the tracked promoter.", f("s3", "This run's result")],
+  ["In a run with two copies, part two B shows what the linker did in the chosen cell. Every row is one path it tried, every tick a frame, coloured by what that spot really was: copy zero, copy one, a stray, or noise. A good result is one solid colour per kept path.", (s) => { s.use("copies"); s.focus("s2b", "What the linker did"); }],
+  ["Part three is the result for this run: the error of every frame against the truth, with detection rates, the share of picks on a stray spot or on the other copy, and the M S two trace at the tracked promoter.", f("s3", "This run's result")],
   ["Three B corrects photobleaching, with the background removed first. Three C estimates uneven illumination and per-cell bleaching from the movie itself, with no flat-field image, and keeps the correction only if it predicts held-out cells better.", f(["s3b", "s3c"], "Bleaching and illumination", { multi: true })],
   ["Three D asks how bright an M S two spot must be before transcription is measurable at all, a sweep over many movies. The answer depends on the brightness of one polymerase compared with one nuclear pixel, so it must be measured on real data.", f("s3d", "How bright must the MS2 spot be?")],
+  ["Three E is the sweep for copies and stray spots: the same movies analysed four ways, with more and more strays. One path per colour misses the second copy and jumps between copies; the multi-copy linker with the pair prior keeps them apart.", (s) => { s.use("copies"); s.focus("s3e", "Copies and strays over many movies"); }],
   ["Part four compares methods on this whole run, for example the original brightest pixel against the new spot finder, so you can see what an analysis choice costs.", f("s4", "Compare methods")],
-], ["Open Spot finding and read part 1", "In part 2 choose cell 1, the promoter, and drag the frame", "Press Compare methods in part 4"]);
+], ["Open Spot finding and read part 1", "In part 2 choose a cell with two copies, the promoter, and look at part 2b", "Read part 3e: which analysis keeps the copies apart?"]);
 
 /* ================================================================== 7 */
 T.chapter("7 · Transcription biology");

@@ -162,20 +162,19 @@ def _ground_truth_numbers(im, run: Path, t: int, cell: int | None, truth_img, tx
     if cell is None or truth_img is None:
         return
     rows = []
-    for k in range(len([c for c in im.channels if c.startswith("locus")])):
-        q = truth_img[(truth_img.cell_id == cell) & (truth_img.t == t) & (truth_img.locus_id == k)]
-        if q.empty:
-            continue
-        q = q.iloc[0]
-        row = {"locus": f"locus {k}", "true x (µm)": round(q.x_um, 3), "true y (µm)": round(q.y_um, 3)}
-        if "z_um" in q:
+    qs = truth_img[(truth_img.cell_id == cell) & (truth_img.t == t)]
+    for q in qs.sort_values([c for c in ("copy", "locus_id") if c in qs]).itertuples():
+        k, cp = int(q.locus_id), int(getattr(q, "copy", 0))
+        row = {"locus": f"{'promoter' if k == 0 else 'enhancer' if k == 1 else f'locus {k}'}, copy {cp}", "true x (µm)": round(q.x_um, 3),
+               "true y (µm)": round(q.y_um, 3)}
+        if hasattr(q, "z_um"):
             row["true z (µm)"] = round(q.z_um, 3)
-        if "x_drawn_um" in q:
+        if hasattr(q, "x_drawn_um"):
             row["drawn offset from truth, lateral (nm)"] = round(np.hypot(q.x_drawn_um - q.x_um, q.y_drawn_um - q.y_um) * 1000, 0)
-        if "z_drawn_um" in q:
+        if hasattr(q, "z_drawn_um"):
             row["drawn offset from truth, axial (nm)"] = round((q.z_drawn_um - q.z_um) * 1000, 0)
         if occ is not None:
-            o = occ[(occ.cell_id == cell) & (occ.t == t) & (occ.locus_id == k)]
+            o = occ[(occ.cell_id == cell) & (occ.t == t) & (occ.locus_id == k) & ((occ["copy"] == cp) if "copy" in occ else True)]
             if len(o):
                 row["probes attached (mean over exposure)"] = round(float(o.mean_attached.iloc[0]), 1)
         rows.append(row)
@@ -183,12 +182,17 @@ def _ground_truth_numbers(im, run: Path, t: int, cell: int | None, truth_img, tx
         st.markdown(f"**Ground truth for cell {cell} in this frame** (positions in image coordinates, i.e. after stage drift)")
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     if tx is not None:
-        q = tx[(tx.cell_id == cell) & (tx.t == t)]
-        if len(q):
-            q = q.iloc[0]
-            st.caption(f"Transcription truth: promoter {'ON' if q.promoter_on else 'OFF'}; promoter-enhancer distance {q.d_nm:.0f} nm "
+        for q in tx[(tx.cell_id == cell) & (tx.t == t)].itertuples():
+            cp = int(getattr(q, "copy", 0))
+            st.caption(f"Transcription truth, copy {cp}: promoter {'ON' if q.promoter_on else 'OFF'}; promoter-enhancer distance {q.d_nm:.0f} nm "
                        f"({'in contact' if q.in_contact else 'not in contact'}); {q.n_polII:.0f} Pol II on the gene; MS2 signal "
-                       f"{q.ms2_loops:.1f} loops → this is the bright spot in the nuclear channel at the promoter.")
+                       f"{q.ms2_loops:.1f} loops" + (" → the bright spot in the nuclear channel at this promoter."
+                                                     if getattr(q, "ms2_labelled", True) else " (this copy carries no MS2 cassette: nothing is drawn)."))
+    sp = _csv(Path(st.session_state.get("_run_path", "")), "stage3_microscopy", "stray_spots.csv")
+    if sp is not None:
+        n = sp[(sp.cell_id == cell) & (sp.t == t)].channel.value_counts()
+        if len(n):
+            st.caption("Stray spots in this cell now (decoys the spot finder must ignore): " + ", ".join(f"{v} in {CH_SHORT.get(c, c)}" for c, v in n.items()) + ".")
 
 
 def _part_view(R, run: Path, im, cfg):
@@ -222,17 +226,21 @@ def _part_view(R, run: Path, im, cfg):
     elif len(cells_now):
         cell = int(cells_now.cell_id.iloc[0])
     lcs = [x for x in im.channels if x.startswith("locus")]
-    lk = 0
+    lk, lcopy = 0, 0
+    truth_img = _csv(run, "stage3_microscopy", "loci_truth_image.csv")
     if mode == "locus" and lcs:
         lk = c[2].radio("Which locus", list(range(len(lcs))), horizontal=True, key="img_lk",
                         format_func=lambda k: f"locus {k}" + (" (promoter)" if k == 0 else " (enhancer)" if k == 1 else ""))
-    truth_img = _csv(run, "stage3_microscopy", "loci_truth_image.csv")
+        cps = sorted(truth_img[truth_img.cell_id == cell]["copy"].unique()) if truth_img is not None and "copy" in truth_img and cell is not None else [0]
+        if len(cps) > 1:
+            lcopy = st.radio("Which copy of the promoter-enhancer pair", cps, horizontal=True, key="img_lcopy")
     tx, occ = _csv(run, "stage1_chromatin", "transcription.csv"), _csv(run, "stage1_chromatin", "probe_occupancy.csv")
-    show_over = st.multiselect("Draw the ground truth on the images", ["masks", "ids", "loci", "ms2", "fid"],
-                               default=["masks", "ids", "loci", "ms2", "fid"], key="img_over",
+    show_over = st.multiselect("Draw the ground truth on the images", ["masks", "ids", "loci", "ms2", "stray", "fid"],
+                               default=["masks", "ids", "loci", "ms2", "stray", "fid"], key="img_over",
                                format_func={"masks": "true nucleus outlines", "ids": "true cell ID numbers",
-                                            "loci": "true locus positions (○ truth, × where it is drawn)",
-                                            "ms2": "promoter with an MS2 spot (◇)", "fid": "fiducial beads on the slide (□)"}.get)
+                                            "loci": "true locus positions (○ truth, × where it is drawn; P/E + copy number)",
+                                            "ms2": "promoter with an MS2 spot (◇)", "stray": "stray spots, decoys (pink □)",
+                                            "fid": "fiducial beads on the slide (magenta □)"}.get)
     c = st.columns(2)
     ideal = c[0].checkbox("Also show the error-free version", True, key="img_ideal",
                           help="The same frame rendered with every source of image error switched off.")
@@ -241,7 +249,8 @@ def _part_view(R, run: Path, im, cfg):
     cell_row = cells_now[cells_now.cell_id == cell].iloc[0] if cell is not None and (cells_now.cell_id == cell).any() else None
     spot_xy = None
     if truth_img is not None and mode == "locus" and cell is not None:
-        q = truth_img[(truth_img.cell_id == cell) & (truth_img.t == t) & (truth_img.locus_id == lk)]
+        q = truth_img[(truth_img.cell_id == cell) & (truth_img.t == t) & (truth_img.locus_id == lk)
+                      & ((truth_img["copy"] == lcopy) if "copy" in truth_img else True)]
         if len(q):
             q = q.iloc[0]
             spot_xy = (q.get("y_drawn_um", q.y_um) / im.px_um, q.get("x_drawn_um", q.x_um) / im.px_um)
@@ -283,7 +292,8 @@ def _part_view(R, run: Path, im, cfg):
     plt.close(fig)
     st.caption("Grey scale: black = low, white = bright (same scale for the recorded and error-free panel of a channel). "
                "Cyan ○ = where the locus truly is in the image; red × = where that colour's spot is actually drawn (differs by the "
-               "chromatic shift); yellow outline = true nucleus mask; ◇ = promoter with an active MS2 signal.")
+               "chromatic shift), labelled P (promoter) / E (enhancer) + copy number when a cell has several copies; yellow outline = true nucleus "
+               "mask; ◇ = promoter with an active MS2 signal; pink □ = a stray spot of that colour (a decoy: probe or MCP aggregate).")
     if (y1 - y0, x1 - x0) != tuple(im.shape):
         st.caption(f"Zoomed region: x {x0}–{x1} px, y {y0}–{y1} px ({(x1 - x0) * im.px_um:.1f} × {(y1 - y0) * im.px_um:.1f} µm).")
     # does the re-rendered frame equal the saved TIFF?
@@ -320,9 +330,16 @@ def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now
             for q in pd.read_csv(fp).itertuples():
                 if x0 <= q.x_um / im.px_um < x1 and y0 <= q.y_um / im.px_um < y1:
                     ax.plot(q.x_um / im.px_um, q.y_um / im.px_um, "s", mfc="none", mec="magenta", ms=13, mew=1.5)
+    if "stray" in show_over:
+        sp = _csv(Path(st.session_state.get("_run_path", "")), "stage3_microscopy", "stray_spots.csv")
+        if sp is not None:
+            for q in sp[(sp.t == t) & (sp.channel == ch)].itertuples():
+                if x0 <= q.x_drawn_um / im.px_um < x1 and y0 <= q.y_drawn_um / im.px_um < y1:
+                    ax.plot(q.x_drawn_um / im.px_um, q.y_drawn_um / im.px_um, "s", mfc="none", mec="#f0abfc", ms=11, mew=1.4)
     if truth_img is None:
         return
     tt = truth_img[truth_img.t == t]
+    multi = "copy" in tt and tt["copy"].max() > 0
     if "loci" in show_over:
         for q in tt.itertuples():
             if ch.startswith("locus") and q.locus_id != int(ch[5:]):
@@ -336,10 +353,14 @@ def _overlay(ax, lab, truth_img, tx, im, t, ch, cell, show_over, bbox, cells_now
                     ax.annotate(f"z {dz:+.1f} µm", (q.x_um / im.px_um, q.y_um / im.px_um), color="cyan", fontsize=8, xytext=(8, 8), textcoords="offset points")
             if hasattr(q, "x_drawn_um") and ch.startswith("locus"):
                 ax.plot(q.x_drawn_um / im.px_um, q.y_drawn_um / im.px_um, "x", color="red", ms=9, mew=1.6, alpha=alpha)
+            if multi and ch.startswith("locus") and x0 <= q.x_um / im.px_um < x1 and y0 <= q.y_um / im.px_um < y1:
+                ax.annotate(f"{'P' if q.locus_id == 0 else 'E'}{int(q.copy)}", (q.x_um / im.px_um, q.y_um / im.px_um), color="cyan", fontsize=9,
+                            xytext=(9, -9), textcoords="offset points", weight="bold")
     if "ms2" in show_over and ch == "nucleus" and tx is not None:
-        on = tx[(tx.t == t) & (tx.ms2_loops > 0.5)]
+        on = tx[(tx.t == t) & (tx.ms2_loops > 0.5) & (tx.ms2_labelled.astype(bool) if "ms2_labelled" in tx else True)]
         for q in tt[tt.locus_id == 0].itertuples():
-            if ((on.cell_id == q.cell_id)).any() and x0 <= q.x_um / im.px_um < x1 and y0 <= q.y_um / im.px_um < y1:
+            same = (on.cell_id == q.cell_id) & ((on["copy"] == getattr(q, "copy", 0)) if "copy" in on else True)
+            if same.any() and x0 <= q.x_um / im.px_um < x1 and y0 <= q.y_um / im.px_um < y1:
                 ax.plot(q.x_um / im.px_um, q.y_um / im.px_um, "D", mfc="none", mec="magenta", ms=14, mew=1.8)
     ax.set_xlim(x0 - .5, x1 - .5); ax.set_ylim(y1 - .5, y0 - .5)
 

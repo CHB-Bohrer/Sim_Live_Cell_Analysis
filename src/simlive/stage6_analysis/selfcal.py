@@ -92,8 +92,9 @@ def hot_pixel_map(bg: np.ndarray, se: np.ndarray | None = None, z: float = 6.0, 
 def chromatic_shift_from_positions(pos: pd.DataFrame, n_boot: int = 400, seed: int = 0, min_cells: int = 30) -> dict:
     """Mean enhancer - promoter vector (lab px) over all cells and frames where both were found, its bootstrap standard error over cells
     (frames of one cell are correlated, cells are not) and whether to apply it: at least min_cells cells and > 3 SE in either axis."""
-    a = pos[pos.locus_id == 0].set_index(["cell_id", "t"])[["lab_y_px", "lab_x_px"]]
-    b = pos[pos.locus_id == 1].set_index(["cell_id", "t"])[["lab_y_px", "lab_x_px"]]
+    k = ["cell_id", "t"] + (["copy"] if "copy" in pos.columns else [])          # promoter and enhancer of the same copy
+    a = pos[pos.locus_id == 0].set_index(k)[["lab_y_px", "lab_x_px"]]
+    b = pos[pos.locus_id == 1].set_index(k)[["lab_y_px", "lab_x_px"]]
     d = (b - a).dropna().reset_index()
     if len(d) < 20 or d.cell_id.nunique() < 3:
         return {"shift_px": [0.0, 0.0], "se_px": [np.nan, np.nan], "significant": False, "n_frames": int(len(d)), "n_cells": int(d.cell_id.nunique())}

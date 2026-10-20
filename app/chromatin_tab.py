@@ -138,12 +138,26 @@ def render(st):
     b_kb = min(N - 1, a_kb + sep)
     ia, ib = int(np.argmin(np.abs(beads - a_kb))), int(np.argmin(np.abs(beads - b_kb)))
     dist = np.linalg.norm(np.asarray(traj[:, ia]) - np.asarray(traj[:, ib]), axis=1)
+    try:                                   # the assumed calibration (configs/calibration/default.json): polymer units -> nm, blocks -> s
+        from simlive.calibration.polymer import default_scale
+
+        nm_u, s_blk, _ = default_scale()
+    except Exception:  # noqa: BLE001 - no calibration file: polymer units only
+        nm_u, s_blk = None, None
     fig, ax = plt.subplots(1, 2, figsize=(15, 4))
-    ax[0].plot(dist, lw=1)
+    ax[0].plot(dist, lw=0.8, color="#2dd4bf")
     ax[0].set_xlabel("block"); ax[0].set_ylabel("distance (monomer diameters)")
-    ax[0].set_title(f"Loci at {beads[ia]} kb and {beads[ib]} kb (separation {abs(beads[ib] - beads[ia])} kb)")
-    ax[1].hist(dist, bins=40, color="tab:blue")
-    ax[1].set_xlabel("distance (monomer diameters)"); ax[1].set_title(f"distribution: mean {dist.mean():.1f}, sd {dist.std():.1f}")
+    ax[0].set_title(f"Loci at {beads[ia]} kb and {beads[ib]} kb ({abs(beads[ib] - beads[ia])} kb apart)")
+    ax[1].hist(dist, bins=40, color="#60a5fa", alpha=0.8)
+    ax[1].set_xlabel("distance (monomer diameters)")
+    ax[1].set_title(f"mean {dist.mean():.1f}, sd {dist.std():.1f} monomer diameters"
+                    + (f" = {dist.mean() * nm_u / 1000:.2f} ± {dist.std() * nm_u / 1000:.2f} µm" if nm_u else ""))
+    if nm_u:                               # the same axes in physical units (assumed calibration)
+        sec = ax[0].secondary_yaxis("right", functions=(lambda v: v * nm_u / 1000, lambda v: v * 1000 / nm_u))
+        sec.set_ylabel("µm (assumed calibration)")
+        top = ax[0].secondary_xaxis("top", functions=(lambda b: b * s_blk / 60, lambda m: m * 60 / s_blk))
+        top.set_xlabel("minutes")
+        ax[1].secondary_xaxis("top", functions=(lambda v: v * nm_u / 1000, lambda v: v * 1000 / nm_u)).set_xlabel("µm")
     fig.tight_layout()
     st.pyplot(fig, width="stretch")
     plt.close(fig)
@@ -213,8 +227,8 @@ def _loop_extruders(st, d: Path, N: int) -> None:
             ax.text(t1, p, " boundary", va="center", ha="left", fontsize=8, color="#e5e7eb", clip_on=False)
     ax.set_xlim(t0, t1); ax.set_ylim(g0, g0 + width)
     ax.set_xlabel("block"); ax.set_ylabel("genomic position (kb)")
-    shown = f"{len(traces)} of {n_all} factors (the busiest; narrow the window or time to see all)" if n_all > len(traces) else f"{n_all} factors"
-    ax.set_title(f"{shown} with a loop in {g0:,}-{g0 + width:,} kb, blocks {t0:,}-{t1:,}: each band is one loop between its two legs")
+    shown = f"{len(traces)} of {n_all} loop-extruding factors (the busiest)" if n_all > len(traces) else f"{n_all} loop-extruding factors"
+    ax.set_title(f"{shown}: each band is one loop between its two legs")
     st.pyplot(fig, width="stretch")
     plt.close(fig)
     st.caption("A band widens as the factor extrudes (both legs move apart), stops growing at a boundary (dashed line) and ends where the factor unbinds "

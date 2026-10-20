@@ -232,14 +232,15 @@ def render(run_path: Path | None = None) -> None:
     ax[0].set_title("How strongly the enhancer acts (blue = how often)", fontsize=11)
     tt = np.arange(len(d)) * blk / 60.0
     ax[1].plot(tt, d, color=C["dist"], lw=0.8)
-    if p0.coupling == "contact":
-        ax[1].axhline(p0.d_contact_nm, color=C["contact"], ls="--", lw=1.2)
-        shade_contact(ax[1], tt, d <= p0.d_contact_nm)
-    elif p0.coupling != "none":
-        shade_contact(ax[1], tt, T.contact_fraction(p0, d) > 0.5)
-    ax[1].set_xlabel("time (min)"); ax[1].set_ylabel("distance (nm)")
-    ax[1].set_title("Teal = moments counted as 'in contact' (coupling above one half)" if p0.coupling != "none" else
-                    "No distance dependence: the rate is raised by a constant", fontsize=11)
+    inc = (d <= p0.d_contact_nm) if p0.coupling == "contact" else (T.contact_fraction(p0, d) > 0.5)
+    thr = p0.d_contact_nm if p0.coupling == "contact" else (float(d[inc].max()) if inc.any() else float(np.percentile(d, 5)))
+    if p0.coupling != "none":
+        ax[1].axhline(thr, color=C["contact"], ls="--", lw=1.2)
+        shade_contact(ax[1], tt, inc)
+        ax[1].set_ylim(0, max(4 * thr, float(np.percentile(d, 25))))      # zoom on the low end: contact is where the curve dips
+    ax[1].set_xlabel("time (min)"); ax[1].set_ylabel("distance (nm), low end")
+    ax[1].set_title(f"In contact {100 * inc.mean():.1f}% of the time (teal; dashed = threshold); zoomed on short distances"
+                    if p0.coupling != "none" else "No distance dependence: the rate is raised by a constant", fontsize=11)
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
     # 4 promoter
     _step(4, "Promoter switching (OFF ⇄ ON)", "Mean times, not rates, so they are easy to relate to published bursts. The enhancer-far "
@@ -292,7 +293,12 @@ def render(run_path: Path | None = None) -> None:
     ax[1].plot(np.arange(len(p_start)) * blk / 60, p_start, color=C["theory"], ls="--", lw=1.2, label="probability ON (exact, averaged over many cells)")
     shade_contact(ax[1], t_min, contact)
     ax[1].set_ylabel("promoter ON"); ax[1].set_xlabel("time (min)"); ax[1].set_xlim(0, horizon); ax[1].legend(fontsize=11, loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=2)
-    ax[0].set_title("Step 4: the promoter switches ON more often while the enhancer is close (teal shading)")
+    blk_contact = contact[: len(pmean)]
+    if blk_contact.any() and (~blk_contact).any():
+        ax[0].set_title(f"Step 4: P(ON) {100 * pmean[blk_contact].mean():.1f}% while in contact (teal) vs {100 * pmean[~blk_contact].mean():.1f}% far "
+                        f"(exact, this distance history; contact {100 * blk_contact.mean():.1f}% of the time)")
+    else:
+        ax[0].set_title("Step 4: the promoter switches ON more often while the enhancer is close (teal shading; no contact in this trace)")
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
 
     # 5 polymerases
@@ -310,10 +316,11 @@ def render(run_path: Path | None = None) -> None:
         if t1 < start or t0 > start + span:
             continue
         ax[0].plot([t0, t1, r.release_s / 60], [0, L_kb, L_kb], color=C["theory"], lw=1.1, alpha=0.8)
-    ax[0].set_ylim(0, L_kb * 1.04); ax[0].set_ylabel("position along gene (kb)")
+    ax[0].set_ylim(0, L_kb * 1.04); ax[0].set_ylabel("kb along gene")
     ax[0].set_title(f"Step 5: each line is one Pol II ({len(ev)} in this cell). Slope = speed; flat top = waiting before release")
     ax[1].step(cell.frames.t_s / 60, cell.frames.n_polII, where="post", color=C["theory"], lw=1.2)
-    ax[1].set_ylabel("Pol II on gene"); ax[1].set_xlabel("time (min)"); ax[1].set_xlim(start, start + span)
+    ax[1].set_ylabel("Pol II"); ax[1].set_xlabel("time (min)"); ax[1].set_xlim(start, start + span)
+    fig.align_ylabels(ax)
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
     style.stat_grid(st, [("Pol II transit time", f"{p.t_gene_s / 60:.1f} min", "from initiation to the end of the gene"),
                          ("MS2 ramp-up time", f"{p.t_cassette_s:.0f} s", "while the cassette is being transcribed"),
@@ -360,7 +367,10 @@ def render(run_path: Path | None = None) -> None:
                "(placeholder 0.8). The 🔎 Spot finding page (part 3d) shows how well transcription can be measured as a function of R; "
                "measure R on a real movie as the background-subtracted spot photons per Pol II over the nuclear pixel value (offset removed).")
     nt = 8
-    first = int(st.slider("First frame shown", 0, max(0, n_frames - nt), 0, key="tx_f0"))
+    on_frames = np.nonzero(fr.ms2_loops.to_numpy() > 0.5)[0]
+    f0 = int(min(max(0, (on_frames[0] if len(on_frames) else 0) - 1), max(0, n_frames - nt)))
+    first = int(st.slider("First frame shown", 0, max(0, n_frames - nt), f0, key="tx_f0",
+                          help="Starts just before this cell's first burst."))
     idx = np.arange(first, min(first + nt, n_frames))
     rng = np.random.default_rng(seed)
     fig, axes = plt.subplots(1, nt, figsize=(14, 2.3))
@@ -457,11 +467,30 @@ def _run_view(run_path):
         return
     st.markdown("### In the selected run")
     tx = pd.read_csv(f)
-    cid = st.selectbox("Cell", sorted(tx.cell_id.unique()), key="tx_cell")
+    tx = tx if "copy" in tx else tx.assign(copy=0)
+    n_cp = tx.groupby("cell_id")["copy"].nunique()
+    cells = sorted(tx.cell_id.unique())
+    two = [c for c in cells if n_cp[c] > 1]
+    busy = tx.groupby("cell_id").ms2_loops.apply(lambda v: float((v > 0.5).mean()))
+    pick = max(cells, key=lambda c: (n_cp[c] > 1, busy.get(c, 0.0)))          # several copies and the most bursting first
+    cid = st.selectbox("Cell", cells, index=cells.index(pick), key="tx_cell",
+                       format_func=lambda c: f"cell {c}" + (f" ({n_cp[c]} promoter-enhancer copies)" if n_cp[c] > 1 else ""))
     g = tx[tx.cell_id == cid]
-    fig, ax = plt.subplots(3, 1, figsize=(14, 5), sharex=True)
-    ax[0].plot(g.t_s / 60, g.d_nm, color=C["dist"]); ax[0].set_ylabel("distance (nm)")
-    shade_contact(ax[0], (g.t_s / 60).to_numpy(), g.in_contact.to_numpy().astype(bool))
-    ax[1].step(g.t_s / 60, g.promoter_on, where="mid", color=C["on"]); ax[1].set_ylabel("promoter ON")
-    ax[2].plot(g.t_s / 60, g.ms2_loops, color=C["ms2"], marker="o", ms=3); ax[2].set_ylabel("MS2 (loops)"); ax[2].set_xlabel("time (min)")
+    cols = ["#e5e7eb", "#2dd4bf", "#f59e0b", "#a78bfa"]
+    fig, ax = plt.subplots(3, 1, figsize=(14, 5.6), sharex=True)
+    for c, q in g.groupby("copy"):
+        q = q.sort_values("t_s")
+        lab = f"copy {c}" + ("" if q.get("ms2_labelled", pd.Series([True])).iloc[0] else " (no MS2 cassette)")
+        ax[0].plot(q.t_s / 60, q.d_nm, color=cols[int(c) % 4], lw=1.2, label=lab)
+        ax[1].step(q.t_s / 60, q.promoter_on + 0.06 * c, where="mid", color=cols[int(c) % 4], lw=1.4)
+        ax[2].plot(q.t_s / 60, q.ms2_loops, color=cols[int(c) % 4], marker="o", ms=2.5, lw=1.0)
+    if g["copy"].nunique() == 1:
+        shade_contact(ax[0], (g.t_s / 60).to_numpy(), g.in_contact.to_numpy().astype(bool))
+    ax[0].set_ylabel("distance (nm)"); ax[1].set_ylabel("promoter ON"); ax[1].set_yticks([0, 1]); ax[1].set_yticklabels(["OFF", "ON"])
+    ax[2].set_ylabel("MS2 (loops)"); ax[2].set_xlabel("time (min)")
+    ax[0].legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=4, fontsize=10)
     fig.tight_layout(); st.pyplot(fig, width="stretch"); plt.close(fig)
+    if g["copy"].nunique() > 1:
+        st.caption("Each copy has its own chromatin trajectory, so its own promoter-enhancer distance, and its own promoter: their bursts are "
+                   "independent (and follow their own rates if loci.copies.transcription gives per-copy overrides). The ON lines are offset "
+                   "slightly so they do not hide each other.")

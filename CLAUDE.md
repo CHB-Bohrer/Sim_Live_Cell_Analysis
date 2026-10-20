@@ -30,6 +30,28 @@ branch, not main": that was a misreading of the user's intent.)
 - Still needed from the user: real frame interval, typical cell speed, cell density, whether cells divide, and ideally
   a real movie with some tracked cells to check how well the simulation matches reality.
 
+## Session 2026-10-19 (UNFINISHED: read first; user asked for several E-P copies per cell, stray spots, informative graphs, fixes, tutorial update)
+- BUILT: `loci.copies` (stage1_chromatin/copies.py; toy + library loci, probes, transcription per copy with per-copy overrides, `ms2: all|first`;
+  copy 0 = exactly the old random numbers, verified byte-identical outputs vs commit 06e4070 with copies/strays off); new error source `stray_spots`
+  (render.py `Imager.stray_spots`, truth `stage3_microscopy/stray_spots.csv`, `_LATER` index); multi-copy linker `stage6_analysis/multicopy.py`
+  (paths per colour, locus test coverage/SNR/D, `untangle`, `assign_pairs`, pair prior `gate|gauss|none`); copy-aware scores (`localize.match_copies`,
+  `frac_on_stray`, `frac_on_other_copy`, copy-number scores), MS2 traces per copy (`trace_id`), 3D path, deconvolution keyed by trace_id.
+  Tests: tests/test_copies_strays.py (14). Configs loci_demo/loci_library have copies + strays + max_copies 2 + pair_prior gate.
+- FINDINGS (one showcase run loci_library_seed12_87a16d, pair_prior gauss): copies right 10/10, found 98.6%, wrong 0.6% (0.3% on strays), 0% other copy.
+  Flat gate cannot resolve copies closer than ~1 um (3-7% other-copy picks on seed 51); gauss prior fixed it (bias 3 nm there). DECIDE default
+  (configs still say gate) from `$SIMLIVE_DATA/sweeps/copies_strays/results.csv` (scripts/sweep_copies_strays.py, was ~14/25 movies when stopped; resumable).
+- Fixed: provenance cp1252 bug (io/runs.py), skimage max_size, bead tracking spikes (fiducials.consistent_beads), deconvolution noise model
+  (sigma_b collapsed to floor -> phantom Pol II; now measured on low-signal bins); optional per-trace `baseline="auto"` (10th pct) exists but default
+  "none": its effect on the dense gene run (loci_demo_seed8_f5c88d) was being measured (_v4 files) when stopped. NOT re-verified: full pipeline after the
+  noise-model change on dense genes.
+- Dashboard: Cells (P/E+copy labels, strays, new error/offset/per-copy distance figure), Spot finding (copy selector, part 2b linker paths, 3e sweep,
+  nm histogram), Images (strays, copy labels), MS2 (per trace_id), Transcription (contact zoom, numbers in step 4, tiles at first burst, run view per copy),
+  Trajectories (crowding vs speed panels), Scans (numeric x, no lines between categories), Calibration, Probes, Chromatin, Stage fixes; sidebar controls.
+  Figures audited with an AppTest capture script (kept in the session scratchpad, not the repo). Not yet looked at in a real browser.
+- Tutorial: new scene `copies` (A.copies in anims.js, untested: no node here), Cells/Spots/Trajectories/sidebar scenes updated, capture_shots.py has
+  RUN_E shots `pg_cells_copies`, `pg_spots_copies`. NOT DONE: re-capture (dashboard on 8502 + venv C:\Users\cbohr\shotenv_tmp\v), build_data.py
+  (check its hand-set OVERRIDES), test the tutorial with Playwright, MP4 re-render, docs (README, docs/SPOT_FINDING.md, ARCHITECTURE) updates.
+
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
   pip freeze, polychrom commit `11a870c` (installer is pinned to it), model-weight SHA-256s, a frozen conda env copy

@@ -155,22 +155,27 @@ def sample_trace(trace, frame_times_s, exposure_s: float) -> pd.DataFrame:
                          "mean_attached": mean})
 
 
-def simulate_probe_occupancy(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
-    """Probe counts at every locus of every cell at every frame (independent stochastic models per cell and locus).
+def simulate_probe_occupancy(cells: pd.DataFrame, cfg: dict, rng: np.random.Generator, n_copies: dict | None = None,
+                             rng_copies: np.random.Generator | None = None) -> pd.DataFrame:
+    """Probe counts at every locus of every cell at every frame (independent stochastic models per cell, copy and locus).
 
-    Columns: t, cell_id, locus_id, locus_name, n_free, n_bound, n_scanning, n_attached, mean_attached (average over the
+    Columns: t, cell_id, locus_id, copy, locus_name, n_free, n_bound, n_scanning, n_attached, mean_attached (average over the
     exposure; this is what scales the rendered locus brightness). Locus 0 = promoter, locus 1 = enhancer.
+    `n_copies` {cell_id: copies} (default 1 each): copy 0 uses `rng` exactly as a one-copy run, further copies draw from `rng_copies`.
     """
     dt, expo = float(cfg["acquisition"]["frame_interval_s"]), float(cfg["acquisition"]["exposure_s"])
     pars = params_from_config(cfg)
     rows = []
     for cid, g in cells.sort_values("t").groupby("cell_id"):
         ts = g.t.to_numpy()
-        for k, name in enumerate(LOCUS_NAMES[: int(cfg["loci"]["n_loci"])]):
-            tr = simulate_trace(pars[name], (ts.max() - ts.min() + 1) * dt + expo, int(rng.integers(2**31)))
-            df = sample_trace(tr, (ts - ts.min()) * dt, expo)
-            df.insert(0, "t", ts); df.insert(1, "cell_id", cid); df.insert(2, "locus_id", k); df.insert(3, "locus_name", name)
-            rows.append(df)
+        for copy in range((n_copies or {}).get(int(cid), 1)):
+            r = rng if copy == 0 else rng_copies
+            for k, name in enumerate(LOCUS_NAMES[: int(cfg["loci"]["n_loci"])]):
+                tr = simulate_trace(pars[name], (ts.max() - ts.min() + 1) * dt + expo, int(r.integers(2**31)))
+                df = sample_trace(tr, (ts - ts.min()) * dt, expo)
+                df.insert(0, "t", ts); df.insert(1, "cell_id", cid); df.insert(2, "locus_id", k); df.insert(3, "copy", copy)
+                df.insert(4, "locus_name", name)
+                rows.append(df)
     return pd.concat(rows, ignore_index=True)
 
 

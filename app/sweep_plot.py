@@ -25,8 +25,10 @@ def _order(values) -> list:
 def default_roles(df: pd.DataFrame, settings: list[str], x: str | None = None) -> dict:
     """{"x": setting, "lines": [settings], "panels": [settings], "held": {setting: value}} for the sweep `df` (`x` given: that setting is the x axis)."""
     n = {c: df[c].nunique(dropna=False) for c in settings}
+    numeric = {c: pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c]) for c in settings}
     ranked = sorted(settings, key=lambda c: (-n[c], settings.index(c)))
-    x = x or ranked[0]
+    # a numeric setting makes a real x axis; categories (methods, modes) are better as colours than as an x axis joined by lines
+    x = x or sorted(settings, key=lambda c: (not (numeric[c] and n[c] > 1), -n[c], settings.index(c)))[0]
     rest = [c for c in ranked if c != x]
     lines = [c for c in rest if n[c] <= MAX_LINES][:1]
     rest = [c for c in rest if c not in lines]
@@ -84,9 +86,12 @@ def draw(df: pd.DataFrame, xcol: str, ycol: str, ylabel: str, lines: list[str] |
                 continue
             col = colours[li % len(colours)]
             m = g.groupby(xcol)[ycol].agg(["mean", "std"]).reindex(xs)
-            xv = list(xs) if numeric else [xpos[v] for v in xs]
-            eb = ax.errorbar(xv, m["mean"], yerr=m["std"].fillna(0), marker="o", ms=5, capsize=3, lw=1.8, color=col)
-            ax.scatter([v if numeric else xpos[v] for v in g[xcol]], g[ycol], s=12, alpha=0.3, color=col, zorder=1)
+            # categories on x: points side by side, NOT joined by a line (there is no order between categories to draw)
+            off = 0.0 if numeric else (li - (len(line_keys) - 1) / 2) * min(0.12, 0.6 / max(len(line_keys), 1))
+            xv = list(xs) if numeric else [xpos[v] + off for v in xs]
+            eb = ax.errorbar(xv, m["mean"], yerr=m["std"].fillna(0), marker="o", ms=6 if not numeric else 5, capsize=3, lw=1.8, color=col,
+                             ls="-" if numeric else "none")
+            ax.scatter([v if numeric else xpos[v] + off for v in g[xcol]], g[ycol], s=12, alpha=0.3, color=col, zorder=1)
             handles[_label(lines, lk) or ycol] = eb.lines[0]
         for y, lab, ls in hlines or []:
             h = ax.axhline(y, color="#e5e7eb", lw=1.1, ls=ls)

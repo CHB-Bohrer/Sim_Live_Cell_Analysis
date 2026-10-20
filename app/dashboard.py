@@ -126,26 +126,66 @@ def error_frames(R, variant) -> list[int]:
     return sorted(set(V["events"].t) | set(m[m.pred_id == 0].t))
 
 
+def crowding_table(cells: pd.DataFrame) -> pd.DataFrame:
+    """Per cell and frame: edge-to-edge gap to the nearest other nucleus (centre distance minus both mean radii, µm) and the step since the
+    previous frame (µm)."""
+    rows = []
+    for t, g in cells.groupby("t"):
+        xy, r = g[["x_um", "y_um"]].to_numpy(), g.radius_um.to_numpy()
+        if len(g) > 1:
+            d = np.hypot(xy[:, None, 0] - xy[None, :, 0], xy[:, None, 1] - xy[None, :, 1]) - r[:, None] - r[None, :]
+            np.fill_diagonal(d, np.inf)
+            gap = d.min(axis=1)
+        else:
+            gap = np.full(len(g), np.inf)
+        rows.append(pd.DataFrame({"t": t, "cell_id": g.cell_id.to_numpy(), "gap_um": gap}))
+    out = pd.concat(rows, ignore_index=True)
+    c = cells.sort_values(["cell_id", "t"])
+    step = np.hypot(c.groupby("cell_id").x_um.diff(), c.groupby("cell_id").y_um.diff())
+    return out.merge(c.assign(step_um=step)[["t", "cell_id", "step_um"]], on=["t", "cell_id"])
+
+
 def trajectory_figure(R, variant):
     cfg = R["cfg"]
-    px = cfg["optics"]["pixel_size_nm"] / 1000.0
     V = R["v"][variant]
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, axes = plt.subplots(1, 3, figsize=(17, 6.2), gridspec_kw={"width_ratios": [1.25, 1, 1]})
+    ax = axes[0]
     c = R["cells"]
     for cid, g in c.groupby("cell_id"):
-        ax.plot(g.x_um, g.y_um, "-", color=color_for(cid), lw=2.2, alpha=0.9)
+        ax.plot(g.x_um, g.y_um, "-", color=color_for(cid), lw=1.4, alpha=0.85)
     paths = tracked_paths(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime, variant)
     for p, pts in paths.items():
-        col = color_for(V["dominant"][p]) if p in V["dominant"] else (0.5, 0.5, 0.5)
-        ax.plot(pts[:, 0], pts[:, 1], "--", color="#e5e7eb", lw=0.9, alpha=0.8)
+        ax.plot(pts[:, 0], pts[:, 1], "--", color="#e5e7eb", lw=0.7, alpha=0.7)
     ev = V["events"]
     for r in ev.itertuples():
         row = c[(c.cell_id == r.gt_id) & (c.t == r.t)]
         if len(row):
-            ax.plot(row.x_um.iloc[0], row.y_um.iloc[0], "rx", ms=11, mew=2.5)
+            ax.plot(row.x_um.iloc[0], row.y_um.iloc[0], "x", color="#f87171", ms=11, mew=2.5)
     ax.set_xlim(0, cfg["geometry"]["fov_um"][1]); ax.set_ylim(cfg["geometry"]["fov_um"][0], 0)
     ax.set_aspect("equal"); ax.set_xlabel("x (µm)"); ax.set_ylabel("y (µm)")
-    ax.set_title("True paths (colored) vs tracked paths (black dashed); red × = identity switch")
+    ax.set_title(f"True paths (colour per cell), tracked paths (white dashed); × = identity switch ({len(ev)})")
+    # why: crowding and speed at the switches vs everywhere
+    cr = crowding_table(c)
+    sw = cr.merge(ev[["t", "gt_id"]].rename(columns={"gt_id": "cell_id"}), on=["t", "cell_id"])
+    for a, col, lab, lim in ((axes[1], "gap_um", "gap to the nearest nucleus (µm)", None),
+                             (axes[2], "step_um", "moved since the previous frame (µm)", None)):
+        v_all = cr[col].replace([np.inf, -np.inf], np.nan).dropna()
+        v_sw = sw[col].replace([np.inf, -np.inf], np.nan).dropna()
+        if not len(v_all):
+            continue
+        bins = np.linspace(np.nanpercentile(v_all, 0.5), np.nanpercentile(v_all, 99.5), 30)
+        a.hist(v_all.clip(bins[0], bins[-1]), bins=bins, density=True, color="#60a5fa", alpha=0.55, label=f"all cell-frames ({len(v_all)})")
+        if len(v_sw):
+            a.hist(v_sw.clip(bins[0], bins[-1]), bins=bins, density=True, color="#f87171", alpha=0.75, histtype="stepfilled",
+                   label=f"frames with an identity switch ({len(v_sw)})")
+            a.axvline(float(v_sw.median()), color="#f87171", lw=1.5, ls="--")
+        a.axvline(float(v_all.median()), color="#60a5fa", lw=1.5, ls="--")
+        a.set_xlabel(lab)
+        a.set_ylabel("share (density)")
+        a.legend(fontsize=9, loc="upper right")
+    axes[1].set_title("Are switches where nuclei crowd? (dashed = medians)")
+    axes[2].set_title("…or where they move fast?")
+    fig.tight_layout()
     return fig
 
 
@@ -255,6 +295,18 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
         l_tx = st.checkbox("Model distance-dependent transcription: MS2 spots (settings from the ⚡ Transcription tab)", False, key="l_tx",
                            help="Adds bright MS2 spots at the promoter in the nuclear channel; the promoter turns ON more often when the "
                                 "enhancer is close. Works best with the saved chromatin library (real distances).")
+        st.markdown("**Promoter-enhancer copies and stray spots**")
+        st.caption("A cell can hold more than one promoter-enhancer pair (e.g. both alleles labelled), each with its own chromatin motion and its "
+                   "own bursting. Stray spots are short-lived decoys (probe or MCP aggregates) the spot finder must ignore.")
+        l_two = st.slider("Share of cells with two copies", 0.0, 1.0, 0.5, 0.1, key="l_two",
+                          help="0 = one promoter-enhancer pair in every cell (the original model); 1 = two pairs in every cell.")
+        l_kon2 = st.number_input("Copy 1 bursts this many times as often (× k_on)", 0.25, 10.0, 2.0, 0.25, key="l_kon2",
+                                 help="Separate bursting dynamics: the second copy's promoter switches ON this many times as often as the first. "
+                                      "1 = the same gene, independent bursts. Different values make a mix-up of the copies visible in the results.")
+        l_ms2all = st.checkbox("MS2 cassette on every copy", True, key="l_ms2all", help="Off = only copy 0 carries MS2 (the other copy still transcribes, unseen).")
+        l_stray = st.slider("Stray spots: new ones per nucleus per minute (each colour)", 0.0, 6.0, 1.0, 0.5, key="l_stray",
+                            help="Each lives about a minute and wanders inside the nucleus, so this is also roughly how many are present at once. 0 = none.")
+        l_stray_b = st.slider("Stray spot brightness (× a locus spot)", 0.1, 3.0, 0.7, 0.1, key="l_stray_b")
         st.markdown("**Spot finding (stage 6)**")
         st.caption("How each locus is found in each cell. The 🔎 Spot finding tab shows every step and compares methods.")
         l_meth = st.radio("Method", ["dog_viterbi", "brightest"], key="l_meth", horizontal=True,
@@ -263,6 +315,12 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
                                "the candidates over the whole movie (Chen et al. 2025, NSMB). brightest: the original placeholder.")
         l_snr = st.slider("Candidate threshold (× noise, dog_viterbi)", 2.0, 8.0, 3.0, 0.5, key="l_snr",
                           help="Low on purpose: more candidates, and the Viterbi path picks the real spot among them.")
+        l_maxc = st.slider("Copies per cell the spot finder looks for", 1, 4, 2, key="l_maxc",
+                           help="1 = one path per colour (Chen et al.). More = the multi-copy linker: several paths per colour, a path counts as a locus "
+                                "only if it is there in most frames (strays live ~1 min), and promoter paths are paired with enhancer paths.")
+        l_gate = st.checkbox("Pair gate: penalise spots far from the other colour's spot of the same copy", True, key="l_gate",
+                             help="Re-runs each copy's paths with candidates more than 1.5 µm from the partner colour penalised. It keeps a path "
+                                  "off a stray spot after the locus went dark; distances beyond 1.5 µm would be biased.")
         l_ie = error_controls("loci")
         go_loci = st.form_submit_button("▶ Run single-cell loci simulation", type="primary", width="stretch")
 
@@ -312,6 +370,10 @@ if go_loci:
               f"loci.photons_per_locus_s={l_phot}", f"cells.p_divide_per_frame={l_div}", f"geometry.fov_um=[{l_fov}, {l_fov}]", *l_ie,
               f"calibration.simulate={'true' if l_cal else 'false'}", f"calibration.apply={'true' if l_cal else 'false'}",
               f"locus_analysis.method={l_meth}", f"locus_analysis.dog_snr={l_snr}",
+              f"locus_analysis.max_copies={l_maxc}", f"locus_analysis.pair_gate_um={1.5 if l_gate else 'null'}",
+              f"loci.copies.n=[1, 2]", f"loci.copies.weights=[{1 - l_two:g}, {l_two:g}]", f"loci.copies.ms2={'all' if l_ms2all else 'first'}",
+              f"imaging_errors.stray_spots.enabled={'true' if l_stray > 0 else 'false'}", f"imaging_errors.stray_spots.rate_per_min={l_stray}",
+              f"imaging_errors.stray_spots.brightness={l_stray_b}",
               f"geometry.outside_um={l_out}", f"imaging_errors.bleaching.per_cell={'true' if l_pcb else 'false'}"]
     if l_inst != "generic":
         common.append(f"instrument={l_inst}")
@@ -338,6 +400,9 @@ if go_loci:
     if l_tx:
         import transcription_tab  # noqa: E402
         common += transcription_tab.overrides_for_movie()
+        kon = next((float(o.split("=", 1)[1]) for o in common if o.startswith("loci.transcription.params.k_on=")),
+                   float(load_config(REPO_ROOT / "configs" / "loci_demo.yaml")["loci"]["transcription"]["params"]["k_on"]))
+        common.append(f"loci.copies.transcription=[{{}}, {{k_on: {kon * l_kon2:.6g}}}]")      # the second copy's own burst rate
     if est_gb > 12:
         st.error("That z-stack run would need more than 12 GB; reduce the frames, planes or field of view.")
     elif l_src == "library":
@@ -557,8 +622,12 @@ trajectory-association accuracy. **Track purity** = how much of each predicted t
 def traj_tab():
     v = st.radio("Tracked on:", list(VARIANT_LABEL), format_func=VARIANT_LABEL.get, horizontal=True, key="trajv")
     fig = trajectory_figure(R, v)
-    st.pyplot(fig)
+    st.pyplot(fig, width="stretch")
     plt.close(fig)
+    st.caption("Left: where the cells went and where the tracker swapped two identities. Middle and right: the same switches against everything "
+               "else. If the red distribution sits left of the blue one in the middle panel, switches happen where nuclei touch (crowding); "
+               "if it sits right of it in the right panel, they happen when a nucleus moves far between frames (speed). The Scans page shows "
+               "how the error rate changes when the speed is varied over many runs.")
 
 if page == PAGES["cfg"]:
     style.intro(st, "The exact, fully resolved settings this run was made with (every default filled in), plus where its files are.",

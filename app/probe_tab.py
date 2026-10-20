@@ -154,8 +154,8 @@ def _locus_panel(locus: str) -> P.ProbeParams | None:
     ax[0].step(ts, d.n_attached, where="post", color="#e5e7eb", lw=1.3, label="attached (what you see)")
     ax[0].axhline(sm["mean_attached"], color=COL["bad"], ls="--", lw=1.2, label="theory average")
     ax[0].axvline(when, color="#94a3b8", lw=1)
-    ax[0].set_xlabel("time (s)"); ax[0].set_ylabel("probes at the locus"); ax[0].set_title("Probes attached through time")
-    ax[0].legend(ncol=4, fontsize=11, loc="upper center", bbox_to_anchor=(0.5, -0.28))
+    ax[0].set_xlabel("time (s)"); ax[0].set_ylabel("probes at the locus"); ax[0].set_title("Probes attached through time", pad=34)
+    ax[0].legend(ncol=4, fontsize=10, loc="lower left", bbox_to_anchor=(0.0, 1.08), frameon=False)    # above the plot, clear of the data and axis label
     long = P.sample_trace(P.simulate_trace(p, 2000, seed + 7), np.arange(0, 2000), 1e-3).n_attached
     ax[1].hist(long, bins=np.arange(long.min(), long.max() + 2) - 0.5, density=True, color=COL["bound"], alpha=0.6)
     ax[1].set_xlabel("probes attached"); ax[1].set_title("How often each count occurs", fontsize=11)
@@ -278,8 +278,9 @@ def render(run_path: Path | None = None) -> None:
                 continue
             ax.step(g.t, g.mean_attached, where="mid", color=color, label=f"{loc} (as imaged)")
             ax.axhline(P.summary(P.ProbeParams.from_dict(current(loc), loc))["mean_attached"], color=color, ls=":", lw=1)
-        ax.set_xlabel("frame"); ax.set_ylabel("probes attached"); ax.legend()
-        ax.set_title("Probes attached per frame in this run (dotted = theory average for the settings above)")
+        ax.set_xlabel("frame"); ax.set_ylabel("probes attached")
+        ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=2, frameon=False, fontsize=10)
+        ax.set_title("Probes attached per frame in this run (dotted = theory average)", loc="right", fontsize=11)
         fig.tight_layout()
         st.pyplot(fig, width="stretch")
         plt.close(fig)

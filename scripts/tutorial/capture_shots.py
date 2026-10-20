@@ -8,6 +8,7 @@ RUN_A = "loci_demo_seed11_24bba2"          # showcase: Vutara, bursty gene, MS2,
 RUN_B = "tracking_demo_seed3_e15523"       # tracking errors (33 identity switches)
 RUN_C = "loci_demo_seed8_f5c88d"           # has measured error effects
 RUN_D = "loci_3d_seed23_2163f4"            # 3D z-stacks + piezo + beads
+RUN_E = "loci_library_seed12_87a16d"       # polymer library, two promoter-enhancer copies in some cells, stray spots, MS2 (2026-10-19)
 OUT = pathlib.Path(sys.argv[1]); OUT.mkdir(parents=True, exist_ok=True)
 ONLY = set(sys.argv[2:])
 
@@ -48,8 +49,9 @@ def select_run(pg, run):
 def rect(pg, spec, ox, oy):
     """spec = (text, up_css) | ('css', selector); the smallest visible `up` element whose text contains `text`; [x, y, w, h] relative to the crop origin."""
     kind, up = spec
-    if kind == "css":
-        loc = pg.locator(up).locator("visible=true").first
+    if kind in ("css", "css_last"):
+        loc = pg.locator(up).locator("visible=true")
+        loc = loc.first if kind == "css" else loc.last
         if loc.count() == 0:
             return None
         r = loc.evaluate("el => { const b = el.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; }")
@@ -161,7 +163,9 @@ def main():
             ("sb_sim", "New simulation", ["Random seed", "Acquisition", "Cells and motion", "Nuclear shape", "Nuclear texture", "Imaging", "Segmentation and tracker", "Image errors", "Run simulation"]),
             ("sb_loci", "New single-cell loci run", ["Random seed", "Cells in the field", "Frame interval", "Cell speed scale", "Photons per locus per second", "Microscope",
                                                       "Field of view", "Room outside the field", "Bleach each cell", "3D z-stacks", "Record 3D z-stacks", "Calibration",
-                                                      "Where do the locus movements come from?", "Model probe binding", "Model distance-dependent transcription", "Spot finding (stage 6)",
+                                                      "Where do the locus movements come from?", "Model probe binding", "Model distance-dependent transcription",
+                                                      "Promoter-enhancer copies and stray spots", "Share of cells with two copies", "Stray spots: new ones per nucleus per minute (each colour)",
+                                                      "Spot finding (stage 6)", "Copies per cell the spot finder looks for", "Pair gate",
                                                       "Image errors", "Run single-cell loci simulation"])]:
             if not want(nm):
                 continue
@@ -225,7 +229,7 @@ def main():
             goto_page(pg, "Cells")
             save_page(pg, "pg_cells", {"intro": INTRO, "ident": ("Cells identified by", EC), "table": ("Cell summary table", EXP), "playall": ("Play all cells together", EXP),
                                        "allframe": ("All cells at one frame", EC), "grid": ("css", "[data-testid=stImage]"), "onecell": ("One cell through time", EC),
-                                       "cellsel": ("Clean track", ALERT), "legend": ("White + = locus found", EC), "traces": ("Dotted lines = true values", EC)})
+                                       "cellsel": ("Clean track", ALERT), "legend": ("White + = spot found by the analysis", EC), "traces": ("Solid = copy 0", EC)})
         if want("spots"):
             goto_page(pg, "Spot finding"); wait_gone(pg, "Running the spot finder")
             idle(pg, 2)
@@ -233,6 +237,18 @@ def main():
                                        "step2": ("2 · Every step on one cell", EC), "settings": ("Settings of the spot finder", EXP), "cellsel": ("Cell (true identity)", EC),
                                        "spotsel": ("locus 0 (promoter)", EC), "frames": ("Frame (this cell)", EC),
                                        "s3": ("3 · This run's result", EC), "s3b": ("3b · Photobleaching correction", EC), "s3c": ("3c · Uneven illumination", EC), "s3d": ("3d · How bright must the MS2 spot be", EC), "s4": ("4 · Compare methods on this run", EC)})
+        if want("cells_copies") or want("spots_copies"):          # the two-copy showcase: copy labels, stray spots, the linker's paths
+            select_run(pg, RUN_E)
+            if want("cells_copies"):
+                goto_page(pg, "Cells")
+                save_page(pg, "pg_cells_copies", {"intro": INTRO, "onecell": ("One cell through time", EC), "legend": ("White + = spot found by the analysis", EC),
+                                                  "fig": ("css_last", "[data-testid=stImage]"), "traces": ("Solid = copy 0", EC)})
+            if want("spots_copies"):
+                goto_page(pg, "Spot finding"); wait_gone(pg, "Running the spot finder"); wait_gone(pg, "Running the multi-copy linker"); idle(pg, 3)
+                save_page(pg, "pg_spots_copies", {"intro": INTRO, "step2": ("2 · Every step on one cell", EC), "copysel": ("Copy", EC),
+                                                  "s2b": ("2b · Copies and stray spots", EC), "s3": ("3 · This run's result", EC),
+                                                  "s3e": ("3e · Several copies and stray spots", EC)})
+            select_run(pg, RUN_A)
         if want("images"):
             goto_page(pg, "Images")
             save_page(pg, "pg_images", {"intro": INTRO, "p1": ("1. The recorded image and the truth behind it", EC), "frame": ("Frame", EC), "channels": ("Channels", EC),
