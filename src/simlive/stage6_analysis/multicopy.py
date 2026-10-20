@@ -31,6 +31,9 @@ alleles, `loci.copies`) shows two promoter spots and two enhancer spots, and any
                           with and without it).
   5  the copies are untangled once more, both colours together (a swap of a whole copy, promoter and enhancer at once, is undone by the
      summed steps of both).
+  5 also runs `untangle_by_place` on the paired copies (2026-10-20): step costs cannot see a swap made through a wrong pick or a gap (in one cell both
+     copies' paths ended up on each other's locus from frame ~72 on, 2.6 um apart). There every spot goes to the track whose RECENT place
+     (median of its last few spots, relative to the nucleus centroid) it is nearest, where that is clearly better.
 Copies are numbered by the rank of their promoter path (copy 0 = the best path). The number says nothing about WHICH true copy (allele) it
 is; scoring matches them (localize.match_copies).
 """
@@ -40,6 +43,7 @@ import numpy as np
 
 from simlive.stage6_analysis import dog_viterbi as DV
 
+PLACE_MIN_SEP_UM = 0.8     # untangle_by_place acts only while the tracks' recent places are farther apart than this
 SETTINGS = dict(max_copies=1, extra_tracks=2, min_track_coverage=0.5, min_snr_ratio=0.6, max_D_ratio=3.0, pair_max_um=1.5, pair_prior="gate",
                 pair_gate_um=None, gate_softness_px=2.0, pair_sigma_um=None)
 HELP = {
@@ -212,6 +216,84 @@ def untangle(tracks: list, peaks: list, centre: np.ndarray, z_scale: float = 1.0
     return tr
 
 
+def untangle_by_place(tracks: list, peaks: list, centre: np.ndarray, z_scale: float = 1.0, memory: int = 6, min_sep_px: float = 6.0,
+                      margin: float = 0.25) -> list:
+    """Give every track the spots that lie where IT has recently been. `untangle` links each spot to the track's last spot (squared step /
+    gap), so a wrong pick moves the reference and a swap made through a wrong pick or a gap goes unseen (found 2026-10-20: in one cell the
+    enhancer paths changed places at frames 70/72 and the promoter paths at 72/76, copies 2.6 um apart, with wrong picks in between; the
+    copies stayed swapped for the rest of the movie). Here each track's reference is the median of its last `memory` spots (relative to the
+    nucleus centroid, so a moving nucleus does not matter, and over a few frames a turning one hardly does): one wrong pick cannot move it,
+    and it waits unchanged through any gap. Frame by frame, per colour, the spots present are assigned to the tracks (Hungarian on the
+    distance to the references, tracks without a spot included); the assignment replaces the current one only if it is shorter by more than
+    `margin` x the distance between the references, and only while the references are more than `min_sep_px` apart (copies that overlap are
+    left to the step costs). An absolute 'territory' version was tried first and dropped: on near-round nuclei the outline's orientation can
+    flip by 180 degrees, which exchanges two copies that sit on opposite sides of the centre. Same input and output as `untangle`."""
+    from scipy.optimize import linear_sum_assignment
+
+    K = len(tracks)
+    if K < 2:
+        return tracks
+    tr = [{k: list(v) for k, v in t.items()} for t in tracks]
+    n = len(centre)
+    for k in sorted({q for t in tr for q in t}):
+        if not all(k in t for t in tr):
+            continue
+        P = [rel_positions(peaks[k], t[k], centre, z_scale) for t in tr]
+        choice = [list(t[k]) for t in tr]
+        hist = [[] for _ in range(K)]                          # recent positions of every track (after any reassignment)
+        for i in range(n):
+            here = [a for a in range(K) if np.isfinite(P[a][i, 0])]
+            if not here:
+                continue
+            if all(len(hist[a]) >= memory for a in range(K)):      # a place known from a few spots only is no reference (e.g. one wrong pick)
+                ref = [np.median(np.array(h[-memory:]), axis=0) for h in hist]
+                sep = min(float(np.linalg.norm(ref[x] - ref[y])) for x in range(K) for y in range(x + 1, K))
+                if sep > min_sep_px:
+                    D = np.array([[np.linalg.norm(P[a][i] - ref[b]) for b in range(K)] for a in here])
+                    r2, c2 = linear_sum_assignment(D)
+                    dest = {here[r]: int(c) for r, c in zip(r2, c2)}
+                    own = sum(D[j, a] for j, a in enumerate(here))
+                    if any(dest[a] != a for a in here) and own - D[r2, c2].sum() > margin * sep:
+                        spots = {a: (choice[a][i], P[a][i].copy()) for a in here}
+                        for a in here:
+                            choice[a][i] = None
+                            P[a][i] = np.nan
+                        for a in here:
+                            choice[dest[a]][i], P[dest[a]][i] = spots[a]
+            for a in range(K):
+                if np.isfinite(P[a][i, 0]):
+                    hist[a].append(P[a][i].copy())
+        for a in range(K):
+            tr[a][k] = choice[a]
+    return tr
+
+
+def repair(copies: list, peaks: list, centre: np.ndarray, z_scale: float, min_common: int, margin: float = 0.8) -> list:
+    """Pair every further colour with the promoters again after `untangle_by_place`. That pass repairs each colour's tracks on its own, so
+    a promoter and an enhancer that were paired while one of them was swapped for part of the movie end up on DIFFERENT true copies for the
+    whole movie (seen 2026-10-20 without a pair prior: one cell, 19% -> 50% of a copy's spots on the other copy). Hungarian on the median
+    distance between the promoter tracks and the colour's tracks; the new pairing replaces the old one only if its total distance is below
+    `margin` x the old one."""
+    from scipy.optimize import linear_sum_assignment
+
+    K = len(copies)
+    if K < 2 or any(0 not in c for c in copies):
+        return copies
+    out = [dict(c) for c in copies]
+    P = [rel_positions(peaks[0], c[0], centre, z_scale) for c in copies]
+    for k in sorted({q for c in copies for q in c} - {0}):
+        if not all(k in c for c in copies):
+            continue
+        Q = [rel_positions(peaks[k], c[k], centre, z_scale) for c in copies]
+        C = np.array([[pair_cost(P[a], Q[b], min_common) for b in range(K)] for a in range(K)])
+        C = np.where(np.isfinite(C), C, 1e6)
+        rr, cc = linear_sum_assignment(C)
+        if C[rr, cc].sum() < margin * np.trace(C):
+            for a, b in zip(rr, cc):
+                out[a][k] = copies[b][k]
+    return out
+
+
 def assign_pairs(C: np.ndarray, limit: float) -> list[tuple[int, int]]:
     """Rows paired with columns (cost matrix C, e.g. distances) so that as many pairs as possible have cost <= limit, and among those the
     total cost is smallest. Every pair beyond the limit costs the same large amount: with the raw costs the assignment would break a good
@@ -314,5 +396,7 @@ def track_copies(peaks: list, snr: list, centre: np.ndarray, valid: np.ndarray |
                     cp[k] = re[0]["choice"]
     if len(copies) >= 2:                   # a whole copy (promoter and enhancer together) can still be swapped: untangle the copies jointly
         copies = untangle(copies, peaks, centre, z_scale)
+        copies = untangle_by_place(copies, peaks, centre, z_scale, min_sep_px=PLACE_MIN_SEP_UM / px_um)
+        copies = repair(copies, peaks, centre, z_scale, min_common)
     return {"copies": copies, "paths": paths, "pairs": pairs, "fallback": fallback, "gated": kind is not None, "prior": kind,
             "sigma_px": sigma_px}

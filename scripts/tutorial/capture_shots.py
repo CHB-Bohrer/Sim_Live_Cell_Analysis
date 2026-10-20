@@ -151,7 +151,8 @@ def main():
                  "guide": ("New here?", EXP), "glossary": ("Glossary of terms", EXP), "summary": ("What was simulated in this run", EXP),
                  "errglance": ("Image errors at a glance", EXP), "nav": ("css", "[data-testid=stButtonGroup]"),
                  "runsel": ("css", "[data-testid=stSidebar] [data-testid=stSelectbox]"), "newsim": ("New simulation", EXP), "newloci": ("New single-cell loci run", EXP),
-                 "scores_auto": ("Automatic segmentation (realistic)", EC), "scores_gt": ("Ground-truth masks (linking error only)", EC)}
+                 "scores_auto": ("Automatic segmentation (realistic)", EC), "scores_gt": ("Ground-truth masks (linking error only)", EC),
+                 "tut": ("css", ".sl-tut")}
             rr = {k: rect(pg, s, 0, 0) for k, s in A.items()}
             rr = {k: v for k, v in rr.items() if v}
             (OUT / "home.json").write_text(json.dumps({"w": W, "h": 1000, "rects": rr}), encoding="utf-8")
@@ -244,7 +245,7 @@ def main():
         if any(want(n) for n in ("cells", "spots", "images", "cal", "tx", "ms2", "ep", "probes", "lib", "chrom", "cfg")):
             select_run(pg, RUN_A)
         if want("cells"):
-            goto_page(pg, "Cells")
+            goto_page(pg, "Cells"); wait_text(pg, "Solid = copy 0"); idle(pg, 3)     # the last figure of the page has drawn
             save_page(pg, "pg_cells", {"intro": INTRO, "ident": ("Cells identified by", EC), "table": ("Cell summary table", EXP), "playall": ("Play all cells together", EXP),
                                        "allframe": ("All cells at one frame", EC), "grid": ("css", "[data-testid=stImage]"), "onecell": ("One cell through time", EC),
                                        "cellsel": ("Clean track", ALERT), "legend": ("White + = spot found by the analysis", EC), "traces": ("Solid = copy 0", EC)})
@@ -255,7 +256,7 @@ def main():
                                        "step2": ("2 · Every step on one cell", EC), "settings": ("Settings of the spot finder", EXP), "cellsel": ("Cell (true identity)", EC),
                                        "spotsel": ("locus 0 (promoter)", EC), "frames": ("Frame (this cell)", EC),
                                        "s3": ("3 · This run's result", EC), "s3b": ("3b · Photobleaching correction", EC), "s3c": ("3c · Uneven illumination", EC), "s3d": ("3d · How bright must the MS2 spot be", EC), "s4": ("4 · Compare methods on this run", EC)})
-        if want("cells_copies") or want("spots_copies"):          # the two-copy showcase: copy labels, stray spots, the linker's paths
+        if want("cells_copies") or want("spots_copies") or want("metrics_prop"):   # the two-copy showcase: copy labels, stray spots, the linker's paths
             select_run(pg, RUN_E); idle(pg, 4, 240)                # let the run switch finish re-rendering before changing page
             pg.set_viewport_size({"width": W, "height": 15000}); time.sleep(1.5); idle(pg, 2)   # the Spot finding page is taller than 9000 px
             if want("cells_copies"):
@@ -269,6 +270,10 @@ def main():
                 save_page(pg, "pg_spots_copies", {"intro": INTRO, "step2": ("2 · Every step on one cell", EC), "copysel": ("Copy", EC),
                                                   "s2b": ("2b · Copies and stray spots", EC), "s3": ("3 · This run's result", EC),
                                                   "s3e": ("3e · Several copies and stray spots", EC)})
+            if want("metrics_prop"):                                # stage 7b needs a loci run: the locus results through the tracker's IDs
+                goto_page(pg, "Metrics")
+                wait_text(pg, "Do tracking errors reach the locus results?"); idle(pg, 2)
+                save_page(pg, "pg_metrics_prop", {"prop": ("Do tracking errors reach the locus results?", EC), "proptab": ("css_last", "[data-testid=stDataFrame]")})
             pg.set_viewport_size({"width": W, "height": TALL}); time.sleep(1.5); idle(pg, 2)
             select_run(pg, RUN_A); idle(pg, 4, 240)
         if want("images"):
@@ -300,7 +305,7 @@ def main():
             save_page(pg, "pg_stage", {"intro": INTRO, "cards": ("The piezo is asked", HB), "s1": ("1. Where the planes really were", EC), "s2": ("2. The fiducial beads on the slide", EC), "s3": ("3. Does correcting help?", EC)})
             select_run(pg, RUN_A)
         if want("tx"):
-            goto_page(pg, "Transcription")
+            goto_page(pg, "Transcription"); wait_text(pg, "In the selected run"); idle(pg, 3)   # a fragment: the status widget does not show it is still drawing
             save_page(pg, "pg_tx", {"intro": INTRO, "diagram": ("From chromosome distance to the MS2 spot", EC), "s1": ("1. How the movie samples time", EC), "s2": ("2. Distance between promoter and enhancer", EC),
                                     "s3": ("3. How the distance sets a rate", EC), "s4": ("4. Promoter switching", EC), "s5": ("5. Polymerases travel along the gene", EC),
                                     "s6": ("6. The MS2 signal", EC), "s7": ("7. What the microscope sees", EC), "s8": ("8. Parameter sweep", EC), "s9": ("9.", EC)})
@@ -321,7 +326,8 @@ def main():
                                         "sweep": ("Parameter sweep", EC), "use": ("Use these settings in a movie", EXP)})
         if want("lib"):
             goto_page(pg, "Library"); time.sleep(3)
-            save_page(pg, "pg_lib", {"intro": INTRO, "how": ("How simulations reach a movie", EC), "live": ("Library generation: live status", EC), "choose": ("Choose which simulations a movie uses", EC),
+            save_page(pg, "pg_lib", {"intro": INTRO, "how": ("How simulations reach a movie", EC), "libsel": ("css", "[data-testid=stMain] [data-testid=stSelectbox]"),
+                                     "live": ("Library generation: live status", EC), "choose": ("Choose which simulations a movie uses", EC),
                                      "radio": ("How should cells get their simulation?", EC), "preview": ("Preview: what each cell will get", EC), "use": ("Use this in a movie", EXP)})
         if want("chrom"):
             goto_page(pg, "Chromatin")

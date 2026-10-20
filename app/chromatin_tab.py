@@ -55,7 +55,8 @@ def render(st):
         else:
             st.info("The validation report has not been generated yet (`scripts\\validate_chromatin.py all`).")
 
-    lib = st.selectbox("Library", libs)
+    pick = st.session_state.get("lib_sel")              # open on the library chosen in the 🗂 Library tab, if any
+    lib = st.selectbox("Library", libs, index=libs.index(pick) if pick in libs else 0)
     sims = sorted(p for p in (CHROM / lib).glob("*_seed*") if (p / "meta.json").exists())
     if not sims:
         st.warning("No finished simulations in this library yet.")
@@ -142,7 +143,7 @@ def render(st):
         from simlive.calibration.polymer import default_scale
 
         nm_u, s_blk, _ = default_scale()
-    except Exception:  # noqa: BLE001 - no calibration file: polymer units only
+    except (OSError, KeyError, ValueError):  # unreadable calibration file: polymer units only
         nm_u, s_blk = None, None
     fig, ax = plt.subplots(1, 2, figsize=(15, 4))
     ax[0].plot(dist, lw=0.8, color="#2dd4bf")

@@ -60,7 +60,7 @@ def test_every_copy_bursts_on_its_own_with_its_own_parameters():
     cfg = _cfg("loci.transcription.enabled=true", "loci.copies.transcription=[{}, {k_on: 0.01}]")
     cells = pd.DataFrame({"t": np.arange(2000), "cell_id": 1})
     rng_d = np.random.default_rng(0)
-    d = rng_d.uniform(400, 900, 4000)                                           # far: no enhancer contact, plain k_on
+    d = rng_d.uniform(1500, 3000, 4000)                                         # far: no enhancer effect (hill, half at 400 nm: < 0.5%), plain k_on
     traces = {1: {"dt_block_s": 10.0, "d_nm": d}, (1, 1): {"dt_block_s": 10.0, "d_nm": d}}
     tx, ev = T.simulate_transcription(cells, traces, cfg, np.random.default_rng(1), np.random.default_rng(2))
     one, _ = T.simulate_transcription(cells, {1: traces[1]}, cfg, np.random.default_rng(1), np.random.default_rng(2))
@@ -222,6 +222,61 @@ def test_untangle_undoes_two_paths_that_swapped_copies():
     assert fixed2[0][0] == [0] * n and fixed2[0][1] == [0] * n
     same = MC.untangle([{0: [0] * n}, {0: [1] * n}], peaks, np.zeros((n, 2)))   # nothing to undo: unchanged
     assert same[0][0] == [0] * n and same[1][0] == [1] * n
+
+
+def test_copies_get_back_the_spots_of_the_place_they_have_been():
+    # two copies 23 px (3 um) apart in a nucleus that turns by 90 degrees during the movie (each copy keeps its place in the nucleus).
+    n, rng = 90, np.random.default_rng(3)
+    theta = np.linspace(0, np.pi / 2, n)
+    home = {0: np.array([0.0, -11.5]), 1: np.array([0.0, 11.5])}            # nucleus frame (y, x)
+
+    def lab(v, th):                                                           # nucleus frame -> crop offsets (inverse of nucleus_frame)
+        c, s = np.cos(th), np.sin(th)
+        return np.array([c * v[0] + s * v[1], -s * v[0] + c * v[1]])
+    a = np.array([lab(home[0] + rng.normal(0, 1.0, 2), theta[i]) for i in range(n)])
+    b = np.array([lab(home[1] + rng.normal(0, 1.0, 2), theta[i]) for i in range(n)])
+    stray = np.array([lab(home[0] + np.array([6.0, 4.0]), theta[i]) for i in range(n)])   # a wrong pick near copy 0
+    peaks = [[np.vstack([a[i], b[i], stray[i]]) for i in range(n)]] * 2       # promoter and enhancer colours, same layout
+    centre = np.zeros((n, 2))
+    # (1) both paths lose their spot at frame 40 and come back on the OTHER copy, path 0 at frame 50 and path 1 at frame 56: when path 0
+    #     returns, path 1 is still dark, so the frame-to-frame repair cannot see the exchange
+    p0 = [0] * 40 + [None] * 10 + [1] * (n - 50)
+    p1 = [1] * 40 + [None] * 16 + [0] * (n - 56)
+    step_only = MC.untangle([{0: p0, 1: p0}, {0: p1, 1: p1}], peaks, centre)
+    assert step_only[0][0][60] == 1
+    fixed = MC.untangle_by_place(step_only, peaks, centre, min_sep_px=6.0)
+    for k in (0, 1):
+        assert {c for c in fixed[0][k] if c is not None} == {0} and {c for c in fixed[1][k] if c is not None} == {1}
+    # (2) the real case: the colours change places at different frames, through a wrong pick (path 1 takes the stray near copy 0 for two
+    #     frames before both paths continue on the other copy)
+    e0 = [0] * 70 + [0, 0] + [1] * (n - 72)
+    e1 = [1] * 70 + [2, 2] + [0] * (n - 72)
+    q0 = [0] * 72 + [None, 0, None, None] + [1] * (n - 76)                   # promoters: path 1 moves first (frame 72), path 0 at 76
+    q1 = [1] * 72 + [0, None, 0, 0] + [0] * (n - 76)                          # (paths never share a candidate in a frame)
+    fixed = MC.untangle_by_place([{0: q0, 1: e0}, {0: q1, 1: e1}], peaks, centre, min_sep_px=6.0)
+    spots = lambda ch: {c for c in ch if c is not None}                      # noqa: E731   (gaps where a spot moved to the other track)
+    assert spots(fixed[0][0]) == {0} and spots(fixed[1][0]) == {1}
+    assert spots(fixed[0][1][72:]) == {0} and spots(fixed[1][1][72:]) == {1}
+    # (3) correct tracks are left alone, and so is everything when the territories overlap (copies too close to tell apart this way)
+    calm = [{0: [0] * 40 + [None] * 10 + [0] * (n - 50)}, {0: [1] * n}]
+    assert MC.untangle_by_place(calm, peaks, centre, min_sep_px=6.0) == calm
+    near = [[np.vstack([a[i] * 0.05, b[i] * 0.05]) for i in range(n)]]          # copies ~1 px apart
+    mixed = [{0: [i % 2 for i in range(n)]}, {0: [1 - i % 2 for i in range(n)]}]
+    assert MC.untangle_by_place(mixed, near, centre, min_sep_px=6.0) == mixed
+
+
+def test_colours_are_paired_again_after_their_tracks_were_repaired():
+    # promoters right, enhancers attached to the wrong promoter for the whole movie (what per-colour repair can leave behind): re-paired
+    n, rng = 60, np.random.default_rng(5)
+    pA, pB = np.c_[np.full(n, 10.0), np.full(n, 10.0)], np.c_[np.full(n, 10.0), np.full(n, 34.0)]
+    eA, eB = pA + [4.0, 0.0], pB + [4.0, 0.0]                                   # each enhancer 4 px from its own promoter
+    peaks = [[np.vstack([pA[i], pB[i]]) + rng.normal(0, 0.5, (2, 2)) for i in range(n)],
+             [np.vstack([eA[i], eB[i]]) + rng.normal(0, 0.5, (2, 2)) for i in range(n)]]
+    wrong = [{0: [0] * n, 1: [1] * n}, {0: [1] * n, 1: [0] * n}]
+    fixed = MC.repair(wrong, peaks, np.zeros((n, 2)), 1.0, 5)
+    assert fixed[0][1] == [0] * n and fixed[1][1] == [1] * n
+    right = [{0: [0] * n, 1: [0] * n}, {0: [1] * n, 1: [1] * n}]
+    assert MC.repair(right, peaks, np.zeros((n, 2)), 1.0, 5) == right
 
 
 def test_pairing_keeps_a_good_pair_instead_of_shortening_an_invalid_one():

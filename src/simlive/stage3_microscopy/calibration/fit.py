@@ -175,7 +175,7 @@ def fit_gauss2d(patch: np.ndarray, y0: int, x0: int):
     try:
         p, _ = curve_fit(_model2d, (ys, xs), patch.ravel(), p0=[bg0, A0, ys[iy], xs[ix], 1.0],
                          bounds=([-np.inf, 0, ys[0], xs[0], 0.3], [np.inf, np.inf, ys[-1], xs[-1], 6.0]), maxfev=400)
-    except Exception:
+    except (RuntimeError, ValueError):     # no convergence within maxfev, or a start outside the bounds / non-finite data
         return None
     return float(p[2]), float(p[3]), float(p[4]), float(p[1])
 
@@ -192,7 +192,7 @@ def fit_gauss1d(profile: np.ndarray):
     try:
         p, _ = curve_fit(_gauss1d, k, profile, p0=[bg0, float(profile.max() - bg0), k0, 1.0],
                          bounds=([-np.inf, 0, -2, 0.2], [np.inf, np.inf, len(k) + 1, 12.0]), maxfev=400)
-    except Exception:
+    except (RuntimeError, ValueError):     # no convergence within maxfev, or a start outside the bounds / non-finite data
         return None
     return float(p[2]), float(p[3]), float(p[1])
 

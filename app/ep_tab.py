@@ -149,17 +149,24 @@ def _live() -> None:
         miss = c[1].number_input("Missed frames", 0.0, 0.9, 0.05, 0.05)
         out = c[2].number_input("Wrong picks", 0.0, 0.5, 0.02, 0.01)
         coupled = c[3].checkbox("Enhancer acts (untick = null control)", True)
-        seed = st.number_input("Random seed", 0, 10**6, 1)
+        c = st.columns(4)
+        knows_wrong = c[0].checkbox("Analysis knows the wrong-pick share", True,
+                                    help="The fit then mixes 'this distance may be a wrong pick' into its measurement model (ep_curve.with_outliers). The share cannot "
+                                         "be learned from the distances; on real data it must come from the spot finder or a simulation of the same movie. "
+                                         "Untick to see the bias of ignoring wrong picks (5% -> -6%, 20% -> -24% of the contrast).")
+        seed = c[1].number_input("Random seed", 0, 10**6, 1)
         go = st.form_submit_button("Simulate and fit", type="primary")
     if not go and "ep_last" not in st.session_state:
         st.info("Press **Simulate and fit** (about 20 s).")
         return
-    key = (wd, cf, fold, loop_s, int(n_cells), float(sigma), int(dims), float(shift), bool(corrected), float(miss), float(out), bool(coupled), int(seed))
+    key = (wd, cf, fold, loop_s, int(n_cells), float(sigma), int(dims), float(shift), bool(corrected), float(miss), float(out), bool(coupled), int(seed),
+           bool(knows_wrong))
     if go:
         with st.spinner("Reference population (3000 cells), your population, fits…"):
             ref = _reference(wd, cf, fold, loop_s)
             pop = _population(wd, cf, fold, loop_s, int(n_cells), int(seed), bool(coupled))
-            meas = ep.Measurement(sigma_nm=sigma, dims=int(dims), shift_nm=shift, miss_rate=miss, outlier_rate=out, assumed_shift_nm=shift if corrected else 0.0)
+            meas = ep.Measurement(sigma_nm=sigma, dims=int(dims), shift_nm=shift, miss_rate=miss, outlier_rate=out, assumed_shift_nm=shift if corrected else 0.0,
+                                  assumed_outlier_rate=out if knows_wrong else 0.0)
             eiv = ep.analyse(pop, meas, n_boot=80, seed=int(seed))
             nv = ep.analyse(pop, meas, naive=True, n_boot=0, seed=int(seed))
             d_meas = ep.measure_distance(pop.d_true, meas, np.random.default_rng(int(seed)))

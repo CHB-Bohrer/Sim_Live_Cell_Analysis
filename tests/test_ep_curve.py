@@ -76,3 +76,24 @@ def test_attenuation_correction_undoes_a_known_sensitivity_and_false_positive_ra
     ref = ep.analyse(pop, m)["fit"]
     assert abs(np.log(cor.fold / ref.fold)) < abs(np.log(raw.fold / ref.fold))
     assert abs(cor.p_far / ref.p_far - 1) < 0.25
+
+
+def test_wrong_picks_are_corrected_when_their_share_is_supplied():
+    # the same curve as above, measured with 20% wrong picks (distance uniform in 0-2 um whatever the truth)
+    rng = np.random.default_rng(4)
+    n = 300000
+    d = np.where(rng.random(n) < 0.12, rng.uniform(100, 380, n), 400 * 2 * np.exp(0.35 * rng.normal(size=n)))
+    truth = (0.05, 8.0, 350.0)
+    y = (rng.random(n) < ep.curve(d, *truth, 4.0)).astype(float)
+    cells = rng.integers(0, 300, n)
+    dm = ep.measure_distance(d, ep.Measurement(sigma_nm=70.0, dims=2, outlier_rate=0.2), rng)
+    agg = ep.Aggregates.build(cells, dm, y)
+    K = ep.kernel_matrix(70.0, 2, 0.0)
+    assert np.allclose(ep.with_outliers(K, 0.2).sum(0), 1.0)               # still a distribution over measured bins
+    fits = {}
+    for rate in (0.0, 0.2):
+        Km = ep.with_outliers(K, rate)
+        fits[rate] = ep.fit_curve(agg, Km, ep.population_prior(agg.n.sum(0), Km))
+    want = ep.curve(150.0, *truth, 4.0) / ep.curve(1000.0, *truth, 4.0)
+    assert fits[0.0].contrast() < 0.85 * want                               # uncorrected: the effect is diluted
+    assert abs(fits[0.2].contrast() / want - 1) < 0.1                         # corrected: recovered

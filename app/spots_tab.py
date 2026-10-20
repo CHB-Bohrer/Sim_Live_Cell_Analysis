@@ -985,7 +985,7 @@ def render(st_, run_path: Path, R: dict):
     p_run = _part_method(cfg)
     try:
         truth = _truth(str(run), stamp)
-    except Exception as e:  # noqa: BLE001 - old runs may lack files; the steps still work without the truth
+    except (OSError, KeyError, ValueError) as e:  # old runs may lack files or columns; the steps still work without the truth
         st.warning(f"Could not load the true locus positions ({e}); errors are not shown.")
         truth = None
     _part_steps(run, cfg, p_run, truth)

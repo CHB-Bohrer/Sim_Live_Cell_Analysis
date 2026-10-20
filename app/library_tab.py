@@ -76,15 +76,13 @@ def library_state(lib_dir: Path) -> dict:
     return {"status": st, "finished": finished, "current": cur, "kind": kind, "text": text}
 
 
+NO_LIBRARY = ("No chromatin libraries yet. Start one from a terminal (it can run for many hours):\n\n"
+              "`scripts\\run.cmd python scripts\\run_chromatin_library.py --config configs\\chromatin\\library_loop_extrusion.yaml "
+              "--library loop_extrusion --n 100`\n\nThis page then shows its progress live.")
+
+
 @st.fragment(run_every=5)
-def _monitor() -> None:
-    libs = libraries()
-    if not libs:
-        st.info("No chromatin libraries yet. Start one from a terminal (it can run for many hours):\n\n"
-                "`scripts\\run.cmd python scripts\\run_chromatin_library.py --config configs\\chromatin\\library_loop_extrusion.yaml "
-                "--library loop_extrusion --n 100`\n\nThis page then shows its progress live.")
-        return
-    lib = st.selectbox("Library", libs, key="mon_lib")
+def _monitor(lib: str) -> None:
     d = CHROM / lib
     S = library_state(d)
     s, cur = S["status"], S["current"]
@@ -97,22 +95,23 @@ def _monitor() -> None:
 
     a, b, c, e = st.columns(4)
     a.metric("Simulations finished", f"{S['finished']} / {requested}")
-    if cur and cur.get("phase") not in (None, "done"):
+    alive = S["kind"] == "run"             # a stalled or stopped generator has no 'now running' and no time left (they used to stay on screen)
+    if alive and cur and cur.get("phase") not in (None, "done"):
         b.metric("Now running", s.get("current_sim", "?").replace(f"{s.get('sim_name', '')}_", ""),
                  help="the seed of the simulation currently on the GPU")
         c.metric("Speed (MD steps/s)", f"{cur.get('steps_per_s', 0):,.0f}")
     else:
         b.metric("Now running", "none")
         c.metric("Average time", f"{s['avg_minutes_per_sim']:.1f} min each" if s.get("avg_minutes_per_sim") else "not known yet")
-    e.metric("Library done in", _hm(s.get("eta_hours")) if s.get("state") == "running" else "—",
+    e.metric("Library done in", _hm(s.get("eta_hours")) if alive else "—",
              help="estimated from the average of the finished simulations")
 
     st.progress(min(S["finished"] / max(requested, 1), 1.0), text=f"Library: {S['finished']} of {requested} simulations")
     if cur and cur.get("total") and cur.get("phase") != "done":
         frac = cur["block"] / cur["total"]
-        left = (cur["total"] - cur["block"]) / cur["blocks_per_s"] / 60 if cur.get("blocks_per_s") else None
-        st.progress(min(frac, 1.0), text=f"This simulation: {cur['phase']}, block {cur['block']:,} of {cur['total']:,}"
-                    + (f"  ·  about {left:.0f} min left" if left is not None else ""))
+        left = (cur["total"] - cur["block"]) / cur["blocks_per_s"] / 60 if cur.get("blocks_per_s") and alive else None
+        st.progress(min(frac, 1.0), text=f"{'This simulation' if alive else 'Last simulation (not running)'}: {cur['phase']}, block {cur['block']:,} "
+                    f"of {cur['total']:,}" + (f"  ·  about {left:.0f} min left" if left is not None else ""))
 
     g = _gpu()
     if g:
@@ -145,12 +144,8 @@ def _how_it_works() -> None:
 
 
 @st.fragment
-def _picker() -> None:
-    libs = libraries()
-    if not libs:
-        return
+def _picker(lib: str) -> None:
     st.markdown("### Choose which simulations a movie uses")
-    lib = st.selectbox("Library", libs, key="pick_lib")
     df = L.list_library(lib)
     if df.empty:
         st.info("This library has no finished simulations yet; they appear here as soon as the first one completes.")
@@ -264,6 +259,19 @@ def overrides_for_movie(n_cells: int) -> list[str] | None:
 def render() -> None:
     style.intro(st, "The saved chromatin (polymer) simulations that movies draw their loci from: how far the generator has got, and which simulation each cell will use.", "Start a library from a terminal (the command is shown if none exists), watch progress live, then choose random, ticked or pinned simulations. The sidebar loci form uses your choice when the library source is selected.")
     _how_it_works()
+    libs = libraries()
+    if not libs:
+        st.markdown("### Library generation: live status")
+        st.info(NO_LIBRARY)
+        return
+    # ONE library choice for the whole page (the live status and the picker used to have a selector each, which could disagree);
+    # it opens on a library that is being generated, else on the one with the most finished simulations
+    states = {b: library_state(CHROM / b) for b in libs}
+    if st.session_state.get("lib_sel") not in libs:
+        st.session_state["lib_sel"] = max(libs, key=lambda b: (states[b]["kind"] == "run", states[b]["finished"]))
+    lib = st.selectbox("Library", libs, key="lib_sel",
+                       format_func=lambda b: f"{b}  ·  {states[b]['finished']} simulations  ·  {states[b]['text'].split(':')[0].split(' (')[0].lower()}",
+                       help="Used by everything on this page: the live status of its generator and the choice of simulations for a movie.")
     st.markdown("### Library generation: live status")
-    _monitor()
-    _picker()
+    _monitor(lib)
+    _picker(lib)

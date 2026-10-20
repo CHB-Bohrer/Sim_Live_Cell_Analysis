@@ -128,49 +128,60 @@ def _plot_distance(d, blk, p, minutes):
 
 def _coupling_inputs() -> dict:
     c = st.columns([3, 3, 2])
-    kind = c[0].radio("How does distance act?", list(KIND), format_func=KIND.get, key="tx_kind", horizontal=False)
-    rate = c[1].radio("Which rate depends on distance?", list(RATE), format_func=RATE.get, key="tx_rate")
-    fold = c[2].number_input("Fold change at full contact", 1.0, 1000.0, 12.0, 1.0, key="tx_fold", help=T.HELP["fold"])
+    D = T.DEFAULTS                       # the widgets start from the model's defaults (the movie configs use the same values)
+    kind = c[0].radio("How does distance act?", list(KIND), index=list(KIND).index(D["coupling"]), format_func=KIND.get, key="tx_kind",
+                      horizontal=False)
+    rate = c[1].radio("Which rate depends on distance?", list(RATE), index=list(RATE).index(D["coupled_rate"]), format_func=RATE.get, key="tx_rate")
+    fold = c[2].number_input("Fold change at full contact", 1.0, 1000.0, float(D["fold"]), 1.0, key="tx_fold", help=T.HELP["fold"])
     out = {"coupling": kind, "coupled_rate": rate, "fold": float(fold)}
     c = st.columns(4)
     if kind == "contact":
-        out["d_contact_nm"] = float(c[0].number_input("Contact distance (nm)", 10.0, 2000.0, 150.0, 10.0, key="tx_dc", help=T.HELP["d_contact_nm"]))
+        out["d_contact_nm"] = float(c[0].number_input("Contact distance (nm)", 10.0, 2000.0, float(D["d_contact_nm"]), 10.0, key="tx_dc",
+                                                      help=T.HELP["d_contact_nm"]))
     elif kind == "hill":
-        out["d_half_nm"] = float(c[0].number_input("Distance of half effect (nm)", 10.0, 2000.0, 200.0, 10.0, key="tx_dh"))
-        out["hill_n"] = float(c[1].number_input("Steepness (Hill n)", 0.5, 20.0, 4.0, 0.5, key="tx_hn"))
+        out["d_half_nm"] = float(c[0].number_input("Distance of half effect (nm)", 10.0, 2000.0, float(D["d_half_nm"]), 10.0, key="tx_dh"))
+        out["hill_n"] = float(c[1].number_input("Steepness (Hill n)", 0.5, 20.0, float(D["hill_n"]), 0.5, key="tx_hn"))
     elif kind == "exp":
-        out["d_decay_nm"] = float(c[0].number_input("Decay length (nm)", 10.0, 2000.0, 150.0, 10.0, key="tx_dd"))
+        out["d_decay_nm"] = float(c[0].number_input("Decay length (nm)", 10.0, 2000.0, float(D["d_decay_nm"]), 10.0, key="tx_dd"))
     else:
-        out["f_const"] = float(c[0].slider("Constant coupling", 0.0, 1.0, 0.1, 0.05, key="tx_fc",
+        out["f_const"] = float(c[0].slider("Constant coupling", 0.0, 1.0, float(D["f_const"]), 0.05, key="tx_fc",
                                            help="Control: the rate is raised by the same factor whatever the distance."))
     return out
 
 
 def _kinetics_inputs() -> dict:
     c = st.columns(3)
-    off = c[0].number_input("Mean OFF time when the enhancer is far (min)", 0.1, 10000.0, 20.0, 5.0, key="tx_off")
-    on = c[1].number_input("Mean ON time (min)", 0.1, 1000.0, 0.75, 0.25, key="tx_on")
-    ini = c[2].number_input("While ON, a Pol II starts every (s)", 1.0, 3600.0, 7.0, 1.0, key="tx_ini")
+    D = T.DEFAULTS
+    off = c[0].number_input("Mean OFF time when the enhancer is far (min)", 0.1, 10000.0, round(1 / D["k_on"] / 60, 2), 5.0, key="tx_off")
+    on = c[1].number_input("Mean ON time (min)", 0.1, 1000.0, round(1 / D["k_off"] / 60, 2), 0.25, key="tx_on")
+    ini = c[2].number_input("While ON, a Pol II starts every (s)", 1.0, 3600.0, round(1 / D["k_init"], 2), 1.0, key="tx_ini")
     c = st.columns(5)
     out = {"k_on": 1 / (off * 60.0), "k_off": 1 / (on * 60.0), "k_init": 1 / ini}
-    out["elongation_kb_min"] = float(c[0].number_input("Pol II speed (kb/min)", 0.2, 20.0, 2.5, 0.5, key="tx_v", help=T.HELP["elongation_kb_min"]))
-    out["cassette_kb"] = float(c[1].number_input("MS2 cassette (kb)", 0.0, 20.0, 1.3, 0.1, key="tx_cas", help=T.HELP["cassette_kb"]))
-    out["gene_kb"] = float(c[2].number_input("Gene after cassette (kb)", 0.0, 200.0, 2.0, 0.5, key="tx_gene", help=T.HELP["gene_kb"]))
-    out["n_loops"] = int(c[3].number_input("MS2 loops", 1, 200, 24, 1, key="tx_loops", help=T.HELP["n_loops"]))
-    out["dwell_s"] = float(c[4].number_input("Wait at gene end (s)", 1.0, 600.0, 20.0, 5.0, key="tx_dw", help=T.HELP["dwell_s"]))
+    out["elongation_kb_min"] = float(c[0].number_input("Pol II speed (kb/min)", 0.2, 20.0, float(D["elongation_kb_min"]), 0.5, key="tx_v",
+                                                        help=T.HELP["elongation_kb_min"]))
+    out["cassette_kb"] = float(c[1].number_input("MS2 cassette (kb)", 0.0, 20.0, float(D["cassette_kb"]), 0.1, key="tx_cas", help=T.HELP["cassette_kb"]))
+    out["gene_kb"] = float(c[2].number_input("Gene after cassette (kb)", 0.0, 200.0, float(D["gene_kb"]), 0.5, key="tx_gene", help=T.HELP["gene_kb"]))
+    out["n_loops"] = int(c[3].number_input("MS2 loops", 1, 200, int(D["n_loops"]), 1, key="tx_loops", help=T.HELP["n_loops"]))
+    out["dwell_s"] = float(c[4].number_input("Wait at gene end (s)", 1.0, 600.0, float(D["dwell_s"]), 5.0, key="tx_dw", help=T.HELP["dwell_s"]))
     return out
 
 
 def current_params() -> dict:
-    """Parameters as currently set in the tab (defaults if never opened), for the hand-off to a movie run."""
-    g = st.session_state.get
-    p = dict(T.DEFAULTS)
-    p.update(coupling=g("tx_kind", "contact"), coupled_rate=g("tx_rate", "k_on"), fold=float(g("tx_fold", 12.0)),
-             d_contact_nm=float(g("tx_dc", 150.0)), d_half_nm=float(g("tx_dh", 200.0)), hill_n=float(g("tx_hn", 4.0)),
-             d_decay_nm=float(g("tx_dd", 150.0)), f_const=float(g("tx_fc", 0.1)),
-             k_on=1 / (g("tx_off", 50.0) * 60.0), k_off=1 / (g("tx_on", 16.0) * 60.0), k_init=1 / g("tx_ini", 600.0),
-             elongation_kb_min=float(g("tx_v", 2.5)), cassette_kb=float(g("tx_cas", 1.3)), gene_kb=float(g("tx_gene", 5.0)),
-             n_loops=int(g("tx_loops", 24)), dwell_s=float(g("tx_dw", 116.0)))
+    """Parameters as currently set in the tab (the model's defaults for anything not set), for the hand-off to a movie run.
+
+    Until 2026-10-20 the fallbacks here were the OLD TFF1-like gene (OFF 50 min, ON 16 min, one Pol II per 600 s), so ticking
+    transcription in the sidebar without opening this tab made a movie with a different gene than the tab and the configs showed."""
+    g, D = st.session_state.get, T.DEFAULTS
+    p = dict(D)
+    p.update(coupling=g("tx_kind", D["coupling"]), coupled_rate=g("tx_rate", D["coupled_rate"]), fold=float(g("tx_fold", D["fold"])),
+             d_contact_nm=float(g("tx_dc", D["d_contact_nm"])), d_half_nm=float(g("tx_dh", D["d_half_nm"])), hill_n=float(g("tx_hn", D["hill_n"])),
+             d_decay_nm=float(g("tx_dd", D["d_decay_nm"])), f_const=float(g("tx_fc", D["f_const"])),
+             elongation_kb_min=float(g("tx_v", D["elongation_kb_min"])), cassette_kb=float(g("tx_cas", D["cassette_kb"])),
+             gene_kb=float(g("tx_gene", D["gene_kb"])), n_loops=int(g("tx_loops", D["n_loops"])), dwell_s=float(g("tx_dw", D["dwell_s"])))
+    for key, rate, to_rate in (("tx_off", "k_on", lambda v: 1 / (v * 60.0)), ("tx_on", "k_off", lambda v: 1 / (v * 60.0)),
+                               ("tx_ini", "k_init", lambda v: 1 / v)):
+        if g(key) is not None:
+            p[rate] = to_rate(float(g(key)))
     return p
 
 
@@ -187,7 +198,8 @@ def render(run_path: Path | None = None) -> None:
     style.intro(st, "How the distance between a promoter and its enhancer, taken from a saved polymer simulation, makes the promoter switch ON, "
                     "fire polymerases, and produce a bright MS2 spot. Every step has its own plot.",
                 "Work through steps 1 to 9 from top to bottom. Change any number and everything below updates. Step 8 sweeps one setting; "
-                "step 9 gives the command (or sidebar checkbox) to run it in a movie. Defaults mimic the TFF1 gene; rates are per second of real time.")
+                "step 9 gives the command (or sidebar checkbox) to run it in a movie. Defaults: a bursty placeholder gene (OFF 20 min, ON 45 s, ~7 Pol II per "
+                "burst) and a smooth enhancer effect with half its strength at 400 nm; rates are per second of real time.")
     st.markdown("### From chromosome distance to the MS2 spot")
     st.markdown(overview_svg(), unsafe_allow_html=True)
     st.caption("The polymer simulation tells us how far the enhancer is from the promoter at every moment. That distance sets how "
@@ -304,9 +316,15 @@ def render(run_path: Path | None = None) -> None:
     # 5 polymerases
     _step(5, "Polymerases travel along the gene", "Each initiation sends one Pol II along the MS2 cassette and the gene body at the "
                                                    "speed set above. The picture is a kymograph: time across, position along the gene up.")
-    span = float(st.slider("Show a window of (min)", 5, int(max(10, minutes)), int(min(30, minutes)), 5, key="tx_win"))
-    start = float(st.slider("Window starts at (min)", 0, int(max(0, minutes - span)), 0, 5, key="tx_start"))
     ev = cell.events
+    span = float(st.slider("Show a window of (min)", 5, int(max(10, minutes)), int(min(30, minutes)), 5, key="tx_win"))
+    # open on this cell's first Pol II: with a mean OFF time of 20 min a window from 0 min was often empty
+    first = int(max(0.0, ev.init_s.min() / 60 - 1)) if len(ev) else 0
+    last = int(max(0, minutes - span))
+    start = float(st.slider("Window starts at (min)", 0, max(last, 1), min(first, last), 1, key=f"tx_start_{seed}",
+                            help="Starts just before this cell's first Pol II."))
+    if not len(ev):
+        st.info(f"This cell made no Pol II in {minutes:g} min (the promoter never switched ON). Press **New random cell** above, or make the movie longer.")
     L_kb = p.cassette_kb + p.gene_kb
     fig, ax = plt.subplots(2, 1, figsize=(14, 4.4), sharex=True, gridspec_kw={"height_ratios": [2.2, 1]})
     ax[0].axhspan(0, p.cassette_kb, color=C["ms2"], alpha=0.12)

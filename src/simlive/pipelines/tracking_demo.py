@@ -240,7 +240,7 @@ def _write_locus_results(A: _Analysis, out6: Path, suffix: str, pos: pd.DataFram
     (dist_fn(pos, A.px_um) if len(pos) else pd.DataFrame(columns=EMPTY_DIST)).to_csv(out6 / f"locus_distances{suffix}.csv", index=False)
     if score_fn is None:
         return None
-    err, sc = score_fn(pos, A.truth, A.px_um, strays=A.strays) if score_fn is score_localization else score_fn(pos, A.truth, A.px_um)
+    err, sc = score_fn(pos, A.truth, A.px_um, strays=A.strays)
     err.to_csv(out6 / f"localization_errors{suffix}.csv", index=False)
     return sc
 
@@ -400,7 +400,7 @@ def _isolate_and_analyze(cfg: dict, run: Path, progress, cal_dir: Path | None = 
     try:  # peak working set of this (main) process over the whole run, incl. segmentation/tracking input arrays
         import psutil
         scores["pipeline_main_process_peak_mb"] = round(psutil.Process().memory_info().peak_wset / 2**20, 1)
-    except Exception:
+    except (ImportError, AttributeError, OSError):   # no psutil, or not Windows (peak_wset is Windows-only)
         pass
     (run / "stage6_analysis" / "scores.json").write_text(json.dumps(scores, indent=2, default=str))
     write_provenance(run / "stage5_cells", cfg, int(cfg["seed"]))

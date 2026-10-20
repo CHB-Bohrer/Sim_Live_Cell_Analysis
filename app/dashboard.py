@@ -329,6 +329,13 @@ with st.sidebar.expander("🔬 New single-cell loci run"):
 
 def launch(overrides, config=None):
     """Run scripts/run_tracking_demo.py in a separate process and stream its progress into the page."""
+    from simlive.stage2_cells.motion import placement_problem
+
+    # the nuclei of the first frame must fit in the field (e.g. 8 nuclei do not fit in the 40 um biplane field): say so before starting
+    problem = placement_problem(load_config(config or REPO_ROOT / "configs" / "tracking_demo.yaml", list(overrides)))
+    if problem:
+        st.error(f"Not started: {problem}.")
+        return
     cmd = [sys.executable, str(REPO_ROOT / "scripts" / "run_tracking_demo.py")]
     if config:
         cmd += ["--config", str(config)]
@@ -422,6 +429,7 @@ runs = list_runs()
 if not runs:
     style.hero(st, "Sim Live Cell Analysis", "No movie runs yet. Open New simulation in the sidebar and press Run. "
                                                 "The chromatin library can already be generated and monitored below.")
+    style.tutorial_banner(st)
     import chromatin_tab  # noqa: E402
     import library_tab  # noqa: E402
     style.guide(st)
@@ -445,10 +453,25 @@ run_path = RUNS / st.session_state["run"]
 R = load_run(str(run_path), (run_path / "stage7_validation" / "metrics.json").stat().st_mtime)
 T = len(R["gt"])
 
+# Only the open page is computed. st.tabs ran the code of all 14 tabs on every rerun (~20 s with warm caches, ~40 s cold), and a full
+# rerun jumped back to the first tab; the page choice lives in session state, so it also survives reruns.
+PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'ms2': '🧮 MS2 → Pol II', 'ep': '🔗 E–P curve', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
+if st.session_state.get("page") not in PAGES.values():
+    st.session_state["page"] = PAGES["movie"]
+# pages that do not use the selected run (sweeps over many runs, the chromatin library, the E-P curve model): the run's summary and
+# tracking scores are not shown above them (they used to be, which suggested they were related)
+NOT_ABOUT_RUN = {PAGES[k] for k in ("scan", "ep", "lib", "chrom")}
+about_run = st.session_state["page"] not in NOT_ABOUT_RUN
+
 # ----------------------------------------------------------------------------- headline numbers
-style.hero(st, "Cell tracking: how well did we do?",
-           f"Run {run_path.name} · {R['cells'].cell_id.nunique()} cell IDs · {T} frames · "
-           f"{R['cfg']['optics']['pixel_size_nm']} nm/px")
+if about_run:
+    style.hero(st, "Cell tracking: how well did we do?",
+               f"Run {run_path.name} · {R['cells'].cell_id.nunique()} cell IDs · {T} frames · "
+               f"{R['cfg']['optics']['pixel_size_nm']} nm/px")
+else:
+    style.hero(st, "Sim Live Cell Analysis", f"{st.session_state['page']}: this page does not depend on the selected run, so its summary and "
+                                             "scores are shown on the run pages (🎞 Movie and the others) instead.")
+style.tutorial_banner(st)
 style.guide(st)
 style.glossary(st)
 
@@ -505,24 +528,20 @@ def run_summary() -> None:
                    "picture, how much each changes it, and the full explanation.")
 
 
-run_summary()
-st.caption("Headline scores for the selected run. Both rows score the tracker against the true cell IDs: the first on masks from automatic "
-           "segmentation (realistic), the second on perfect masks (isolates the linking error). 1.0 is perfect for CHOTA and LNK.")
-for v in ("auto_masks", "gt_masks"):
-    m = R["metrics"][v]
-    st.markdown(f"**{VARIANT_LABEL[v]}**")
-    a, b, c, d = st.columns(4)
-    a.metric("CHOTA", f"{m['CHOTAMetric']['CHOTA']:.3f}", help="Detection + trajectory association, 1 = perfect")
-    b.metric("LNK", f"{m['CTCMetrics']['LNK']:.3f}", help="Cell Tracking Challenge linking score, 1 = perfect")
-    c.metric("ID switches", m["Identity"]["id_switches"], help="Times a true cell changed track ID")
-    d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
-             help="Fraction of cell-frames on the cell's main track ID")
+if about_run:
+    run_summary()
+    st.caption("Headline scores for the selected run. Both rows score the tracker against the true cell IDs: the first on masks from automatic "
+               "segmentation (realistic), the second on perfect masks (isolates the linking error). 1.0 is perfect for CHOTA and LNK.")
+    for v in ("auto_masks", "gt_masks"):
+        m = R["metrics"][v]
+        st.markdown(f"**{VARIANT_LABEL[v]}**")
+        a, b, c, d = st.columns(4)
+        a.metric("CHOTA", f"{m['CHOTAMetric']['CHOTA']:.3f}", help="Detection + trajectory association, 1 = perfect")
+        b.metric("LNK", f"{m['CTCMetrics']['LNK']:.3f}", help="Cell Tracking Challenge linking score, 1 = perfect")
+        c.metric("ID switches", m["Identity"]["id_switches"], help="Times a true cell changed track ID")
+        d.metric("Identity kept", f"{100 * m['Identity']['identity_preserved_fraction']:.1f}%",
+                 help="Fraction of cell-frames on the cell's main track ID")
 
-# Only the open page is computed. st.tabs ran the code of all 14 tabs on every rerun (~20 s with warm caches, ~40 s cold), and a full
-# rerun jumped back to the first tab; the page choice lives in session state, so it also survives reruns.
-PAGES = {'movie': '🎞 Movie', 'metrics': '📊 Metrics', 'traj': '🧭 Trajectories', 'scan': '📈 Scans', 'cells': '🔬 Cells', 'spots': '🔎 Spot finding', 'img': '🖼 Images', 'cal': '🎯 Calibration', 'stage': '📍 Stage & fiducials', 'tx': '⚡ Transcription', 'ms2': '🧮 MS2 → Pol II', 'ep': '🔗 E–P curve', 'probe': '🧪 Probes', 'lib': '🗂 Library', 'chrom': '🧬 Chromatin', 'cfg': '⚙ Config'}
-if st.session_state.get("page") not in PAGES.values():
-    st.session_state["page"] = PAGES["movie"]
 page = st.segmented_control("Page", list(PAGES.values()), key="page", label_visibility="collapsed") or PAGES["movie"]
 
 # ----------------------------------------------------------------------------- movie
@@ -628,6 +647,42 @@ trajectory-association accuracy. **Track purity** = how much of each predicted t
     v = st.selectbox("Per-cell identity table for:", list(VARIANT_LABEL), format_func=VARIANT_LABEL.get)
     st.dataframe(R["v"][v]["per_cell"].sort_values("id_switches", ascending=False), hide_index=True,
                  width="stretch")
+    propagation_view()
+
+
+def propagation_view():
+    """Stage 7b: the locus results read through the tracker's IDs vs through the true IDs (scores.json from the pipeline)."""
+    st.markdown("#### Do tracking errors reach the locus results? (stage 7b)")
+    f = run_path / "stage6_analysis" / "scores.json"
+    sc = json.loads(f.read_text()) if f.exists() else {}
+    prop = sc.get("propagation") or {}
+    if not prop:
+        st.caption("Not available for this run: it has no loci, or it was made before stage 7b (2026-10-15), or tracking was skipped.")
+        return
+    rows = []
+
+    def row(label, s, extra=None):
+        if not s:
+            return
+        rows.append({"loci read through": label, "found": s.get("detection_rate"), "wrong pick (> 0.5 µm)": s.get("frac_far"),
+                     "on the other copy": s.get("frac_on_other_copy"), "on a stray spot": s.get("frac_on_stray"),
+                     "median error (nm)": 1000 * s["median_error_um"] if s.get("median_error_um") is not None else None,
+                     "rms error (nm)": 1000 * s["rms_error_um"] if s.get("rms_error_um") is not None else None,
+                     "on mixed tracks": (extra or {}).get("mixed_track_fraction", np.nan), "attributed": (extra or {}).get("attributed_fraction", np.nan)})
+    row("true cell IDs", sc.get("truth"))
+    row("true cell IDs, calibrated", sc.get("truth_calibrated"))
+    for src, d in prop.items():
+        name = {"tracked_auto_masks": "tracker IDs (automatic masks)", "tracked_gt_masks": "tracker IDs (perfect masks)"}.get(src, src)
+        row(name, d.get("uncalibrated"), d.get("uncalibrated"))
+        row(name + ", calibrated", d.get("calibrated"), d.get("calibrated"))
+    tab = pd.DataFrame(rows)
+    st.dataframe(tab, hide_index=True, width="stretch",
+                 column_config={c: st.column_config.NumberColumn(format="%.3f") for c in tab.columns if c not in ("loci read through",)
+                                and "nm" not in c} | {c: st.column_config.NumberColumn(format="%.0f") for c in tab.columns if "nm" in c})
+    st.caption("Every locus detection of a tracked cell is assigned to the true cell its tracker label covered most in that frame, then scored like the "
+               "true-ID analysis. A gap between a 'tracker IDs' row and the 'true cell IDs' row is what tracking (and the crops it gives) costs the locus "
+               "results. 'On mixed tracks' = share of detections on a tracker label that stood for two true cells at different times (an identity "
+               "switch); 'attributed' = share that could be given to a true cell at all.")
 
 # ----------------------------------------------------------------------------- trajectories
 @st.fragment

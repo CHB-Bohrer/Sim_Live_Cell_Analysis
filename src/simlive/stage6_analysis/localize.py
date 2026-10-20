@@ -344,6 +344,25 @@ def _nearest_other(j: pd.DataFrame, objects: pd.DataFrame, keys: list) -> np.nda
     return d.reindex(j.index).fillna(np.inf).to_numpy()
 
 
+def wrong_object_distances(j: pd.DataFrame, tr: pd.DataFrame, strays: pd.DataFrame | None) -> tuple[np.ndarray, np.ndarray]:
+    """For every detection of j (est_y_um, est_x_um; cell_id, t, locus_id, copy): the lateral distance (um) to the same locus of ANOTHER true
+    copy (tr: the truth), and to the nearest stray spot of its colour (strays: stage3_microscopy/stray_spots.csv; inf without). Used by the 2D
+    and the 3D scores to tell what a wrong pick landed on."""
+    other = tr[["cell_id", "t", "locus_id", "copy", "y_um", "x_um"]].rename(columns={"copy": "_c"})
+    oc = j[["cell_id", "t", "locus_id", "copy", "est_y_um", "est_x_um"]].reset_index().merge(other, on=["cell_id", "t", "locus_id"])
+    oc = oc[oc["copy"] != oc["_c"]]
+    d_other = (np.hypot(oc.est_y_um - oc.y_um, oc.est_x_um - oc.x_um).groupby(oc["index"]).min().reindex(j.index).fillna(np.inf).to_numpy()
+               if len(oc) else np.full(len(j), np.inf))
+    if strays is not None and len(strays):
+        st = strays[strays.channel.str.startswith("locus")].assign(locus_id=lambda d: d.channel.str[5:].astype(int))
+        sy, sx = ("y_drawn_um", "x_drawn_um") if "y_drawn_um" in st else ("y_um", "x_um")
+        st = st.assign(y_um=st[sy], x_um=st[sx])
+        d_stray = _nearest_other(j, st, ["cell_id", "t", "locus_id"])
+    else:
+        d_stray = np.full(len(j), np.inf)
+    return d_other, d_stray
+
+
 def copy_scores(pos: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """How well the number of copies per cell was found: share of cells with the right number, true copies never found, extra copies."""
     t = with_copy(truth)
@@ -378,18 +397,7 @@ def score_localization(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far
         return err, {"n_detections": int(len(pos)), **copy_scores(pos, truth)}
     vis = j.visible.to_numpy(bool)
     far = j.err_um.to_numpy() > far_um
-    other = tr[["cell_id", "t", "locus_id", "copy", "y_um", "x_um"]].rename(columns={"copy": "_c"})
-    oc = j[["cell_id", "t", "locus_id", "copy", "est_y_um", "est_x_um"]].reset_index().merge(other, on=["cell_id", "t", "locus_id"])
-    oc = oc[oc["copy"] != oc["_c"]]
-    d_other = (np.hypot(oc.est_y_um - oc.y_um, oc.est_x_um - oc.x_um).groupby(oc["index"]).min().reindex(j.index).fillna(np.inf).to_numpy()
-               if len(oc) else np.full(len(j), np.inf))
-    if strays is not None and len(strays):
-        st = strays[strays.channel.str.startswith("locus")].assign(locus_id=lambda d: d.channel.str[5:].astype(int))
-        sy, sx = ("y_drawn_um", "x_drawn_um") if "y_drawn_um" in st else ("y_um", "x_um")
-        st = st.assign(y_um=st[sy], x_um=st[sx])
-        d_stray = _nearest_other(j, st, ["cell_id", "t", "locus_id"])
-    else:
-        d_stray = np.full(len(j), np.inf)
+    d_other, d_stray = wrong_object_distances(j, tr, strays)
     ok = err[vis]
     n_vis = int(tr.visible.sum())
     nv = max(int(vis.sum()), 1)

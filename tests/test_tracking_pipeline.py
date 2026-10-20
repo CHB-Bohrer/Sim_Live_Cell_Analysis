@@ -96,3 +96,26 @@ def test_cells_can_walk_out_of_the_field_and_back(tmp_path):
     gt = write_ctc(masks, tab, tmp_path / "gt")
     m = evaluate(gt, write_ctc(masks, tab, tmp_path / "pred"))
     assert m["CTCMetrics"]["DET"] == 1.0
+
+
+def test_cell_layout_is_redrawn_instead_of_failing_and_unchanged_when_it_fit():
+    from simlive.stage2_cells.motion import place_cells, placement_problem
+
+    biplane = REPO_ROOT / "configs" / "loci_demo.yaml"
+    # 4 nuclei in the 40 um biplane field: one at a time at random used to block the last one (run aborted); a 2 x 2 layout fits
+    assert placement_problem(load_config(biplane, ["instrument=vutara_vxl_biplane", "cells.n_cells=4", "seed=71"])) is None
+    msg = placement_problem(load_config(biplane, ["instrument=vutara_vxl_biplane", "cells.n_cells=8", "seed=71"]))
+    assert msg and "Could not place 8 nuclei" in msg and "40 x 40 um" in msg
+
+    # a layout that fitted on the first try is exactly the old one (same random numbers in the same order)
+    bound, lo, hi = np.full(6, 7.0), np.zeros(2), np.array([80.0, 80.0])
+    old_rng, new_rng = np.random.default_rng(5), np.random.default_rng(5)
+    old = np.zeros((6, 2))
+    for i in range(6):
+        for _ in range(2000):
+            p = old_rng.uniform(lo + bound[i], hi - bound[i])
+            if all(np.hypot(*(p - old[j])) >= bound[i] + bound[j] for j in range(i)):
+                old[i] = p
+                break
+    assert np.array_equal(place_cells(bound, lo, hi, new_rng), old)
+    assert old_rng.uniform() == new_rng.uniform()          # and the stream continues from the same place

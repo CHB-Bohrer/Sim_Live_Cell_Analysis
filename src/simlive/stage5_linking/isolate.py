@@ -25,7 +25,7 @@ import tifffile
 def _memmap(path):
     try:
         return tifffile.memmap(path, mode="r")
-    except Exception:  # compressed / non-contiguous files can't be memory-mapped
+    except ValueError:  # compressed / non-contiguous files can't be memory-mapped (tifffile raises ValueError)
         return tifffile.imread(path)
 
 
@@ -99,7 +99,7 @@ def _extract_cell(job: dict) -> dict:
     try:
         import psutil
         summary["_peak_mb"] = psutil.Process().memory_info().peak_wset / 2**20
-    except Exception:
+    except (ImportError, AttributeError, OSError):   # no psutil, or not Windows (peak_wset is Windows-only)
         summary["_peak_mb"] = float("nan")
     return summary
 

@@ -84,11 +84,12 @@ loci:                       # STAND-IN for stage 1 (polychrom): confined diffusi
       k_on: 0.000333         # OFF -> ON when the enhancer is far (1/3000 s: mean OFF 50 min; TFF1 burst period 66 min, Rodriguez 2019)
       k_off: 0.00104         # ON -> OFF (1/960 s: bursts last 16 min, TFF1)
       k_init: 0.00167        # Pol II initiations per second while ON (one per 600 s: ~1.6 per burst; TFF1 1.5 +/- 0.5)
-      coupling: contact      # contact (sharp) | hill | exp | none (control)
+      coupling: hill         # contact (sharp) | hill | exp | none (control). hill since 2026-10-20 (the user's E-P choice of 2026-10-14):
+      #   the sharp 150 nm contact was reached in only 0.75% of frames by the library distances (400 nm: 11.8%), so it barely coupled
       coupled_rate: k_on     # which rate depends on distance: k_on | k_init | k_off
       fold: 12               # coupled rate is this many times faster at full contact
       d_contact_nm: 150      # sharp contact: enhancer touches promoter when closer than this
-      d_half_nm: 200         # hill: distance of half effect
+      d_half_nm: 400         # hill: distance of half effect (n = 4: 6% of full effect at 800 nm, 94% at 200 nm)
       hill_n: 4
       d_decay_nm: 150        # exp: decay length
       f_const: 0.1           # none: constant coupling (control with the same average)

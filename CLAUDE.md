@@ -60,6 +60,43 @@ branch, not main": that was a misreading of the user's intent.)
   copy 1 rate, MS2 on all copies, stray rate/brightness, copies looked for, pair prior. Every page's figures audited with `scripts/audit_figures.py`
   (AppTest, saves each figure); changed pages also checked in a browser (port 8502).
 
+## Known problems fixed, tutorial link (2026-10-20; user: "Fix all known problems and make a link to the tutorial on the main page please")
+- **Tutorial link on the dashboard home page** (both home versions): `style.tutorial_banner` (styled HTML, wraps on narrow windows) links to
+  `app/static/tutorial/index.html` (opens in a new tab) and to the video release. `style.publish_tutorial()` copies `docs/tutorial` into
+  `app/static/tutorial` (changed files only; gitignored): a page served over http may not link to `file://`, Streamlit refuses symlinks that
+  leave `app/static`, and Streamlit 1.65 serves .html/.js with the right content types (checked). docs/tutorial stays the source.
+- **Multi-copy linker:** `multicopy.untangle_by_place` + `repair` (docs/SPOT_FINDING.md "Copy swaps through wrong picks and gaps"): copy swaps made
+  through wrong picks or gaps were invisible to the step costs (showcase, calibrated, tracked IDs: 7.9% on the other copy -> 0, rms 0.80 -> 0.15 um).
+  25 sweep movies re-analysed, all three variants better (default: other copy at most 0.8%, was up to 2.5%; wrong picks 2.3 -> 0.6% at 1 stray/min),
+  none worse by > 1 point. Dropped on the way (they made things worse): absolute territories in the nucleus frame (orientation flips by 180 deg on
+  round nuclei), the pass on per-colour paths before pairing (stray paths at 4/min). 3D with two copies works (biplane run seed 72: 8/8 copies);
+  3D scores now report stray / other-copy picks too.
+- **E-P curve:** wrong-pick mixture (`with_outliers`, `assumed_outlier_rate`; corrected 4.11-4.13 vs reference 4.07 at 5-40% wrong picks when the
+  share is supplied); bootstrap re-fits the prior per replicate; the "intervals 25% too narrow" claim WITHDRAWN (scan settings reused the same 20
+  populations; 60 fresh ones give coverage 0.95). E-P page has the checkbox. docs/EP_CURVE.md "Update 2026-10-20".
+- **Crash fixed:** cell placement drew nuclei one at a time and gave up when early ones blocked the rest (4 nuclei in the 40 um biplane field
+  crashed; 8 never fit). `motion.place_cells` redraws the whole layout (100 tries; the first try uses the old random numbers, so every run that
+  worked is unchanged, tested) and `placement_problem(cfg)` lets the sidebar refuse an impossible layout BEFORE starting, with the reason.
+- **Transcription:** default coupling is now hill, half effect at 400 nm (transcription.DEFAULTS, loci_demo/loci_library/loci_3d configs, page):
+  the user's E-P choice; the sharp 150 nm contact was reached in 0.75% of frames of the library distances (400 nm: 11.8%), so it barely coupled.
+  BUG fixed: the sidebar hand-off fell back to the OLD TFF1-like gene when the Transcription tab had not been opened. Step 5 opens on the first burst.
+- **Dashboard:** run summary + tracking scores only above pages that use the run (`NOT_ABOUT_RUN`: Scans, E-P curve, Library, Chromatin); one
+  library selector on the Library page (and Chromatin opens on it); the live monitor checked during a real 2-simulation GPU library run, and a
+  stalled generator no longer shows "now running" / time left; stage 7b table on the Metrics page (`propagation_view`); guide / glossary updated.
+- **Code:** broad `except Exception` blocks narrowed to what they mean; `tests/test_dashboard_pages.py` (every page on the saved showcase runs + the
+  empty home page; skipped where the runs do not exist; it caught a syntax slip in library_tab.py that this round introduced); `tests/test_segtrack_gpu.py`
+  (Cellpose + Trackastra on a synthetic movie); new tests for placement, untangle_by_place, repair, wrong-pick correction.
+- **Lesson (again):** do not edit `src/` while a pipeline run or a re-analysis is going: worker processes import modules from disk (a 3D run crashed
+  with "name 'repair' is not defined" between two edits of one file). Do multi-step source edits in one write, or wait.
+- **Needs the user (cannot be fixed here):** measured values for every placeholder (MS2 brightness R, instrument / camera, probe kinetics, stray-spot
+  rate and brightness, wrong-pick share for the E-P fit), a measured MSD for the polymer calibration, a real movie; which meaning of nucleus
+  "steadiness"; whether loops should live longer (more blocks per simulation) and whether a surrogate distance process should cover > 61 min movies;
+  the plain-polymer library (73 h of GPU) needs a go-ahead; `gh auth refresh -s workflow` to enable docs/ci/syntax.yml; two stale entries
+  `.git/worktrees/head_wt` and `.git/worktrees/wt06e` carry an "Everyone: deny delete" permission (made when worktrees were created inside the
+  sandbox) and make every git command print "Permission denied": remove them as the user (e.g. `icacls <dir> /remove:d Everyone` then delete).
+- **Planned work, not defects (unchanged):** stage 5 stitching of broken / switched tracks, 3D tracking and 3D cell isolation, Ultrack / TrackMate,
+  density and frame-interval scans, choosing spots with promoter + enhancer + MS2 jointly, sister chromatids, E-P pool from the 100-simulation library.
+
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
   pip freeze, polychrom commit `11a870c` (installer is pinned to it), model-weight SHA-256s, a frozen conda env copy
@@ -155,15 +192,16 @@ STAND-INS (to be replaced): stage 1 = `stage1_chromatin/toy_loci.py` (2 loci per
 the nucleus frame, NOT polychrom); stage 6 = `stage6_analysis/spots.py` + `localize.py` / `localize3d.py` (placeholder for the user's
 analysis, but now a measured one: see "Spot finding" below). The loci/isolation pipeline runs via `configs/loci_demo.yaml`.
 Library wiring (2026-10-08): `stage1_chromatin/library_loci.py` (`loci.source: library`, config `configs/loci_library.yaml`; one simulation per cell, random rotation + time offset, polymer coordinates converted to true nm with `nm_per_unit` (from `loci.calibration`, see "Polymer calibration"; NOT rescaled to the nucleus) and placed at a random territory centre per cell (re-drawn until all loci stay inside the nucleus in every frame), `block_duration_s` likewise) is unit-tested with a fake library on CPU and was run end-to-end (tracked, 2026-10-15) on the 4-simulation `smoke` library; The 100-simulation loop-extrusion library exists since 2026-10-18 (showcase loci_library_seed12_87a16d uses it).
-Dashboard redesign + library monitor (2026-10-08, built on the cloud container with fake data, NOT yet seen on the Windows machine
-with a real GPU run): `.streamlit/config.toml` + `app/style.py` (one theme, CSS, matplotlib defaults), new 🗂 Library tab
+Dashboard redesign + library monitor (2026-10-08; the monitor was checked LIVE on 2026-10-20 with a 2-simulation test library on the GPU: running badge,
+1 of 2 finished, current simulation's block and time left, GPU load, then "Stalled" after the generator was stopped): `.streamlit/config.toml` + `app/style.py` (one theme, CSS, matplotlib defaults), new 🗂 Library tab
 (`app/library_tab.py`): live monitor (refreshes every 5 s) of `<library>/status.json` (written by `run_chromatin_library.py`) and the
 running simulation's `progress.json` (written by `polymer3d.py` every 20 blocks): state badge (running / stalled / finished /
-stopped), n done, ETA, GPU load via nvidia-smi, recent log; plus a picker to choose which simulations a movie uses.
+stopped), n done, ETA, GPU load via nvidia-smi, recent log; plus a picker to choose which simulations a movie uses. ONE library selector for the whole
+page (key `lib_sel`, opens on a running library, else the one with most simulations; the Chromatin page opens on the same library) since 2026-10-20.
 Choosing simulations: `library.assign_simulations(..., pool=, pinned=)`; config `loci.sim_ids` (restrict the pool) and
 `loci.pin: {cell_id: sim_id}`; the sidebar's loci form has a source radio (stand-in / library) that uses the Library tab's choice.
-The picker's preview uses the movie's own random stream (`SeedSequence(seed).spawn(4)[2]`), so it matches the real assignment when no cell divides.
-Untested: `status.json` writing needs a real library run (GPU).
+The picker's preview uses the movie's own random stream (`SeedSequence(seed).spawn(4)[2]` = `spawn(10)[2]`: a child's numbers do not depend on how many
+siblings are spawned), so it matches the real assignment when no cell divides.
 Probe binding model (2026-10-08): `stage1_chromatin/probes.py`, stage 1b. Each locus (locus 0 = promoter, 1 = enhancer, separate parameters)
 has N probes cycling FREE -(k_bind)-> BOUND -(k_scan)-> SCANNING -(k_off)-> FREE, plus BOUND -(k_unbind)-> FREE; optional `capacity` (binding
 sites). Exact Gillespie (numba); exact theory in `summary()` (mean, CV, dwell time, correlation time); tested against each other
@@ -175,12 +213,13 @@ Sweeps: `scripts/sweep_probes.py` (model only, seconds, -> `$SIMLIVE_DATA/probe_
 with `scripts/sweep.py --config configs/loci_demo.yaml --set loci.probes.enabled=true --grid loci.probes.promoter.k_off=...` (its metrics are still
 the tracking metrics only; locus-analysis metrics wait for stage 6/7b). Dashboard 🧪 Probes tab (`app/probe_tab.py`): explainer, per-locus
 parameter panel with presets, live drawing of the model with probe counts, example trace + count histogram, parameter sweep, command/sidebar
-hand-off to a movie (sidebar checkbox in the loci form). Seen only on the cloud container with no real runs.
+hand-off to a movie (sidebar checkbox in the loci form).
 Transcription / MS2 model (2026-10-09; stage 1c): `stage1_chromatin/transcription.py` (details and the user's decisions: `docs/PLAN_transcription.md`).
 Promoter OFF -(k_on)-> ON -(k_off)-> OFF, Pol II initiation k_init while ON, Pol II ramp over the MS2 cassette then plateau until released
 (random dwell); MS2 signal = loops carried by all Pol II. The promoter-enhancer distance d(t) (3D, from the library trajectories at full block
 resolution, via `simulate_library_loci(..., return_traces=True)`; toy loci use their 2D lab distance) multiplies ONE chosen rate
-(`coupled_rate`: k_on default | k_init | k_off) by 1 + (fold-1) f(d), f = sharp contact (default) | hill | exp | none (control). ALL rates are per second
+(`coupled_rate`: k_on default | k_init | k_off) by 1 + (fold-1) f(d), f = hill (default since 2026-10-20: half effect at 400 nm, n = 4, the user's E-P choice;
+the old default, a sharp 150 nm contact, was reached in only 0.75% of frames by the library distances, so it barely coupled) | contact | exp | none (control). ALL rates are per second
 of real time, so the frame interval can change freely (library loci are interpolated between blocks; `check_sampling` warns when too coarse).
 Exact Gillespie + exact expectations (`expected_on`, `expected_ms2`); 12 tests in `tests/test_transcription.py` (constant-distance theory, two-valued
 distance vs exact expectation, frame-interval independence, null/positive correlation with contact, interpolation, MS2 spot in the nuclear
@@ -189,8 +228,8 @@ and renders the spot at the promoter into the nuclear channel (`render_nuclei(..
 stream ss[5]). If the movie is longer than the saved polymer trajectory, the trajectory is repeated back and forth with a warning (correlations beyond
 its length are artificial); the planned surrogate distance process (PLAN step 5) is NOT built. Dashboard ⚡ Transcription tab (`app/transcription_tab.py`): nine
 numbered steps (sampling, distance, coupling, promoter, Pol II kymograph, MS2 signal with exact expectation, simulated microscope tiles, parameter sweep,
-hand-off to a movie + sidebar checkbox). Checked in a browser on the cloud container with a FAKE library only; the pipeline was run through stage 4
-segmentation (trackastra not installed there). LITERATURE NUMBERS ARE UNVERIFIED search-summary values (primary papers blocked from the build machine); all
+hand-off to a movie + sidebar checkbox). Its widgets start from `transcription.DEFAULTS` (until 2026-10-20 the hand-off fell back to the OLD TFF1-like gene
+when the tab had not been opened: a sidebar movie then used a different gene than the tab showed); step 5 opens on the cell's first Pol II. LITERATURE NUMBERS ARE UNVERIFIED search-summary values (primary papers blocked from the build machine); all
 MS2 brightness, coupling strength, initiation rate and nm_per_unit / block_duration_s are placeholders.
 NOT built: MSD calibration from MEASURED data (an assumed-D calibration exists, see below), surrogate distance process for long movies, 3D tracking / 3D cell isolation, stage 5 beyond
 isolation (stitching the locus results of broken / switched tracks into one cell), the user's stage 6 analysis, 7b for 3D (7b exists for the 2D locus results), Ultrack/TrackMate adapters,
@@ -282,7 +321,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 192 CPU + 6 GPU tests at 2026-10-20. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 213 CPU + 7 GPU tests at 2026-10-20. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 
@@ -320,7 +359,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   (`stage2_cells.motion.add_z`, own random stream `ss[6]`: the lateral simulation is unchanged), loci get `z_um` (toy and library). `Imager` renders (nz, y, x) frames: 3D Gaussian PSF core + haze,
   nuclei = flattened ellipsoids, per-plane noise (`t * 4096 + k` into the camera RNG). New sources: `slice_skew`; z parameters in `stage_drift` (drift_z), `chromatic_shift` (shift_z_um), `defocus` (axial
   shift in a stack). Saved: `<ch>_zstack.tif` (T,Z,Y,X), `labels_3d.tif`, plus 2D projections `<ch>.tif` / `labels.tif` (max) that stages 4-5 use unchanged. `localize3d.py` (placeholder 3D localizer) +
-  `score_localization_3d`; scores `truth_3d`. Pipeline stream layout is now `SeedSequence(seed).spawn(8)`: 0 motion, 1 imaging, 2 loci, 4 probes, 5 transcription, 6 heights, 7 free (entropy_for still uses stream 1).
+  `score_localization_3d`; scores `truth_3d`. Pipeline stream layout is now `SeedSequence(seed).spawn(10)`: 0 motion, 1 imaging, 2 loci, 4 probes, 5 transcription, 6 heights, 8 copies, 7 and 9 free (entropy_for still uses stream 1).
 - calibration (`stage3_microscopy/calibration/`: `sim.py` acquisitions of the SAME instrument with their own session, `fit.py` blind estimators (dark / photon transfer curve / flat-field / flicker / beads),
   `model.py` `Calibration` (maps, values, `correct`, `correct_positions`, save/load), `run.py` `run_calibration` -> (Calibration, estimate-vs-truth table); `scripts/run_calibration.py`; config block `calibration:`).
   Imager now separates `entropy` (instrument: fixed patterns) from `session` (drift, focus, flicker, per-frame noise; equal for a movie). The pipeline runs it AFTER the tracker (numpy LAPACK loads a second
@@ -425,7 +464,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
     - 60x/1.3 NA silicone, ~100 nm px, Orca Fusion BT QE 0.95, top-hat (vignette 3% ASSUMED), active focus (defocus 30 nm), sequential colours;
     - bleed-through FROM SPECTRA (FPbase EGFP: 0.0042 cross-excitation at 555 nm x 0.062/0.717 in-band emission = 0.036%, vs ~8.6% if excited
       simultaneously);
-    - biplane (2 planes 600 nm apart, 50:50) NOT built.
+    - biplane (2 planes 600 nm apart, 50:50): built 2026-10-17 (`vutara_vxl_biplane`, see "Vutara biplane mode").
   - **New error sources** (errors.INDEX frozen; `_LATER` list gives new sources the next numbers):
     - `sequential_colour`: later colours drawn at t + delay by interpolation + a Brownian bridge of the locus motion RELATIVE to its nucleus;
       `Imager.locus_positions_at_exposure`, 2D only;
@@ -496,11 +535,16 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   distance were fixed: the promoter's response delay flattens it).
 - Findings (placeholders: invented distance dynamics, 57 nm per axis, 2D, 5% missed, 2% wrong picks): null false positive 3.3% (60 populations); 2D projection of the distance costs
   ~35% of the effect if ignored (2.7 vs 4.1) and is fully corrected by the EIV fit; localization precision matters only above ~200 nm; colour shift up to 100 nm harmless; missed frames
-  harmless to 60%; WRONG PICKS are the bad one (5% -> -6%, 10% -> -13%, 20% -> -24%; not corrected in the fit); cells: contrast sd 0.77 (50) -> 0.055 (3200), d_half scatter 11% -> 2%
+  harmless to 60%; WRONG PICKS are the bad one (5% -> -6%, 10% -> -13%, 20% -> -24% uncorrected; corrected since 2026-10-20 when their share is supplied, see below); cells: contrast sd 0.77 (50) -> 0.055 (3200), d_half scatter 11% -> 2%
   with a +3.6% offset; contact fraction 0.03 is biased low (2.7 vs 3.5). MS2 -> ON: the balanced-accuracy burst rule has 8% false positives next to real bursts, costs ~10% of the
   contrast, and the simple (sensitivity, false-positive) attenuation correction FAILS for it (9.2 vs 4.07); conservative rules (2,2), (3,3), (8,6) are nearly unbiased uncorrected
-  and the correction is then acceptable (4.3-4.9). MS2 noise of 2 x one Pol II with 20 s frames halves the contrast. The cell-bootstrap intervals are ~25% too narrow (coverage 85-90%).
-- NOT done: wrong-pick mixture in the fit; other coupling shapes; the real polymer-library distances (needs MSD calibration); linking sigma to photons / the movie's spot finder; a convergence
+  and the correction is then acceptable (4.3-4.9). MS2 noise of 2 x one Pol II with 20 s frames halves the contrast. (An earlier note "intervals ~25% too narrow" was WITHDRAWN 2026-10-20: see below.)
+- 2026-10-20 (docs/EP_CURVE.md "Update 2026-10-20"): (1) wrong-pick mixture `ep_curve.with_outliers` / `Measurement.assumed_outlier_rate` (kernel (1 - w) K + w q, q = a wrong
+  pick's distance distribution; w must be SUPPLIED, it is not identifiable from distances): contrast 4.11-4.13 at 5-40% wrong picks with the true w (reference 4.07; uncorrected
+  3.83 / 3.55 / 3.09 / 2.35); half the share corrects half, twice the share over-corrects and blows up at 40%. E-P page: checkbox "Analysis knows the wrong-pick share".
+  (2) bootstrap replicates re-estimate the true-distance prior and refit on the full grid; the "25% too narrow" came from every scan setting reusing the SAME 20 populations:
+  with 60 fresh populations coverage of the contrast is 0.95 (null: 6.7% exclude 1, nominal 5%); d_half intervals cover 88% (its +2-4% offset).
+- NOT done: other coupling shapes; the real polymer-library distances (needs MSD calibration); linking sigma to photons / the movie's spot finder; a convergence
   check inside `estimate_on` (single chain); the real MS2 noise relative to one Pol II (user must supply).
 
 ### E-P curve with POLYMER distances and three microscopes (2026-10-14, second version; docs/EP_CURVE.md "Update 2026-10-14 (b)")
@@ -515,7 +559,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   plane / 27 (z-stack) or 51 (biplane) in z, exposure motion 38-62, sequential colours 0.15 s apart = 120 (the biggest), piezo 12; total ~126-140. At 600 cells x 1 h: contrast 4.77 +- 1.00 (2D), 4.25 +- 0.72 (z-stack), 4.45 +- 0.80 (biplane), truth 3.80 +- 0.54; 95% interval width 5.1 / 3.9 / 3.1 / 2.3;
   null false positives 3-7%. Need ~10x more cells than with the invented process; frames every <= 10 s (reference falls 4.19 -> 1.78 at 80 s); biplane loses loci when focus is off by > 0.6 um or photons < 0.3x; simultaneous colours cut ~20% of the scatter; the ON state from the MS2 trace is biased high (calls cluster near the enhancer) and unstable.
 - NOT done: wrong-pick filter from the locus's past positions (the spot finder already links with a diffusion model; the scan's wrong picks are random draws); nucleus "steadiness" (simulated nuclei: outline changes 0.29 um rms per 10 s frame, long/short radius 1.6, rotation 4.5 deg and centroid step 0.9 um per frame; awaiting which meaning the user intends);
-  rendering real z-stack / biplane movies and localizing in them (the acquisition model is vector-level); loop-extrusion timing is too fast at 0.46 s per block (loop lifetime 46 s); the library of 100 simulations.
+  rendering real z-stack / biplane movies and localizing in them (the acquisition model is vector-level); loop-extrusion timing is too fast at 0.46 s per block (loop lifetime 46 s); the E-P polymer pool still uses the 10 validation simulations (the 100-simulation library exists since 2026-10-18 and could replace it).
 
 ## Dashboard walk-through findings (2026-10-09)
 - Tested: all 24 coupling shape x rate combinations, frame intervals 5/20/120/600 s (warnings sensible), both sweeps, probe presets,
@@ -530,10 +574,9 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   (both loci on the last monomer in a 3 Mb library) -> now from the Transcription tab or the middle of the library region; Transcription tab default
   positions follow region size; run log decode crashed on non-ASCII (cp1252) -> UTF-8; figure fonts were tiny.
 - `st.rerun(scope="fragment")` buttons work in the browser but raise under AppTest (test artefact only).
-- Not done: the live library monitor was never looked at while a library ran (only fake files + finished libraries);
-  one library selector exists in the monitor and a separate one in the picker (confusing; not merged); the header metrics of the selected run
-  sit above the Transcription/Probes/Library/Chromatin tabs although unrelated to them; default seed-1 cell in Transcription step 5 shows no Pol II
-  (empty plots); with 50 nm/unit and 150 nm contact the smoke distances rarely touch, so coupling looks inert (placeholder scale).
+- All four "not done" items of this walk-through were fixed on 2026-10-20: the live monitor was checked during a real (test) library run; one library selector per
+  page; the run's summary and tracking scores are no longer shown above pages that do not use the run (Scans, E-P curve, Library, Chromatin; `NOT_ABOUT_RUN`);
+  Transcription step 5 opens on the cell's first Pol II; the coupling default is the Hill curve at 400 nm (the 150 nm contact was reached in 0.75% of frames).
 - Literature checked against PMC full texts, see docs/PLAN_transcription.md: TFF1 ON 16 min (not 6), burst period 66-86 min, 1.5 transcripts/burst;
   Pol II 2.6 kb/min, 3' dwell 116 s (our default 30 s). Defaults not changed: needs the user's choice of gene.
 
@@ -556,7 +599,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 
 ## Narrated tutorial (2026-10-17; user: "in depth tutorial with animation and voice over ... the person should know how to use the UI")
 - `docs/tutorial/index.html` (+ `engine.js`, `anims.js`, `scenes_a.js`, `scenes_b.js`, `tutorial.css`, `shots_data.js`, `img/`): self-contained, no libraries, works from `file://`.
-  38 scenes / 243 sentences (~50 min; 2026-10-20). Narration = the browser's speech synthesis (Edge "Online (Natural)" voices are best; the picker is on the start screen). It is NOT
+  38 scenes / 246 sentences (~50 min; 2026-10-20). The dashboard home page links to it (served from a copy in app/static/tutorial, refreshed from docs/tutorial on every home-page load: edit docs/tutorial only). Narration = the browser's speech synthesis (Edge "Online (Natural)" voices are best; the picker is on the start screen). It is NOT
   Claude's own voice (not callable from a local page); the MP4 (below) uses a Microsoft neural voice instead.
 - Screenshots are real dashboard pages: `scripts/tutorial/capture_shots.py` (Playwright driving the installed Edge, in a separate venv `C:\Users\cbohr\shotenv_tmp\v`, NOT the simlive env) captures TALL page images + the
   rectangle of each control; `scripts/tutorial/build_data.py <shots dir>` copies them to `docs/tutorial/img` and writes `shots_data.js`. Scenes refer to controls by name (`f("next", "Next error")`), so a
@@ -634,5 +677,6 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - Gotchas: (1) `python` in the Bash tool is the Microsoft Store shim: run Python only through `scripts\run.cmd`. (2) Do not edit source while a run is going: the process pool re-imports modules from disk. (3) Python `write_text`
   on this Windows machine writes CRLF (the repo's index is LF, git normalises; fine) and a `"\r"` inside a normal string literal in an edit script silently becomes a carriage return (it garbled a README edit once; reverted before commit): use the
   Edit tool or raw strings for docs. (4) skimage warns that `remove_small_objects(min_size)` is deprecated (removal in skimage 2.0): `segment.threshold_watershed` will need `max_size`.
-- Still open from the review (not done): coverage of `trackers`/Cellpose worker is only the registry (Trackastra and Cellpose run only in full pipeline runs); dashboard has no automated tests; nine broad `except Exception`
-  blocks remain (calibration fit, isolate, bleach, two dashboard tabs); CLAUDE.md is long and partly a log (condense when convenient); Scans/Cells pages do not show `propagation`.
+- From the review, fixed 2026-10-20: Cellpose + Trackastra really run in `tests/test_segtrack_gpu.py` (GPU); every dashboard page is opened by `tests/test_dashboard_pages.py`
+  (AppTest, on the saved showcase runs; skipped where they do not exist); the broad `except Exception` blocks now name what they catch (or report why, e.g. the Calibration
+  page); the Metrics page shows `propagation` (stage 7b). Still open: CLAUDE.md is long and partly a log (condense when convenient).

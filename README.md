@@ -19,7 +19,7 @@ Everything runs through `scripts\run.cmd`, which uses the `simlive` conda env fr
 | I want to... | Command |
 |---|---|
 | Check the GPU setup (OpenMM CUDA, PyTorch, CuPy, Trackastra) | `scripts\run.cmd pytest -m gpu -v` |
-| Run all tests | `scripts\run.cmd pytest` |
+| Run all tests | `scripts\run.cmd pytest` (CPU; includes opening every dashboard page on the saved showcase runs) and `scripts\run.cmd pytest -m gpu` (GPU: OpenMM, Cellpose, Trackastra), or `scripts\run_tests.cmd` for both |
 | **Open the dashboard (set parameters, run, see everything)** | `scripts\dashboard.cmd` then open http://localhost:8501 |
 | Simulate moving cells and score the tracking (no GUI) | `scripts\run.cmd python scripts\run_tracking_demo.py` |
 | ...with different settings | `scripts\run.cmd python scripts\run_tracking_demo.py --set motion.D_um2_s=0.05 --set seed=2` |
@@ -43,7 +43,8 @@ commands without the `scripts\run.cmd` prefix.
 
 ## The dashboard
 
-`scripts\dashboard.cmd` starts a local web app (this PC only, http://localhost:8501). The sidebar's **New
+`scripts\dashboard.cmd` starts a local web app (this PC only, http://localhost:8501). The top of its home page links to the narrated tutorial (served by the
+dashboard itself, opens in a new tab) and to the tutorial video. The sidebar's **New
 simulation** form sets motion, shape, imaging and tracker parameters and runs the pipeline (~20 s); **Run to view**
 reopens any earlier run. Tabs: **Movie** (true cells | tracked cells side by side, large; identity swaps circled in red and
 labeled, missed cells outlined in yellow; **Next error ⏭** jumps to the next frame with a mistake; optional raw-image
@@ -93,7 +94,7 @@ Stage 7b: when the movie has tracked identity sources, `stage6_analysis/scores.j
 
 ### Watching a library run, and choosing simulations (🗂 Library tab)
 Start the generator in one window (`scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\library_loop_extrusion.yaml --library loop_extrusion --n 100`),
-the dashboard in another (`scripts\dashboard.cmd`). The **🗂 Library** tab shows live progress (refreshes every 5 s; shows "Stalled" if the PC slept).
+the dashboard in another (`scripts\dashboard.cmd`). The **🗂 Library** tab shows live progress (refreshes every 5 s; shows "Stalled" if the PC slept). One library selector at the top serves the whole page.
 Below it you pick how cells get their simulation: random from the whole library (default), random from the ones you tick, or pin cell N to a given simulation.
 The same choices work in config files: `loci.sim_ids: [...]`, `loci.pin: {1: loop_extrusion_seed1003}` (see `configs/loci_library.yaml`).
 
@@ -110,6 +111,8 @@ fire Pol II that carry MS2 loops, which appear as a bright spot at the promoter 
 a movie with `loci.transcription.enabled=true` (sidebar checkbox: "Model distance-dependent transcription"), e.g.
 `scripts\run.cmd python scripts\run_tracking_demo.py --config configs\loci_library.yaml --set loci.transcription.enabled=true --set acquisition.frame_interval_s=10`.
 All kinetic rates are per second, so any frame interval works. Sweep a setting in the tab, or across whole movies with `scripts\sweep.py --grid loci.transcription.params.fold=3,12,48`.
+The enhancer's effect is a smooth Hill curve, half its strength at 400 nm (the default since 2026-10-20; the old sharp 150 nm contact was reached in under 1% of frames
+by the polymer-library distances, so it barely did anything).
 
 ### Sidebar checkboxes and library movies
 The single-cell loci form now really passes the **probe binding** and **transcription** settings from their tabs to the run, and library movies place the
@@ -166,7 +169,9 @@ terminal (re-runs only stage 6 on a finished run, ~1-3 min; also adds MS2 traces
   aggregates) inside the nuclei in every colour. Sidebar: *Promoter-enhancer copies and stray spots* in the loci form.
 - **Analysis:** with `locus_analysis.max_copies` > 1 the multi-copy linker (`stage6_analysis/multicopy.py`) follows several paths per colour, keeps the
   ones that look like a locus, untangles swapped copies, pairs each promoter with its enhancer and uses the partner colour (`pair_prior`, default
-  `gauss`) to choose spots. Every detection and MS2 trace carries its `copy`.
+  `gauss`) to choose spots. Every detection and MS2 trace carries its `copy`. Since 2026-10-20 it also gives every copy back the spots that lie
+  where it has recently been (`untangle_by_place`): swaps made through a wrong pick or a gap are undone (picks on the other copy: at most 0.8%,
+  was up to 2.5%).
 - **Measured** over 25 movies (`scripts\run.cmd python scripts\sweep_copies_strays.py`, Spot finding page part 3e): copy number right in every cell
   without strays and in 90% of cells at 4 strays per nucleus per minute; one path per colour (the one-copy finder) misses the second copy.
   Details and the bias check: [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md).
@@ -198,7 +203,9 @@ into the moments Pol II started on the gene (with uncertainty) and into bursts. 
 units, what one Pol II looks like, noise, one cell against the truth, and the whole run. The burst rule's settings can be changed live.
 `scripts\run.cmd python scripts\deconvolve_ms2.py --run <run>`; details and measured accuracy in [docs/SPOT_FINDING.md](docs/SPOT_FINDING.md). Has the sampler converged? Four chains per cell, R-hat and effective sample size: `scripts\run.cmd python scripts\check_mcmc.py --run <run>`, results (the plain sampler does not converge on the dense gene; the default now checks every cell and uses parallel tempering where it fails) in [docs/MCMC_CONVERGENCE.md](docs/MCMC_CONVERGENCE.md).
 
-**Promoter-enhancer distance and P(burst ON) (🔗 E–P curve page).** How well can the whole curve of P(promoter in a burst) against the E-P distance be recovered, with localization error, the 2D projection, colour shift, wrong picks, a noisy MS2 trace and a limited number of cells? `scripts\run.cmd python scripts\sweep_ep_curve.py --exps sigma shift outliers cells null --workers 12` (the page also simulates one population live); method and measured numbers in [docs/EP_CURVE.md](docs/EP_CURVE.md). Second version (2026-10-14): E–P distances from the polymer simulations (`scripts\run.cmd python scripts\sweep_ep_polymer.py --exps modality null wrong cells --workers 10`), seen through a 2D, z-stack or biplane microscope; the main finding is that the distance changes faster than the promoter responds, so the curve is fitted from the distance history.
+**Promoter-enhancer distance and P(burst ON) (🔗 E–P curve page).** How well can the whole curve of P(promoter in a burst) against the E-P distance be recovered, with localization error, the 2D projection, colour shift, wrong picks, a noisy MS2 trace and a limited number of cells? `scripts\run.cmd python scripts\sweep_ep_curve.py --exps sigma shift outliers cells null --workers 12` (the page also simulates one population live); method and measured numbers in [docs/EP_CURVE.md](docs/EP_CURVE.md). Wrong picks are corrected in
+the fit when their share is supplied (`Measurement.assumed_outlier_rate`; 5-40% wrong picks: contrast 4.11-4.13 against 4.07); the cell-bootstrap
+intervals cover the truth 95% of the time (checked on 60 populations). Second version (2026-10-14): E–P distances from the polymer simulations (`scripts\run.cmd python scripts\sweep_ep_polymer.py --exps modality null wrong cells --workers 10`), seen through a 2D, z-stack or biplane microscope; the main finding is that the distance changes faster than the promoter responds, so the curve is fitted from the distance history.
 
 **Instruments.** `--set instrument=vutara_vxl` (or the sidebar's *Microscope* choice) switches from the generic placeholder optics to a
 Bruker Vutara VXL in 2D mode:

@@ -114,10 +114,13 @@ def specs_for(exp: str, seeds: int) -> list[dict]:
         for sh, corrected in itertools.product((0, 25, 50, 100, 200), (False, True)):
             add({"shift_nm": sh, "corrected": corrected}, meas=replace(M, shift_nm=float(sh), assumed_shift_nm=float(sh) if corrected else 0.0))
     elif exp == "outliers":
-        for o in (0.0, 0.02, 0.05, 0.1, 0.2, 0.4):
-            add({"outlier_rate": o, "miss_rate": M.miss_rate}, meas=replace(M, outlier_rate=o))
+        # assumed = what the analysis supplies as the wrong-pick share, as a multiple of the true share (0 = not corrected; 0.5 / 2 = misjudged)
+        add({"outlier_rate": 0.0, "miss_rate": M.miss_rate, "assumed": 0.0}, meas=replace(M, outlier_rate=0.0))
+        for o, f in itertools.product((0.02, 0.05, 0.1, 0.2, 0.4), (0.0, 0.5, 1.0, 2.0)):
+            add({"outlier_rate": o, "miss_rate": M.miss_rate, "assumed": f}, meas=replace(M, outlier_rate=o, assumed_outlier_rate=min(o * f, 0.9)))
         for mr in (0.0, 0.3, 0.6, 0.8):
-            add({"outlier_rate": M.outlier_rate, "miss_rate": mr}, meas=replace(M, miss_rate=mr))
+            add({"outlier_rate": M.outlier_rate, "miss_rate": mr, "assumed": 1.0},
+                meas=replace(M, miss_rate=mr, assumed_outlier_rate=M.outlier_rate))
     elif exp == "cells":
         for n_cells, lvl in itertools.product((50, 100, 200, 400, 800, 1600, 3200), ("L0", "L2")):
             add({"n_cells": n_cells, "level": lvl}, setup=replace(S, n_cells=n_cells), level=lvl)
@@ -189,7 +192,7 @@ def main() -> None:
         rows = run_ladder_and_ms2(exp, a.deconv_seeds, a.workers) if exp in ("ladder", "ms2", "rules") else run_pool(specs_for(exp, a.seeds), a.workers)
         df = write(exp, rows)
         print(f"   {time.time() - t0:.0f} s", flush=True)
-        key = [c for c in df.columns if c in ("level", "sigma_nm", "dims", "fit", "shift_nm", "corrected", "outlier_rate", "miss_rate", "n_cells", "coupling",
+        key = [c for c in df.columns if c in ("level", "sigma_nm", "dims", "fit", "shift_nm", "corrected", "outlier_rate", "miss_rate", "assumed", "n_cells", "coupling",
                                               "loop_time_s", "contact_fraction", "frame_s", "ms2_sb", "rule_w", "rule_gb")]
         agg = df.groupby(key).agg(contrast=("contrast", "mean"), ref=("contrast_ref", "mean"), sd=("contrast", "std"), curve_err=("curve_err", "mean"),
                                   cover=("contrast_covers", "mean"), excl1=("excludes_one", "mean"), ci_w=("contrast_ci_width", "mean"))

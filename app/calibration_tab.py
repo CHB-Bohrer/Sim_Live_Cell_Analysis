@@ -210,7 +210,7 @@ def _truth_note(cal, quantity: str, channel: str) -> str:
     f = getattr(cal, "_dir", None)
     try:
         tab = pd.read_csv(Path(st.session_state.get("_cal_dir", "")) / "comparison.csv") if f is None else pd.read_csv(Path(f) / "comparison.csv")
-    except Exception:  # noqa: BLE001 - no comparison table: say nothing
+    except (OSError, pd.errors.EmptyDataError):  # no comparison table: say nothing
         return ""
     r = tab[(tab.quantity == quantity) & (tab.channel == channel)]
     if not len(r):
@@ -251,7 +251,8 @@ def _effect_section(run: Path, cal: Calibration) -> None:
             n_pages = len(tf.pages)
         t = st.slider("Frame", 0, n_pages - 1, 0, key="cal_eff_t")
         raw = tifffile.imread(s3 / f"{ch}.tif", key=int(t)).astype(float)
-    except Exception:
+    except (OSError, ValueError, IndexError) as e:
+        st.info(f"The recorded {ch} images of this run could not be read ({e}), so the correction is not shown.")
         return
     corr = cal.correct(raw, ch)
     y0, x0, h = raw.shape[0] // 2 - 80, raw.shape[1] // 2 - 80, 160

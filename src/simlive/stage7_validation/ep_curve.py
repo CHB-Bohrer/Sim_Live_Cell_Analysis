@@ -137,8 +137,30 @@ class Measurement:
     shift_nm: float = 0.0               # colour-channel offset left after correction (in plane, x direction)
     dims: int = 3                       # 2 = distance in the image plane (the 2D movies), 3 = from z-stacks
     miss_rate: float = 0.0              # fraction of frames without a distance
-    outlier_rate: float = 0.0           # fraction of frames with a wrong pick: distance uniform in [0, 2000] nm
+    outlier_rate: float = 0.0           # fraction of frames with a wrong pick: distance uniform in [0, OUTLIER_MAX_NM] nm
     assumed_shift_nm: float = 0.0       # what the analysis believes the shift to be (correction applied in the fit's kernel)
+    assumed_outlier_rate: float = 0.0   # what the analysis believes the wrong-pick share to be (mixture in the fit's kernel, `with_outliers`)
+
+
+OUTLIER_MAX_NM = 2000.0                 # a wrong pick's measured distance: uniform on [0, this] (the simulation's model of a wrong pick)
+
+
+def outlier_pdf(edges: np.ndarray = EDGES, d_max: float = OUTLIER_MAX_NM) -> np.ndarray:
+    """P(measured bin) for a wrong pick: uniform on [0, d_max] nm, whatever the true distance."""
+    q = np.clip(np.minimum(edges[1:], d_max) - edges[:-1], 0.0, None)
+    return q / q.sum()
+
+
+def with_outliers(K: np.ndarray, rate: float, edges: np.ndarray = EDGES) -> np.ndarray:
+    """The measurement kernel when a share `rate` of the frames are wrong picks: K' = (1 - rate) K + rate q, q = `outlier_pdf` (the same for
+    every true distance). Used for the population prior and for the EIV weights alike, so a measured distance that may be a wrong pick is
+    automatically trusted less: P(true d | measured bin) mixes the kernel's answer with the population's distribution. The share cannot be
+    learned from the distances alone (a wider distribution of true distances explains them as well), so it has to be supplied: from the spot
+    finder's own statistics or from simulations of the same movie (2026-10-20; before, wrong picks were not corrected and cost 6-24% of the
+    contrast)."""
+    if rate <= 0:
+        return K
+    return (1.0 - rate) * K + rate * outlier_pdf(edges)[:, None]
 
 
 def measure_distance(d_true: np.ndarray, m: Measurement, rng: np.random.Generator) -> np.ndarray:
@@ -153,7 +175,7 @@ def measure_distance(d_true: np.ndarray, m: Measurement, rng: np.random.Generato
     out = np.sqrt((v[:, :m.dims] ** 2).sum(1))
     if m.outlier_rate > 0:
         bad = rng.random(n) < m.outlier_rate
-        out[bad] = rng.uniform(0, 2000, bad.sum())
+        out[bad] = rng.uniform(0, OUTLIER_MAX_NM, bad.sum())
     if m.miss_rate > 0:
         out[rng.random(n) < m.miss_rate] = np.nan
     return out
@@ -364,15 +386,18 @@ def fit_curve(agg: Aggregates, K: np.ndarray, prior: np.ndarray, n_shape: float 
                bool(best.success))
 
 
-def bootstrap_fits(agg: Aggregates, K, prior, n_boot: int = 200, seed: int = 0, **kw) -> list[Fit]:
-    """Resample CELLS with replacement (the frames of a cell are correlated) and refit; the prior of true distances is kept fixed."""
+def bootstrap_fits(agg: Aggregates, K, prior, n_boot: int = 200, seed: int = 0, refit_prior: bool = True, coarse: bool = False, **kw) -> list[Fit]:
+    """Resample CELLS with replacement (the frames of a cell are correlated) and refit. Every replicate re-estimates the distribution of true
+    distances from its own cells (refit_prior) and refits on the full grid: with the prior kept fixed and the coarse grid (the method until
+    2026-10-20) the 95% intervals covered the reference in only 85-90% of populations."""
     rng = np.random.default_rng(seed)
     n_c = agg.n.shape[0]
-    base = fit_curve(agg, K, prior, **kw)
     out = []
     for _ in range(n_boot):
         pick = rng.integers(0, n_c, n_c)
-        out.append(fit_curve(Aggregates(agg.n[pick], agg.s[pick]), K, prior, coarse=True, **kw))
+        b = Aggregates(agg.n[pick], agg.s[pick])
+        pr = population_prior(b.n.sum(0), K) if refit_prior else prior
+        out.append(fit_curve(b, K, pr, coarse=coarse, **kw))
     return out
 
 
@@ -388,7 +413,7 @@ def analyse(pop: Population, meas: Measurement, y: np.ndarray | None = None, nai
     for the attenuation correction. Returns the fit, bootstrap intervals (n_boot > 0) and the curve on D_GRID."""
     rng = np.random.default_rng(seed)
     d_meas = measure_distance(pop.d_true, meas, rng)
-    K = kernel_matrix(meas.sigma_nm, meas.dims, meas.assumed_shift_nm)
+    K = with_outliers(kernel_matrix(meas.sigma_nm, meas.dims, meas.assumed_shift_nm), meas.assumed_outlier_rate)
     return analyse_measured(pop, d_meas, K, y=y, naive=naive, correct_calls=correct_calls, n_boot=n_boot, seed=seed, n_shape=n_shape, free_shape=free_shape)
 
 

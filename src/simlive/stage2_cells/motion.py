@@ -47,6 +47,52 @@ def nucleus_to_lab_um(row, xn, yn):
     return row.y_um + u * s + v * c, row.x_um + u * c - v * s
 
 
+def place_cells(bound: np.ndarray, lo: np.ndarray, hi: np.ndarray, rng: np.random.Generator, restarts: int = 100) -> np.ndarray:
+    """Random non-overlapping centres (n, 2) for cells reaching `bound` um from their centre, inside the box [lo, hi] (y, x).
+
+    Cells are dropped one at a time at random; when an early cell leaves no room for a later one, the whole layout is drawn again
+    (until 2026-10-20 the run failed at that point, e.g. 4 nuclei in the 40 um biplane field, where a 2 x 2 layout fits easily). The
+    first attempt uses the random numbers exactly as before, so every layout that used to succeed is unchanged."""
+    n = len(bound)
+    if n and np.any(hi - lo < 2 * bound.max()):
+        raise RuntimeError(f"A nucleus ({2 * bound.max():.1f} um across at its widest) does not fit in the {hi - lo} um area; "
+                           "use a larger field of view or smaller nuclei")
+    for _ in range(restarts):
+        pos = np.zeros((n, 2))
+        for i in range(n):
+            for _ in range(2000):
+                p = rng.uniform(lo + bound[i], hi - bound[i])
+                if all(np.hypot(*(p - pos[j])) >= bound[i] + bound[j] for j in range(i)):
+                    pos[i] = p
+                    break
+            else:
+                break
+        else:
+            return pos
+    side = hi - lo
+    raise RuntimeError(f"Could not place {n} nuclei without overlap in a {side[1]:g} x {side[0]:g} um area (nuclei reach up to "
+                       f"{bound.max():.1f} um from their centre; {restarts} layouts tried). Use fewer cells, a larger field of view, or room "
+                       "outside the field (geometry.outside_um)")
+
+
+def placement_problem(cfg: dict, seed: int | None = None) -> str | None:
+    """Why the first frame of this config cannot be laid out (None if it can): the same draw as a run with this seed."""
+    seed = int(cfg.get("seed", 0) if seed is None else seed)
+    rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(10)[0])
+    g, sh = cfg["geometry"], cfg["geometry"]["shape"]
+    n0 = int(cfg["cells"]["n_cells"])
+    radius = np.full(n0, g["cell_radius_um"], float)
+    aspect, angle, amp, phase = _new_shapes(n0, sh, rng)
+    bound = _bound_radius(radius, aspect, amp, phase, np.array(sh["harmonics"], float))
+    out_um = float(g.get("outside_um", 0.0) or 0.0)
+    fov = np.array(g["fov_um"], float)
+    try:
+        place_cells(bound, np.full(2, -out_um), fov + out_um, rng)
+    except RuntimeError as e:
+        return str(e)
+    return None
+
+
 def _new_shapes(n, sh, rng):
     k = len(sh["harmonics"])
     aspect = np.maximum(1.0, rng.normal(sh["aspect_mean"], sh["aspect_std"], n))
@@ -73,15 +119,7 @@ def simulate_cells(cfg: dict, rng: np.random.Generator) -> pd.DataFrame:
     radius = np.full(n0, g["cell_radius_um"], float)
     aspect, angle, amp, phase = _new_shapes(n0, sh, rng)
     bound = _bound_radius(radius, aspect, amp, phase, harm)
-    pos = np.zeros((n0, 2))
-    for i in range(n0):  # random non-overlapping initial placement
-        for _ in range(2000):
-            p = rng.uniform(lo + bound[i], hi - bound[i])
-            if all(np.hypot(*(p - pos[j])) >= bound[i] + bound[j] for j in range(i)):
-                pos[i] = p
-                break
-        else:
-            raise RuntimeError("Could not place cells without overlap; reduce n_cells or radius")
+    pos = place_cells(bound, lo, hi, rng)
     heading = rng.uniform(0, 2 * np.pi, n0)
     ids = list(range(1, n0 + 1))
     parent = [0] * n0

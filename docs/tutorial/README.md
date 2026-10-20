@@ -1,8 +1,9 @@
 # Narrated tutorial
 
 `index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 50 minutes in 38 short scenes;
-every scene can be jumped to from the list on the left). **Open it by double-clicking `index.html`** (Microsoft Edge recommended).
-Nothing to install, nothing is sent anywhere.
+every scene can be jumped to from the list on the left). **Open it from the dashboard's home page ("Open the narrated tutorial") or by
+double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install, nothing is sent anywhere. The dashboard serves a copy
+(`app/static/tutorial`, refreshed from this folder whenever the home page loads; `app/style.publish_tutorial`), so edit the files HERE.
 
 - **Voice:** the narration uses your browser's speech synthesis (Web Speech API). Edge offers the most natural voices (names ending in
   "Online (Natural)", e.g. Aria or Jenny; they need an internet connection). Pick the voice and speed on the start screen or in the bottom bar.

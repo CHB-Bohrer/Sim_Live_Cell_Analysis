@@ -52,7 +52,8 @@ contact fraction 0.1; much more data; errors varied. Code: `src/simlive/stage7_v
 **Colour shift left over** (2D): up to 100 nm harmless (contrast 3.99-4.02, whether or not the analysis knows it); at 200 nm uncorrected the contrast drops to 3.79 (coverage 70%), corrected 4.09.
 
 **Wrong picks and missed frames:** missed frames are harmless up to 60% (contrast 4.0; interval width 0.64 -> 0.73). Wrong picks are not: 5% -> contrast 3.83 (coverage 55%), 10% -> 3.55 (10%),
-20% -> 3.09 (0%), 40% -> 2.35. A wrong-pick mixture in the fit would remove most of this; not built.
+20% -> 3.09 (0%), 40% -> 2.35. **Fixed 2026-10-20** by a wrong-pick mixture in the fit when the share is supplied (see "Update 2026-10-20" below):
+corrected 4.11-4.13 at 5-40%.
 
 **Number of cells** (L2; sd of the contrast over populations): 50 -> 0.77, 100 -> 0.55, 200 -> 0.36, 400 -> 0.26, 800 -> 0.17, 1600 -> 0.10, 3200 -> 0.055 (the 1/sqrt(n) of the cells).
 The effect (contrast 4) is detected at every size from 50 cells; what many cells buy is the SHAPE: curve error 0.010 (50) -> 0.002 (3200); the scatter of the recovered working distance d_half falls from 11% (50 cells) to 4% (600) and 2% (3200). A small systematic offset remains: d_half 336 nm against 324 (+3.6%, the fitted hill shape is not exactly the shape the dynamics produce), so the d_half interval covers the reference less often as the cell number grows (95% at 50-100 cells, 80% at 600, 55% at 3200).
@@ -86,13 +87,13 @@ Frame interval 10 / 20 / 40 / 80 s: contrast unchanged, interval width 0.64 / 0.
   A conservative rule gives an almost unbiased contrast (uncorrected 3.96-4.14) with more scatter (sd of the contrast over populations 0.31-0.36 against 0.27 for the balanced rule, 4 populations each), and with the correction the absolute P(ON) level is right too (curve error 0.006-0.007).
   For real data the rule cannot be tuned on the truth: choose a conservative one from the start rate (page 🧮 MS2 → Pol II, step 6).
 
-**Calibration of the intervals:** the cell-bootstrap intervals are ~25% too narrow (mean width 0.64 against 3.92 x sd over populations 0.19 = 0.75): coverage 85-90% at the nominal 95% in most scans.
-Widen them by ~1.3 for honest 95%; not corrected in the code.
+**Calibration of the intervals:** this said "~25% too narrow (coverage 85-90%)". **Withdrawn 2026-10-20:** every setting of a scan reuses the SAME 20 populations,
+so the "consistent" shortfall was one sample of 20; with 60 fresh populations the contrast intervals cover the reference 95% of the time (see "Update 2026-10-20").
 
 ## What this means
 1. With ~600 cells x 1 h and a 400 nm working distance the CURVE is recoverable: the contrast to 5% (sd over populations; interval +-8%), the working distance to 4% scatter (+3.6% offset), when the true ON state is known and the fit accounts for the measurement.
    Ignoring that the distance is measured in the image plane costs ~35% of the effect (2.7 instead of 4.1).
-2. The measurement error that matters most is not localization precision (fine to ~200 nm): it is (i) 2D projection (fixable in the fit), (ii) wrong picks above ~5% (not fixed), (iii) the MS2-based ON
+2. The measurement error that matters most is not localization precision (fine to ~200 nm): it is (i) 2D projection (fixable in the fit), (ii) wrong picks above ~5% (corrected since 2026-10-20 when their share is known), (iii) the MS2-based ON
    estimate when the trace is noisy and frames are slow (not fixed; needs the user's real MS2 noise relative to one Pol II).
 3. More cells narrow the intervals as 1/sqrt(n); the movie length and the time per visit set how many bursts occur in contact (contact fraction 0.03 is much harder than 0.1).
 
@@ -103,6 +104,26 @@ Widen them by ~1.3 for honest 95%; not corrected in the code.
   quantities are simulated at the level of the distance vector. The earlier spot-finding scores (22-84 nm median error, 98% found) put the baseline in the right range.
 - One gibbs_shift chain per cell for the ON estimate (no convergence check), 200 samples; a single gene (placeholder kinetics). MS2 noise, burst rule, frame interval grids are small (4 populations per setting).
 - Homologous copies / sister chromatids, a shared probe pool and transcription feeding back on the polymer are not modelled.
+
+## Update 2026-10-20: wrong picks corrected in the fit; the interval check redone
+- **Wrong-pick mixture** (`ep_curve.with_outliers`, `Measurement.assumed_outlier_rate`): the kernel becomes K' = (1 - w) K + w q, q = the measured-distance distribution of a
+  wrong pick (uniform 0-2 um here, the simulation's model), used for the population prior and the EIV weights alike. A distance that may be a wrong pick is then trusted less
+  automatically. w cannot be learned from the distances (a wider true-distance distribution explains them as well), so the analysis must supply it (spot finder statistics, or
+  a simulation of the same movie). Scan `outliers` (20 populations, reference 4.07; column `assumed` = supplied share / true share):
+
+  | wrong picks | not corrected | half the share | the true share | twice the share |
+  |---|---|---|---|---|
+  | 5% | 3.83 | 3.98 | 4.12 | 4.41 |
+  | 10% | 3.55 | 3.83 | 4.11 | 4.74 |
+  | 20% | 3.09 | 3.54 | 4.11 | 5.92 |
+  | 40% | 2.35 | 2.97 | 4.13 | 52.9 (fails) |
+
+  With the true share the bias is gone at every rate (coverage 0.80-0.90 with 20 populations). Overstating the share is worse than understating it: at high rates it blows up.
+- **Bootstrap:** every replicate now re-estimates the true-distance distribution and refits on the full grid (`bootstrap_fits(refit_prior=True, coarse=False)`). Diagnosis
+  on 30 fresh populations (`scripts` not kept; seeds 3000+): bootstrap SD / real SD of the contrast = 0.96 (true distances) and 0.99 (measured, new; 1.05 with the old
+  coarse refits). Scan `null` (60 populations per arm, new bootstrap): coupling on: contrast 3.99 vs 4.07, interval-implied SD 0.155 vs real 0.143, **coverage 0.95**;
+  coupling off: 6.7% of intervals exclude "no effect" (4 of 60; nominal 5%). The d_half intervals cover 88% (the +2-4% d_half offset above). Old results kept as
+  `results_before_2026-10-20.csv` in `$SIMLIVE_DATA/sweeps/ep_curve_{outliers,null}`.
 
 ---
 

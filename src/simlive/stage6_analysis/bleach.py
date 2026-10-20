@@ -16,6 +16,7 @@ Estimates (both from the data alone; the simulation's true b(t) is only used for
 """
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -209,7 +210,8 @@ def _flat_truth(run: Path, cfg: dict, fits: dict, nuc: pd.DataFrame, summary: di
     s3 = run / "stage3_microscopy"
     try:
         im = imager_for_run(run, cfg)
-    except Exception:
+    except (OSError, KeyError, ValueError) as e:     # older runs lack some truth files or config keys
+        warnings.warn(f"illumination maps not compared with the truth: {e!r}")
         return
     cal = None
     if (s3 / "calibration" / "calibration.json").exists():

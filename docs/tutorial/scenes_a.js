@@ -58,9 +58,11 @@ SC("launch", "Start it", (st) => {
 SC("layout", "The home screen", shot({ shot: "home", label: "🏠 home" }), [
   ["This is the home screen. On the left is the sidebar. It is where you create new simulations, and where you choose which finished run you are looking at.", (s) => s.focus("sidebar", "Sidebar")],
   ["At the top, the title says which run is open, how many cells it has, how many frames, and the pixel size.", f("hero", "Which run is open")],
+  ["Just below, a banner opens this tutorial in a new browser tab, or its narrated video. Point anyone new to the dashboard there first.", f("tut", "Tutorial and video")],
   ["Two folded boxes help newcomers: a map of the app, and a glossary of terms. Open them whenever a word is unfamiliar.", f(["guide", "glossary"], "Map and glossary", { multi: true })],
   ["What was simulated in this run lists the settings in plain words: how many nuclei, how long the movie is, the field of view, how many image errors are on, whether there are loci, probe binding, M S two transcription, and which segmentation and tracker were used. Hover a box for details.", f("summary", "Plain-language summary of the run")],
   ["Below are the headline tracking scores. The first row uses automatic segmentation, which is realistic. The second uses perfect masks, which isolates just the linking error. One point zero is perfect for both.", f(["scores_auto", "scores_gt"], "Headline scores", { multi: true })],
+  ["The run summary and these scores sit above every page that uses the selected run. Scans, E P curve, Library and Chromatin do not use it, so they leave them out.", f(["scores_auto", "scores_gt"], "Only on run pages", { multi: true })],
   ["Then comes the page bar. There are sixteen pages, and only the page you open is computed, which keeps the dashboard fast. Your choice survives reruns.", f("nav", "16 pages")],
   ["Run to view lists every finished movie, newest first. Pick another one and every page switches to it.", (s) => { s.focus("runsel", "Choose a run"); s.click("runsel"); }],
 ], ["Open the map and the glossary boxes", "Click through a few pages in the page bar", "Open Run to view and pick a different run; watch the title change"]);
@@ -147,11 +149,12 @@ SC("movie", "Page: Movie", shot({ sets: { main: "pg_movie", player: "pg_movie_pl
   ["The bar chart shows identity switches over time, and the folded box explains every outline colour on the pictures.", f(["howto", "bars"], "Switches over time", { multi: true })],
 ], ["Open the Movie page of any run", "Press Next error and read the red box", "Switch Tracked on to ground-truth masks: do the errors disappear?", "Tick Also show raw image panel to see what the segmenter sees"]);
 
-SC("metrics", "Pages: Metrics and Trajectories", shot({ sets: { main: "pg_metrics", traj: "pg_traj" }, label: "📊 Metrics" }), [
+SC("metrics", "Pages: Metrics and Trajectories", shot({ sets: { main: "pg_metrics", prop: "pg_metrics_prop", traj: "pg_traj" }, label: "📊 Metrics" }), [
   ["Metrics starts with a sentence in words: what fraction of nuclei were found, how many links were right, and how many identity switches occurred, for both automatic and perfect masks.", f("inwords", "In words")],
   ["Below is the table of every score for both variants. Compare the two columns: any gap between them is caused by the segmentation, not the tracker.", f("table", "Automatic vs perfect masks")],
   ["The folded box defines the numbers. DET is detection, LNK is linking, TRA is overall tracking, and CHOTA combines detection and association. Track purity and target effectiveness say how much of a track follows one cell.", f("meaning", "What do these numbers mean?")],
   ["The per-cell identity table shows which cells swapped. Sort it to find the troublemakers.", f("percell", "Per-cell identity table")],
+  ["In a loci run, the end of the page asks whether tracking errors reach the locus results: the spots read through the tracker's IDs, scored next to the same analysis through the true IDs.", fs("prop", ["prop", "proptab"], "Stage 7b", { multi: true })],
   ["Trajectories draws the true path of every cell in colour and the tracker's paths as white dashed lines, with red crosses at switches. A dashed line that jumps between coloured paths is a swap.", (s) => { s.use("traj"); s.focus("plot", "Coloured = truth · dashed = tracker · ✕ = switch"); }],
   ["The two panels next to it ask why. Each compares the frames with a switch against all frames: the gap to the nearest nucleus, and how far the nucleus moved since the last frame. In this run the switches sit where nuclei moved far, not where they crowd.", (s) => { s.use("traj"); s.focus("plot", "Crowding or speed?"); }],
 ], ["Open Metrics and read the In words sentence", "Open Trajectories and find a red cross", "Compare both columns: which is larger, the segmentation or the linking error?"]);

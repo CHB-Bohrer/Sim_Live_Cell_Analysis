@@ -3,6 +3,8 @@
 Colours are defined once here (PALETTE). Matplotlib figures use the same palette so plots match the page.
 """
 import html
+import shutil
+from pathlib import Path
 
 import matplotlib as mpl
 
@@ -102,6 +104,14 @@ h3 {{ margin-top: 2rem; }}
 .sl-guide div {{ background:var(--card); border:1px solid var(--line); border-radius:.75rem; padding:.6rem .8rem; font-size:.88rem;
   line-height:1.4; color: var(--muted); }}
 .sl-guide b {{ color: var(--ink); display:block; font-size:.95rem; }}
+.sl-tut {{ display:flex; flex-wrap:wrap; align-items:center; gap:.6rem 1rem; background:var(--card); border:1px solid var(--line);
+  border-left:4px solid var(--accent); border-radius:.85rem; padding:.7rem 1rem; margin:-.4rem 0 1.1rem 0; }}
+.sl-tut > span {{ flex:1 1 320px; color:var(--muted); font-size:.93rem; line-height:1.45; }}
+.sl-tut > span b {{ color:var(--ink); }}
+.sl-tut a {{ text-decoration:none !important; font-weight:600; border-radius:.6rem; padding:.45rem .9rem; white-space:nowrap; }}
+.sl-tut a.sl-tut-go {{ background:linear-gradient(135deg, #0f766e, #0e7490); color:#f0fdfa !important; }}
+.sl-tut a.sl-tut-alt {{ border:1px solid var(--line); color:var(--ink) !important; }}
+.sl-tut a:hover {{ box-shadow:0 4px 12px rgba(20,184,166,.30); }}
 </style>
 """
 
@@ -113,7 +123,7 @@ def fit_titles(fig) -> None:
 
     try:
         renderer = fig.canvas.get_renderer()
-    except Exception:                                    # a backend without a renderer: leave the titles alone
+    except (AttributeError, NotImplementedError, TypeError):   # a backend without a renderer: leave the titles alone
         return
     for ax in fig.axes:
         axw = ax.get_window_extent(renderer).width
@@ -202,8 +212,53 @@ def intro(st, what: str, how: str) -> None:
                 f'<div class="how"><b class="t">How to use it</b><p>{html.escape(how)}</p></div></div>', unsafe_allow_html=True)
 
 
+TUTORIAL_SRC = Path(__file__).resolve().parents[1] / "docs" / "tutorial"
+TUTORIAL_DST = Path(__file__).resolve().parent / "static" / "tutorial"      # Streamlit serves app/static at /app/static/
+TUTORIAL_URL = "app/static/tutorial/index.html"
+TUTORIAL_VIDEO = "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20"
+
+
+def publish_tutorial() -> bool:
+    """Mirror docs/tutorial into app/static/tutorial so the dashboard can link to it; True if it is there.
+
+    A page served over http may not link to a file:// page, and Streamlit refuses symlinks that leave app/static, so the
+    files are copied (only the ones that changed; app/static/tutorial is not committed). docs/tutorial stays the source."""
+    if not (TUTORIAL_SRC / "index.html").exists():
+        return False
+    try:
+        keep = set()
+        for f in TUTORIAL_SRC.rglob("*"):
+            if f.is_dir() or f.suffix == ".md":
+                continue
+            rel = f.relative_to(TUTORIAL_SRC); keep.add(rel)
+            d, s = TUTORIAL_DST / rel, f.stat()
+            if d.exists() and d.stat().st_size == s.st_size and d.stat().st_mtime >= s.st_mtime:
+                continue
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, d)
+        for d in TUTORIAL_DST.rglob("*"):                 # pictures the tutorial no longer uses
+            if d.is_file() and d.relative_to(TUTORIAL_DST) not in keep:
+                d.unlink()
+    except OSError:
+        return False
+    return (TUTORIAL_DST / "index.html").exists()
+
+
+def tutorial_banner(st) -> None:
+    """Links to the narrated tutorial (served by the dashboard itself) and to its video, for the top of the home page."""
+    here = publish_tutorial()
+    open_link = (f'<a class="sl-tut-go" href="{TUTORIAL_URL}" target="_blank" rel="noopener" title="Animated and narrated; 38 short scenes, jump to any '
+                 f'scene from the list on its left. Opens in a new tab; Microsoft Edge has the best voices.">📖 Open the narrated tutorial</a>'
+                 if here else f'<span class="sl-mono">{html.escape(str(TUTORIAL_SRC / "index.html"))}</span>')
+    st.markdown(f'<div class="sl-tut"><span><b>New here?</b> A tutorial shows how to start a simulation, what every page shows and how to read '
+                f'its figures (about 50 minutes).</span>{open_link}<a class="sl-tut-alt" href="{TUTORIAL_VIDEO}" target="_blank" rel="noopener" '
+                f'title="The same tutorial as an MP4 with narration, on the project\'s GitHub releases page (720p or full size).">'
+                f'🎬 Watch it as a video (52 min)</a></div>', unsafe_allow_html=True)
+
+
 GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked and scored. About 20 s."),
-         ("🔬 New single-cell loci run (sidebar)", "Adds two coloured loci per nucleus (optional probes, MS2, 3D z-stacks and a calibration). 2 to 10 min."),
+         ("🔬 New single-cell loci run (sidebar)", "Adds a coloured promoter and enhancer per nucleus, optionally a second copy of the pair and stray decoy spots "
+                                                  "(plus probes, MS2, 3D z-stacks and a calibration). 2 to 10 min."),
          ("🎞 Movie · 📊 Metrics · 🧭 Trajectories", "How well the tracker did, frame by frame, with the errors marked."),
          ("🔬 Cells · 📈 Scans", "Single-cell movies with their loci; sweeps over many seeds and settings."),
          ("🔎 Spot finding", "How each locus and the MS2 signal are found (Chen et al. 2025), every intermediate image, the error per frame, bleaching and illumination corrections, and a comparison of methods."),
@@ -212,7 +267,9 @@ GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked an
          ("🎯 Calibration", "Simulated dark frames, flat-field slide and bead slide: what the instrument is, estimated vs true, and how much correcting for it helps."),
          ("⚡ Transcription · 🧪 Probes", "Build and explore the models behind the MS2 spot and the locus brightness."),
          ("🧮 MS2 → Pol II", "Turn each cell's MS2 trace into the moments Pol II started and into bursts (Chen et al. 2025 deconvolution), against the truth."),
-         ("🗂 Library · 🧬 Chromatin", "The saved polymer simulations: progress, choosing them, and looking inside one.")]
+         ("🔗 E–P curve", "How well the promoter-enhancer distance → burst probability curve can be recovered through the microscope's errors."),
+         ("🗂 Library · 🧬 Chromatin", "The saved polymer simulations: progress, choosing them, and looking inside one."),
+         ("⚙ Config", "The exact settings a run was made with, to repeat or change it from a terminal.")]
 
 
 def guide(st) -> None:
@@ -240,7 +297,8 @@ GLOSSARY = {
     "Chromatic shift": "Different colours are imaged at slightly different positions, so two loci of different colours appear displaced.",
     "Flat-field": "How even the illumination is across the field of view.",
     "Library": "A collection of saved polymer (chromosome) simulations; each cell in a movie gets its own.",
-    "Polymer unit": "The length unit of the polymer simulation until it is calibrated to nanometres and seconds (still a placeholder).",
+    "Polymer unit": "The length unit of the polymer simulation. It is converted to nanometres and seconds with configs/calibration/default.json, "
+                    "which rests on ASSUMED numbers (a locus diffusion constant and a contact fraction) until a measured MSD is supplied.",
     "z-stack": "One 3D picture made of several planes recorded at different heights, one after the other.",
     "Maximum projection": "A 2D picture made by keeping the brightest value along z at every position (what segmentation and tracking use in 3D runs).",
     "Axial": "Along z, the direction of the microscope's optical axis (up and down); lateral means in the image plane.",

@@ -168,11 +168,13 @@ def locus_distances_3d(pos: pd.DataFrame, px_um: float) -> pd.DataFrame:
     return d.rename("dist_um").reset_index()
 
 
-def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: float = 0.5) -> tuple[pd.DataFrame, dict]:
+def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, far_um: float = 0.5,
+                          strays: pd.DataFrame | None = None) -> tuple[pd.DataFrame, dict]:
     """Compare 3D detections with the true positions (same cell, frame, locus; truth in image coordinates, i.e. drift-corrected).
-    err_um = 3D error, err_xy_um = lateral error, err_z_um = signed axial error. Rates and far fraction as in `score_localization`."""
+    err_um = 3D error, err_xy_um = lateral error, err_z_um = signed axial error. Rates and far fraction as in `score_localization`, including
+    (since 2026-10-20) frac_on_stray / frac_on_other_copy: a far detection within far_um (laterally) of a stray spot / of the other copy."""
     from simlive.stage1_chromatin.copies import with_copy
-    from simlive.stage6_analysis.localize import _visible, copy_scores, intensity_scores, match_copies
+    from simlive.stage6_analysis.localize import _visible, copy_scores, intensity_scores, match_copies, wrong_object_distances
 
     truth = with_copy(truth)
     pos = match_copies(pos, truth, px_um)            # found copies -> true copies (lateral positions), as in 2D
@@ -182,10 +184,14 @@ def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, 
     j["err_xy_um"] = np.hypot(j.est_y_um - j.y_um, j.est_x_um - j.x_um)
     j["err_z_um"] = j.z_um - j.z_um_true
     j["err_um"] = np.sqrt(j.err_xy_um**2 + j.err_z_um**2)
-    err = j[["cell_id", "t", "locus_id", "copy", "err_um", "err_xy_um", "err_z_um", "visible"]]
+    far_all = j.err_um.to_numpy() > far_um
+    d_other, d_stray = wrong_object_distances(j, tr, strays)
+    j["on_stray"], j["on_other_copy"] = far_all & (d_stray <= far_um), far_all & (d_other <= far_um)
+    err = j[["cell_id", "t", "locus_id", "copy", "err_um", "err_xy_um", "err_z_um", "visible", "on_stray", "on_other_copy"]]
     if err.empty:
         return err, {"n_detections": 0}
     ok = err[err.visible]
+    nv = max(int(err.visible.sum()), 1)
     n_vis = int(tr.visible.sum())
     near = ok.err_um <= far_um
     return err, {"n_detections": len(err), "detection_rate": len(ok) / max(n_vis, 1), "n_visible": n_vis,
@@ -193,5 +199,6 @@ def score_localization_3d(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, 
                  "rms_error_um": float(np.sqrt((ok.err_um ** 2).mean())), "median_error_um": float(ok.err_um.median()),
                  "p95_error_um": float(ok.err_um.quantile(0.95)), "rms_xy_um": float(np.sqrt((ok.err_xy_um ** 2).mean())),
                  "rms_z_um": float(np.sqrt((ok.err_z_um ** 2).mean())), "median_z_um": float(ok.err_z_um.median()),
-                 "frac_far": float((~near).mean()), "rms_error_near_um": float(np.sqrt((ok.err_um[near] ** 2).mean())) if near.any() else np.nan,
+                 "frac_far": float((~near).mean()), "frac_on_stray": float((ok.on_stray).sum() / nv),
+                 "frac_on_other_copy": float((ok.on_other_copy).sum() / nv), "rms_error_near_um": float(np.sqrt((ok.err_um[near] ** 2).mean())) if near.any() else np.nan,
                  **copy_scores(pos, truth), **intensity_scores(j, j.err_um <= far_um)}

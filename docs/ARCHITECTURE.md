@@ -137,7 +137,7 @@ flowchart LR
     TR --> A2["Same locus analysis"]:::standin
     A1 --> R1["Result using true IDs"]:::built
     A2 --> R2["Result using tracker IDs"]:::built
-    R1 --> CMP{{"<b>Difference = the damage<br/>caused by tracking mistakes</b><br/>(scores.json: propagation)"}}:::built
+    R1 --> CMP{{"<b>Difference = the damage<br/>caused by tracking mistakes</b><br/>(scores.json: propagation;<br/>table on the 📊 Metrics page)"}}:::built
     R2 --> CMP
     R1 --> ACC{{"<b>How accurate is the analysis itself?</b><br/>estimated vs true locus positions"}}:::built
 
@@ -219,7 +219,7 @@ flowchart LR
         d6["Probe binding, distance-driven<br/>transcription and MS2"]:::built
         d7["Spot finder (Chen 2025), MS2 trace,<br/>MS2 → Pol II deconvolution"]:::built
         d8["Calibration from images AND<br/>from the movie; measured effect<br/>of every image error"]:::built
-        d9["Dashboard (dark theme), players,<br/>sweeps"]:::built
+        d9["Dashboard (dark theme), players,<br/>sweeps, narrated tutorial linked"]:::built
         d10["Instrument preset: Bruker Vutara VXL (widefield mode),<br/>bleed-through from spectra"]:::built
         d11["Several promoter-enhancer copies per cell;<br/>multi-copy linker, copies paired"]:::built
     end

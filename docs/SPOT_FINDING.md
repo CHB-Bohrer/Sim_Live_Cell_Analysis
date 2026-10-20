@@ -354,8 +354,39 @@ mostly frames whose true distance is large (the true share above 1.5 um among it
 **Showcase** `loci_library_seed12_87a16d` (smooth prior, tracked, calibrated): 10 copies in 8 cells, all found; 98.6% of loci found, 0.6% wrong
 picks (0.3% on strays, 0 on the other copy), median error 46 nm (21 nm calibrated); MS2 trace r 0.98 at R = 8.
 
-**Not done:** 3D z-stack runs with copies were not measured (the 3D path exists, `localize3d.py`); sister chromatids (cohesed copies < 1 um
-apart) are not modelled; homolog territory separation is a placeholder (2.5 um minimum); stray-spot rate, life and brightness are placeholders.
+**Not done:** sister chromatids (cohesed copies < 1 um apart) are not modelled; homolog territory separation is a placeholder (2.5 um minimum);
+stray-spot rate, life and brightness are placeholders. (3D with copies: run once on 2026-10-20, see below.)
+
+### Copy swaps through wrong picks and gaps (2026-10-20)
+Found through stage 7b on the showcase run: with the calibration applied, the tracked-ID analysis had 7.9% of its spots on the other copy and an
+rms error of 0.80 um, the same analysis without calibration 0% and 0.14 um. In one cell both copies' paths ended up on each other's locus from
+frame ~72 on, although the copies stayed 2.6 um apart: the enhancer paths changed places at frames 70/72 and the promoter paths at 72/76, with
+wrong picks in between, so every labelling had big steps and `untangle` (frame-to-frame steps) could not see it.
+- **`untangle_by_place`** (step 5, on the paired copies): each track's reference is the median of its last 6 spots relative to the nucleus
+  centroid (a wrong pick cannot move it; it waits through any gap); per frame and colour the spots present go to the tracks whose references
+  they are nearest (Hungarian), only if that is shorter by > 1/4 of the distance between the references, only while the references are
+  > 0.8 um apart, and only once every track has 6 spots. Then **`repair`** pairs every colour with the promoters again (a colour repaired on
+  its own could otherwise stay attached to the wrong promoter for the whole movie).
+- Tried and dropped: (1) a pass comparing medians before / after every frame (misses staggered colours); (2) absolute territories in the
+  nucleus's own frame (k-means): on near-round nuclei the outline's orientation flips by 180 degrees, which exchanges two copies that sit on
+  opposite sides of the centre, and it CREATED a swap; (3) running the pass on each colour's paths before pairing: at 4 strays / min those
+  include paths through strays and it made a second copy disappear.
+- Showcase cell: fixed (calibrated, tracked IDs: other copy 7.9% -> 0%, rms 0.80 -> 0.15 um; uncalibrated unchanged).
+- The 25 movies of the sweep above re-analysed (`$SIMLIVE_DATA/sweeps/copies_strays/recheck3_<variant>.csv`; `results.csv` = before):
+
+| strays / nucleus / min | 0 | 0.5 | 1 | 2 | 4 |
+|---|---|---|---|---|---|
+| smooth prior (default): on the other copy, before -> after | 0 -> 0 | 0.01% -> 0 | 1.7% -> 0 | 2.5% -> 0.01% | 2.5% -> 0.8% |
+| smooth prior: wrong picks | 0.2% -> 0.2% | 0.4% -> 0.4% | 2.3% -> 0.6% | 5.7% -> 3.2% | 8.3% -> 6.6% |
+| smooth prior: distance rms (nm) | 81 -> 81 | 87 -> 86 | 104 -> 88 | 172 -> 157 | 288 -> 278 |
+| no prior: on the other copy | 1.2% -> 0 | 0.3% -> 0 | 0.9% -> 0.05% | 1.7% -> 0.1% | 1.7% -> 0.8% |
+| flat gate: on the other copy | 1.5% -> 0.07% | 0.16% -> 0.01% | 0.08% -> 0.08% | 2.6% -> 0.6% | 2.4% -> 0.8% |
+
+  18 of 75 (movie, analysis) pairs improved by more than one point, none got worse by more than one point; copy numbers unchanged. One blemish:
+  flat gate at 2 strays / min, distance rms 194 -> 295 nm although its wrong and other-copy picks fell (a few larger errors).
+- **3D with copies** (biplane, 4 cells x 2 copies, 30 frames, strays on; run loci_demo_seed72_167117): 8 of 8 copies found, 100% of loci found in
+  3D, no stray or other-copy picks; 3D median error 0.23 um (0.22 um calibrated), dominated by the placeholder axial colour shift (6.5% wrong
+  picks before calibration, 0% after). 3D scores now also report `frac_on_stray` / `frac_on_other_copy` (`localize.wrong_object_distances`).
 
 ## MS2 deconvolution: noise model fix (2026-10-19)
 

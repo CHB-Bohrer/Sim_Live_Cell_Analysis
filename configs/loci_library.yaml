@@ -95,11 +95,12 @@ loci:                       # source: library = saved polychrom simulations (nee
       # (first bursty version: k_on 1/900, k_off 1/120, k_init 0.2 -> 24 Pol II per 2-min burst, gene 5 kb, dwell 116 s: broad humps)
       # previous, TFF1-like (literature, ~1.6 Pol II per burst, barely bursty in MS2): k_on 0.000333 (OFF 50 min), k_off 0.00104 (ON 16 min),
       # k_init 0.00167 (one per 600 s); TFF1 burst period 66 min, ON 16 min, 1.5 transcripts per burst (Rodriguez 2019)
-      coupling: contact      # contact (sharp) | hill | exp | none (control)
+      coupling: hill         # contact (sharp) | hill | exp | none (control). hill since 2026-10-20 (the user's E-P choice of 2026-10-14):
+      #   the sharp 150 nm contact was reached in only 0.75% of frames by the library distances (400 nm: 11.8%), so it barely coupled
       coupled_rate: k_on     # which rate depends on distance: k_on | k_init | k_off
       fold: 12               # coupled rate is this many times faster at full contact
       d_contact_nm: 150      # sharp contact: enhancer touches promoter when closer than this
-      d_half_nm: 200         # hill: distance of half effect
+      d_half_nm: 400         # hill: distance of half effect (n = 4: 6% of full effect at 800 nm, 94% at 200 nm)
       hill_n: 4
       d_decay_nm: 150        # exp: decay length
       f_const: 0.1           # none: constant coupling (control with the same average)

@@ -15,3 +15,6 @@ data/runs/*
 # Sweep outputs are reproducible from config + seeds.
 data/sweeps/*
 !data/sweeps/.gitkeep
+
+# copy of docs/tutorial that the dashboard serves (app/style.publish_tutorial)
+app/static/tutorial/
