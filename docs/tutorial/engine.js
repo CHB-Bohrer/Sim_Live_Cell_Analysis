@@ -134,6 +134,7 @@ function mountScene(i, upToBeat) {
   T.si = i; T.bi = 0;
   const sc = T.scenes[i];
   T.ctl = sc.make(stage);
+  keepDecoded([...(sc.make.shots || []), ...((T.scenes[i + 1] && T.scenes[i + 1].make.shots) || [])]);   /* this scene's and the next scene's pictures */
   if (T.ctl) T.ctl.instant = true;
   for (let b = 0; b < upToBeat; b++) { try { sc.beats[b].c && sc.beats[b].c(T.ctl); } catch (e) { console.error(e); } }
   if (T.ctl) T.ctl.instant = false;
@@ -187,6 +188,24 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 /* ---------------------------------------------------------------- screenshot camera */
+/* The page screenshots are up to 1300 x 9000 px. Decoding one when it is first shown stalls the page for a second or more
+   (the caption and the recorded video then lag the voice), so the pictures of the current and the next scene are decoded
+   ahead of time and kept; older ones are dropped to bound memory. */
+const DECODED = new Map();
+function decodedImg(name) {
+  let im = DECODED.get(name);
+  if (!im) {
+    const d = window.SHOTS[name]; if (!d) return null;
+    im = new Image(); im.decoding = "async"; im.src = d.src;
+    if (im.decode) im.decode().catch(() => { });
+    DECODED.set(name, im);
+  }
+  return im;
+}
+function keepDecoded(names) {
+  for (const n of Array.from(DECODED.keys())) if (!names.includes(n)) DECODED.delete(n);
+  names.forEach(decodedImg);
+}
 class Shot {
   /* sets: {key: shotName}; the browser frame shows the picture at its natural size in a moving camera. */
   constructor(stage, opts) {
@@ -198,6 +217,7 @@ class Shot {
     this.hls = []; this.tip = h("div", { class: "tip" });
     this.cur = h("div", { class: "cur", html: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 2l7 18 2.6-7.4L20 10z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>' });
     this.view.append(this.world); this.root.append(this.view); stage.append(this.root);
+    Object.values(this.sets).forEach(decodedImg);
     this.use(this.key, true);
   }
   get data() { return window.SHOTS[this.sets[this.key]]; }
@@ -205,7 +225,8 @@ class Shot {
     if (!first && key === this.key) return;   /* already showing this picture: keep the camera where it is */
     this.key = key; const d = this.data; if (!d) { console.warn("missing shot", key); return; }
     this.world.innerHTML = "";
-    this.img = h("img", { src: d.src, style: `width:${d.w}px;height:${d.h}px` });
+    this.img = decodedImg(this.sets[key]) || h("img", { src: d.src });
+    this.img.style.cssText = `width:${d.w}px;height:${d.h}px`;
     this.world.append(this.img);
     this.hls = []; this.world.append(this.tip, this.cur);
     this.tip.classList.remove("show"); this.cur.classList.remove("show");

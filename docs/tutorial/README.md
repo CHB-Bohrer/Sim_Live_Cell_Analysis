@@ -40,11 +40,16 @@ Nothing to install, nothing is sent anywhere.
 ## The MP4 (48 min; 720p = 61 MB, full size 1600x900 = 118 MB)
 Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17
 That video was recorded on 2026-10-17: it does not have the two-copies / stray-spots scene or the 2026-10-20 screenshots (the HTML tutorial does).
+A new 52-minute version with both (1600x900 = 110 MB, 720p = 82 MB) was made on 2026-10-20 and is kept locally in `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-20\`;
+it is not published yet.
 It is NOT in the git tree, to keep the repository small (an earlier 46-minute version, `docs/tutorial/tutorial_720p.mp4`, is still in the git history; it was removed from the tree on 2026-10-17). This version includes the Vutara biplane scene. Local copies: `C:\Users\cbohr\SimLiveData\tutorial\`.
 The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
 How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):
 1. `tts.py`: exports every sentence of the tutorial and synthesizes one MP3 each (sends the narration text, already public in this repo, to Microsoft's service); writes `beats.json` with durations.
 2. `record.py`: plays `index.html#s=welcome&b=0&play=1` silently with every sentence lasting exactly its audio length (`window.BEAT_DUR`), screen-records it with Playwright and logs when each sentence started.
    Playwright's video recorder needs an ffmpeg at `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`; the `imageio-ffmpeg` binary was copied there.
-3. `mix.py`: places each MP3 at its logged start time and encodes H.264 + AAC. Checked by extracting frames: the caption of a sentence is on screen when its audio starts, at 19:44 and 47:49 of the 48-minute version (no drift); not every sentence was checked.
+3. `mix.py`: places each MP3 where that sentence's caption appears in the recording, then encodes H.264 + AAC. The recorder's frames arrive 0.3-2.2 s
+   (median 0.8 s) after the page logs a sentence, by a varying amount, so audio placed at the logged time led the picture (the 2026-10-17 video has this);
+   `--no-sync` restores the old placement. Checked on the 2026-10-20 video at 49 sentences spread over the whole length: the voice starts 0.17-0.63 s after its caption
+   (median 0.22 s, mostly the silence at the start of each voice clip).
 Takes about 55 minutes in real time. Re-do it whenever the narration or the dashboard changes (delete `vid/audio` first: `tts.py` caches clips by scene and sentence number, not by text).

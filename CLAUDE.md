@@ -578,6 +578,10 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - MP4 (2026-10-17; user asked for "claudes voice and an mp4", then "don't add another 59 MB to the history"): re-rendered after the biplane scene, 48 min, published as GitHub release `tutorial-video-2026-10-17`
   (https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17; 720p 61 MB + full size 118 MB), NOT in the git tree (the first 59 MB version is still in history). Local copies in `C:\Users\cbohr\SimLiveData\tutorial\`.
   Delete the audio cache before re-running `tts.py` (clips are keyed by scene:sentence, not by text). Frame-checked at 19:44 and 47:49.
+  2026-10-20 version (with the copies scene, 52 min, full 110 MB / 720p 82 MB) in `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-20\`, NOT published (publishing a release needs the
+  user's OK). Found while checking it: the recorder's frames lag the page's sentence log by 0.3-2.2 s, varying, so the voice LED the picture by ~0.7 s (also in the 2026-10-17
+  video). `mix.py` now finds each caption change in the recording and places the audio there (voice now 0.17-0.63 s after its caption, median 0.22 s, 49 sentences checked).
+  The player also pre-decodes the current and next scene's screenshots (`engine.js` `decodedImg` / `keepDecoded`) so switching to a 9000 px picture does not stall it.
   Voice = Microsoft `en-US-JennyNeural` via `edge-tts` (the user chose it; Claude's own voice cannot be produced). Scripts `scripts/tutorial/video/{tts,record,mix}.py`; the player accepts `#s=<id>&b=<n>&play=1`
   and `window.BEAT_DUR` (fixed sentence lengths) for recording. Regenerating takes ~50 min of real time. Playwright's recorder needed an ffmpeg copied to `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`.
 - When the dashboard changes: re-run the capture + build, then fix any scene whose control was renamed. Sentences must stay under ~250 characters (some online voices cut off long utterances). NOT checked: how the

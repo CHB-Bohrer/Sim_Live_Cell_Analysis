@@ -1,7 +1,7 @@
 /* Scenes, part 1: the idea, starting the dashboard, making a simulation, cells and tracking, the microscope. */
 "use strict";
 const SC = (id, title, make, beats, tryit) => T.add({ id, title, make, beats: beats.map((b) => ({ s: b[0], c: b[1], pause: b[2] })), tryit });
-const shot = (o) => (st) => new Shot(st, o);
+const shot = (o) => { const make = (st) => new Shot(st, o); make.shots = Object.values(o.sets || { main: o.shot }); return make; };
 const code = (s) => `<code>${s}</code>`;
 /* focus helper: f("name", "label", opts) */
 const f = (n, l, o) => (s) => s.focus(n, l, o);
