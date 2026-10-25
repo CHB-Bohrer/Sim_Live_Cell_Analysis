@@ -24,7 +24,7 @@ SC("pipeline", "The pipeline in seven stages", (st) => A.pipeline(st), [
   ["The program is a pipeline of seven stages. Each stage is its own folder of code, and each one writes files that the next one reads, so you can inspect or replace any stage on its own.", (a) => a.stage(0)],
   ["Stage one is chromatin. A polymer simulation on the graphics card folds a ten megabase region and moves it, with loop extrusion and boundary elements. It is made once, saved, and reused. A simple stand-in motion exists for quick tests.", (a) => a.stage(1)],
   ["Stage two is the cells. Nuclei move around the field, bump into each other, change shape, and sometimes divide. Every cell keeps its own true ID number.", (a) => a.stage(2)],
-  ["Stage three is the microscope. It turns cells and loci into camera images, with twenty-six switchable sources of image error, from drift and blur to hot pixels and bleaching. It also writes the answer key.", (a) => a.stage(3)],
+  ["Stage three is the microscope. It turns cells and loci into camera images, with twenty-eight switchable sources of image error, from drift and blur to hot pixels and bleaching. It also writes the answer key.", (a) => a.stage(3)],
   ["Stage four finds every nucleus in every frame, which is segmentation, and links them through time, which is tracking. It uses Cellpose and Trackastra, and it never sees the answer key.", (a) => a.stage(4)],
   ["Stage five cuts out one small movie per cell, so each cell can be analysed by itself, many in parallel.", (a) => a.stage(5)],
   ["Stage six finds the promoter and the enhancer in every frame, reads the MS2 spot, and turns it into Pol two start times. This is where your own analysis plugs in.", (a) => a.stage(6)],
@@ -178,7 +178,7 @@ SC("forward", "From a spot to an image", (st) => A.microscope(st), [
   ["The camera adds its own electronic read noise to every pixel.", (a) => a.step(4)],
   ["Then the defects: hot pixels and a cosmic ray. Now the brightest pixel is red, because a naive detector would report a hot pixel instead of the locus.", (a) => a.step(5)],
   ["And even a perfect detector would be off, because stage drift and the chromatic shift between colours draw the spot in the wrong place. Some errors can be removed by the analysis, others only by calibration.", (a) => a.step(6)],
-  ["The current version has twenty-six switchable sources. The Images page, next, explains each one and measures what it costs.", (a) => a.step(6)],
+  ["The current version has twenty-eight switchable sources. The Images page, next, explains each one and measures what it costs.", (a) => a.step(6)],
 ]);
 
 SC("biplane", "Vutara biplane: two planes at once", (st) => A.biplane(st), [

@@ -8,8 +8,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits tog
 
 ## New here? Take the narrated tutorial
 Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20)** (52 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 50 minutes of animated, narrated scenes covering the
-pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = your browser's
-speech synthesis (Edge's "Natural" voices sound best); details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
+pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = recorded natural neural clips made locally (default speed 1.5x; without the clips, your browser's
+speech synthesis, where Edge's "Natural" voices sound best); the MP4 predates the newest scenes. Details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
 
 ## Quick start (Windows)
 
@@ -120,7 +120,7 @@ two loci at the positions set in the Transcription tab (default: 100 kb apart in
 
 
 ### Image errors and the 🖼 Images tab
-The microscope model (stage 3) has 22 switchable sources of image error: stage drift, chromatic shift between colours, diffraction blur, focus drift, out-of-focus haze,
+The microscope model (stage 3) has 28 switchable sources of image error (22 original ones, plus z-slice skew, piezo, biplane registration, sequential colours, cytoplasm and stray spots, which are described in their own sections): stage drift, chromatic shift between colours, diffraction blur, focus drift, out-of-focus haze,
 exposure motion, bleaching, uneven illumination, flicker, background, autofluorescence, colour cross-talk, quantum efficiency, shot noise, dark current, hot pixels,
 cosmic rays, pixel-gain pattern, read noise, row noise, offset pattern and digitisation/saturation. They are set in the `imaging_errors:` block of the configs (all
 values are placeholders), or with the sidebar's **Image errors** controls; `imaging_errors.enabled: false` gives the simple original model. Every source is

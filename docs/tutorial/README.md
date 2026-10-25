@@ -1,13 +1,15 @@
 # Narrated tutorial
 
-`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 50 minutes in 38 short scenes;
+`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 50 minutes at 1x, 35 minutes at the default 1.5x speed, in 38 short scenes;
 every scene can be jumped to from the list on the left). **Open it from the dashboard's home page ("Open the narrated tutorial") or by
 double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install, nothing is sent anywhere. The dashboard serves a copy
 (`app/static/tutorial`, refreshed from this folder whenever the home page loads; `app/style.publish_tutorial`), so edit the files HERE.
 
-- **Voice:** the narration uses your browser's speech synthesis (Web Speech API). Edge offers the most natural voices (names ending in
-  "Online (Natural)", e.g. Aria or Jenny; they need an internet connection). Pick the voice and speed on the start screen or in the bottom bar.
-  This is NOT Claude's own voice: there is no way to call it from a local page. With no voice installed the captions still run at reading speed.
+- **Voice:** the default is a recorded natural neural voice (Microsoft `en-US-JennyNeural`): one MP3 per sentence in `audio/`, played by the page itself, so it works offline once the files
+  exist. They are made by `scripts/tutorial/video/make_clips.py` (see below) and are NOT in git (17 MB): without them the page falls back to your browser's speech synthesis (Web Speech API;
+  Edge offers the most natural voices, names ending in "Online (Natural)"). Pick the voice and speed on the start screen or in the bottom bar; the default speed is 1.5x.
+  A clip is used only while its sentence is unchanged (hash check), so after editing narration run `make_clips.py` again (only edited sentences are re-recorded).
+  This is NOT Claude's own voice: there is no way to call it from a local page.
 - **Keys:** Space = play/pause, Left/Right = previous/next sentence, Shift + Left/Right = previous/next scene, M = voice on/off, C = captions.
 - **Deep links:** `index.html#s=<scene id>&b=<sentence number>` opens a scene (ids are in `scenes_a.js` / `scenes_b.js`).
 - **Your turn:** the last sentence of most scenes shows a short "Your turn" card with steps to try in the real dashboard.
@@ -21,7 +23,7 @@ double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install,
 | 3 Cells and tracking | animation of tracking errors; Movie, Metrics, Trajectories, Scans pages |
 | 4 The microscope | animation of a spot becoming an image; Images, Calibration, Stage and fiducials pages |
 | 5 Chromatin | polymer + loop extrusion animation; Library, Chromatin pages |
-| 6 Finding the loci | Cells page; animation of the Viterbi spot finder; animation of two promoter-enhancer copies, stray spots and the multi-copy linker; Spot finding page |
+| 6 Finding the loci | Cells page (incl. the x-z / y-z side views of 3D runs); animation of the Viterbi spot finder; animation of two promoter-enhancer copies, stray spots and the multi-copy linker; Spot finding page |
 | 7 Transcription biology | probes, transcription, MS2 deconvolution and E-P curve animations; Probes, Transcription, MS2, E-P pages |
 | 8 Configuration | Config page; command-line cheat sheet |
 | 9 Putting it together | three workflows, cautions, cheat sheet |
@@ -37,6 +39,10 @@ double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install,
 - Keep each sentence under ~250 characters: some online voices stop reading long utterances.
 - Run numbers in the screenshots come from `loci_demo_seed11_24bba2`, `tracking_demo_seed3_e15523`, `loci_demo_seed8_f5c88d`, `loci_3d_seed23_2163f4` and
   (two copies per cell, stray spots: shots `pg_cells_copies`, `pg_spots_copies`) `loci_library_seed12_87a16d`.
+
+## Recording the natural-voice clips
+With the separate venv (playwright + `pip install edge-tts`): `python scripts/tutorial/video/make_clips.py [voice]` (default en-US-JennyNeural; try en-US-AvaMultilingualNeural or en-US-AriaNeural; changing the voice re-records
+everything, about 4 minutes). It sends the narration text to Microsoft's online service (the text is public in this repo). To share the clips, attach `docs/tutorial/audio` to a release.
 
 ## The MP4 (52 min; 720p = 82 MB, full size 1600x900 = 110 MB)
 Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20

@@ -33,16 +33,20 @@ SC("chromatin", "Page: Chromatin", shot({ shot: "pg_chrom", label: "🧬 Chromat
 
 /* ================================================================== 6 */
 T.chapter("6 · Finding the loci");
-SC("cells", "Page: Cells", shot({ sets: { main: "pg_cells", copies: "pg_cells_copies" }, label: "🔬 Cells" }), [
+SC("cells", "Page: Cells", shot({ sets: { main: "pg_cells", copies: "pg_cells_copies", d3: "pg_cells_3d" }, label: "🔬 Cells" }), [
   ["Stage five cuts every cell out of the movie. Each cell becomes a fixed-size window that follows its centre, with the nucleus and one channel per locus. The Cells page shows them.", f("intro", "One small movie per cell")],
   ["First choose which identities to use: the true cell IDs from the simulation, or the tracker's. Running the same analysis on both is how tracking errors are carried into locus results.", f("ident", "True IDs or tracker IDs")],
   ["The summary table lists each cell's lifetime, gaps, border contact and nearest neighbour. Clean tracks are the ones to trust.", f("table", "Cell summary")],
   ["All cells at one frame shows every window side by side, and a player runs them together.", f(["playall", "allframe", "grid"], "All cells", { multi: true })],
   ["Then pick one cell to watch through time, with its located loci. White plus signs are what the analysis found, cyan circles are the truth, and red crosses are where each colour is really drawn.", f(["onecell", "cellsel"], "One cell through time", { multi: true })],
+  ["The picture above is flat: it is the view from the top. In a three-dimensional run, a new part appears underneath it, called Side views, which shows where each spot sits along z, the height above the coverslip.", fs("d3", "side", "Side views: where the spots are along z")],
+  ["Pick a spot in the list. The two left panels cut the recorded stack through it: x against z, then y against z, with the coverslip at the bottom. The blur is the axial point spread function, longer than in x and y.", fs("d3", ["spotsel", "sidefig"], "Cuts through the chosen spot", { multi: true })],
+  ["White plus signs are the heights the analysis found. Cyan circles are the true heights, and red crosses are where each spot is really drawn. A plus far from its circle means a spot found at the wrong height.", fs("d3", "sidefig", "Found, true and drawn heights")],
+  ["The right panel follows the height of every spot through time. Thick faint lines are the truth, and the grey band is the range of the stack. A spot near the edge of the band is easy to lose.", fs("d3", "sidefig", "Height through time")],
   ["Some cells now carry two promoter-enhancer pairs. Each found spot is labelled P for promoter or E for enhancer, plus its copy number, and pink squares mark stray spots, the decoys the finder has to ignore.", (s) => { s.use("copies"); s.focus("legend", "P0, E0, P1, E1 and stray spots"); }],
   ["The figure underneath is built to answer three questions. Top left: how far is every found spot from its true locus, frame by frame? A pink square there means the spot found was a stray, a diamond means it was the other copy.", (s) => { s.use("copies"); s.focus("fig", "Errors, offsets, distances"); }],
   ["Top right: every found position minus the true one. The width of the cloud is the precision, and its centre is the bias, for example an uncorrected colour shift. Below: the promoter-enhancer distance of each copy, found against true.", (s) => { s.use("copies"); s.focus("fig", "Precision, bias and each copy's distance"); }],
-], ["Open Cells and choose True cell IDs", "Pick a cell with 2 promoter-enhancer copies", "Find the frames with a pink square in the error plot, and look at them in the image above"]);
+], ["Open Cells and choose True cell IDs", "Pick a cell with 2 promoter-enhancer copies", "On a 3D run (loci_3d), open Cells and look at Side views: choose a spot and compare the white plus with the cyan circle along z", "Find the frames with a pink square in the error plot, and look at them in the image above"]);
 
 SC("trellis", "How a spot is found", (st) => A.trellis(st), [
   ["Stage six finds each locus in each cell, following Chen, Levo, Zoller and Gregor, two thousand twenty-five. In every frame we have a set of bright blobs, and one of them is the locus.", (a) => a.step(0)],

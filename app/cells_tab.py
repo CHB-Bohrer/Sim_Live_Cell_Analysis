@@ -15,10 +15,12 @@ from style import PALETTE
 
 PALETTE_WARN = PALETTE["warn"]
 import tifffile
+import yaml
 from PIL import Image
 
 from fastview import all_cells_frames, cell_composite, movie_limits, single_cell_frames
 from player import show_player
+from simlive.stage3_microscopy.render import imager_for_run
 from simlive.stage5_linking.celldata import load_cell
 
 SRC_LABEL = {"truth": "True cell IDs (ground truth)", "tracked_gt_masks": "Tracked IDs (tracker on ground-truth masks)",
@@ -75,6 +77,116 @@ def _all_cells_movie(sdir: str, stamp: float, loc_names: tuple, tile: int = 150)
             tiles[int(t)] = np.asarray(Image.fromarray(rgb.astype(np.uint8)).resize((tile, tile), Image.BILINEAR))
         data.append((int(cid), tiles))
     return all_cells_frames(data, int(summ.last_t.max()) + 1, tile=tile)
+
+
+@_st.cache_resource(show_spinner=False, max_entries=3)
+def _z_geometry(run: str, stamp: float):
+    """z positions of the planes of a z-stack run (None for a 2D run): (planes z in um, plane spacing in um)."""
+    r = Path(run)
+    if not (r / "stage3_microscopy" / "locus0_zstack.tif").exists():
+        return None
+    im = imager_for_run(r, yaml.safe_load((r / "stage2_cells" / "params.yaml").read_text()))
+    return (np.asarray(im.zk, float), float(im.zstep)) if im.is3d else None
+
+
+@_st.cache_data(show_spinner=False, max_entries=24)
+def _read_zstack(run: str, stamp: float, name: str, t: int, nz: int):
+    """All planes (z, y, x) of one frame of <name>_zstack.tif."""
+    return tifffile.imread(Path(run) / "stage3_microscopy" / f"{name}_zstack.tif", key=range(int(t) * nz, (int(t) + 1) * nz)).astype(float)
+
+
+def side_views(st, run_path: Path, src: str, cid: int, t_now: int, fr_now, S: int, px_um: float, truth):
+    """Side views (x-z and y-z cuts through a chosen spot of the z-stack) and the heights of the cell's spots through time.
+
+    The x-y picture above is a projection of the stack, so it cannot show how far a spot is from the focal plane. Here the
+    horizontal axis is x (or y) and the vertical axis is the height z above the coverslip, so a spot found at the wrong height
+    is visible. 3D runs only."""
+    st.subheader("Side views: where the spots are along z")
+    geo = _z_geometry(str(run_path), (run_path / "stage2_cells" / "params.yaml").stat().st_mtime)
+    if geo is None:
+        st.info("This run is 2D, so there is no height to show. Make a 3D run with “Record 3D z-stacks” in the loci form "
+                "(or `configs/loci_3d.yaml`) to get x–z and y–z side views.")
+        return
+    zk, zstep = geo
+    nz = len(zk)
+    s6 = run_path / "stage6_analysis" / src
+    files = [(lab, s6 / n) for lab, n in (("as found", "loci_positions_3d.csv"), ("with the calibration applied", "loci_positions_3d_cal.csv")) if (s6 / n).exists()]
+    if not files:
+        st.info("This run has no 3D spot positions for this identity source (the 3D analysis may have run on true cell IDs only).")
+        return
+    which = files[0]
+    if len(files) > 1:
+        which = files[st.radio("3D positions", range(len(files)), format_func=lambda i: files[i][0], horizontal=True, key="cell_3d_which")]
+    p3 = with_copy(pd.read_csv(which[1]))
+    p3 = p3[p3.cell_id == cid]
+    now = p3[p3.t == t_now]
+    if now.empty:
+        st.info("No 3D spot was found for this cell in this frame (the cell may be out of the stack or the spot was missed).")
+        return
+    opts = [(int(q.locus_id), int(q.copy)) for q in now.itertuples()]
+    pick = st.selectbox("Cut through spot", range(len(opts)), format_func=lambda i: tag(*opts[i]), key="cell_3d_spot",
+                        help="The cut passes through this spot (3 pixel rows or columns averaged). The picture is that spot's own colour channel.")
+    k, cp = opts[pick]
+    q = now[(now.locus_id == k) & (now["copy"] == cp)].iloc[0]
+    zfile = run_path / "stage3_microscopy" / f"locus{k}_zstack.tif"
+    vol = _read_zstack(str(run_path), zfile.stat().st_mtime, f"locus{k}", t_now, nz)
+    ny, nx = vol.shape[1:]
+    x0, y0 = int(fr_now.crop_x0), int(fr_now.crop_y0)
+    iy, ix = min(max(int(round(q.lab_y_px)), 1), ny - 2), min(max(int(round(q.lab_x_px)), 1), nx - 2)
+    half = max(int(round(3.0 / px_um)), 8)                                  # zoom: 3 um each side of the spot, inside the cell's own window
+    xa, xb = max(ix - half, x0, 0), min(ix + half + 1, x0 + S, nx)
+    ya, yb = max(iy - half, y0, 0), min(iy + half + 1, y0 + S, ny)
+    if xb - xa < 5 or yb - ya < 5:
+        st.info("This spot is at the very edge of the image, so there is too little around it for a side view.")
+        return
+    vol = vol - np.median(vol[:, ya:yb, xa:xb].reshape(nz, -1), axis=1)[:, None, None]          # each plane's own background level
+    xz = vol[:, iy - 1:iy + 2, xa:xb].mean(axis=1)
+    yz = vol[:, ya:yb, ix - 1:ix + 2].mean(axis=2)
+    lo, hi = float(np.percentile(np.r_[xz.ravel(), yz.ravel()], 5)), float(np.percentile(np.r_[xz.ravel(), yz.ravel()], 99.9))
+    zext = (zk[0] - zstep / 2, zk[-1] + zstep / 2)
+    tt = truth[(truth.cell_id == cid) & (truth.t == t_now)] if truth is not None and "z_um" in truth else None
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), gridspec_kw={"width_ratios": [1, 1, 1.15]})
+    for ax, cut, (u0, u1), idx, name in ((axes[0], xz, (xa, xb), "x", "x–z"), (axes[1], yz, (ya, yb), "y", "y–z")):
+        ax.imshow(cut, cmap="gray", vmin=lo, vmax=hi, aspect="auto", origin="lower", interpolation="nearest",
+                  extent=(u0 * px_um, u1 * px_um, zext[0], zext[1]))
+        ax.set_title(f"{name} cut through {tag(k, cp)}", fontsize=11)
+        ax.set_xlabel(f"{idx} (µm)")
+        ax.set_ylabel("z above the coverslip (µm)")
+        for r in now.itertuples():                          # every found spot of this cell, labelled
+            u = (r.lab_x_px if idx == "x" else r.lab_y_px) * px_um
+            ax.plot(u, r.z_um, "+", color="white", ms=15, mew=2)
+            ax.annotate(tag(r.locus_id, r.copy), (u, r.z_um), color="white", fontsize=9, fontweight="bold", xytext=(8, 8), textcoords="offset points",
+                        bbox={"boxstyle": "round,pad=0.12", "fc": "black", "ec": "none", "alpha": 0.5})
+        if tt is not None:
+            for r in tt.itertuples():
+                ax.plot(r.x_um if idx == "x" else r.y_um, r.z_um, "o", mfc="none", mec="cyan", ms=13, mew=1.5)
+                if hasattr(r, "z_drawn_um") and abs(r.z_drawn_um - r.z_um) + abs(r.x_drawn_um - r.x_um) + abs(r.y_drawn_um - r.y_um) > 1e-9:
+                    ax.plot(r.x_drawn_um if idx == "x" else r.y_drawn_um, r.z_drawn_um, "x", color="red", ms=9, mew=1.5)
+        ax.set_xlim(u0 * px_um, u1 * px_um)
+        ax.set_ylim(max(zext[0], float(q.z_um) - 4.0), min(zext[1], float(q.z_um) + 4.0))          # 4 um above and below the spot
+    a = axes[2]                                              # heights of all of the cell's spots through time
+    for (kk, cc), g in p3.groupby(["locus_id", "copy"]):
+        g = g.sort_values("t")
+        a.plot(g.t, g.z_um, color=COLORS[int(kk) % 3], ls="-" if int(cc) == 0 else "--", lw=1.2, label=tag(kk, cc))
+    if truth is not None and "z_um" in truth:
+        for (kk, cc), g in truth[truth.cell_id == cid].groupby(["locus_id", "copy"]):
+            g = g.sort_values("t")
+            a.plot(g.t, g.z_um, color=COLORS[int(kk) % 3], lw=4, alpha=0.25)
+    a.axvline(t_now, color="#f59e0b", lw=1)
+    a.axhspan(zext[0], zext[1], color="#94a3b8", alpha=0.07, lw=0)
+    a.set_xlabel("frame")
+    a.set_ylabel("z above the coverslip (µm)")
+    a.set_title("Height of each spot through time")
+    a.legend(fontsize=8, ncol=4, loc="upper right")
+    fig.tight_layout()
+    st.pyplot(fig, width="stretch")
+    plt.close(fig)
+    st.caption(f"Left and middle: the recorded stack of this frame ({nz} planes, {zstep:g} µm apart, each plane minus its own background) cut along x or y through the chosen spot, zoomed to 3 µm sideways and 4 µm up and down around it, "
+               "coverslip at the bottom, bright = light. Right: the height of every spot through time; thick faint lines are the true heights"
+               + ("" if truth is not None else " (only available for true cell IDs)")
+               + ", the grey band is the range of the stack. White + = found by the analysis"
+               + ("; cyan ○ = true position; red × = where the spot is really drawn (true position + chromatic shift + focus error)" if truth is not None else "")
+               + ". Orange line = the frame shown above. The blur along z is the axial point spread function, longer than in x–y: height is the least certain coordinate.")
 
 
 def render(st, run_path: Path, cfg: dict):
@@ -213,6 +325,7 @@ def render(st, run_path: Path, cfg: dict):
                   "(true position + chromatic shift: the gap between ○ and × is an error no analysis can remove without a calibration); "
                   "pink □ = a stray spot (a decoy the finder must ignore)." if truth is not None
                   else ". (True positions are only available for true cell IDs.)"))
+    side_views(st, run_path, src, int(cid), t_now, fr_now, S, px_um, truth)
 
     if len(pos):
         pc = pos[pos.cell_id == cid]
@@ -232,7 +345,7 @@ def render(st, run_path: Path, cfg: dict):
         sub = gs[1, :].subgridspec(1, len(cps))
         dist_axes = {c: fig.add_subplot(sub[0, i]) for i, c in enumerate(cps)}
         if errs is not None:                       # how far each found spot is from its true locus, frame by frame
-            e = errs[(errs.cell_id == cid) & errs.visible.astype(bool)]
+            e = errs[(errs.cell_id == cid) & (errs.visible.astype(bool) if "visible" in errs else True)]          # runs made before the "visible" column have none
             a = ax["err"]
             for (k, c), g in e.groupby(["locus_id", "copy"]):
                 g = g.sort_values("t")

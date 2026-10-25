@@ -97,6 +97,21 @@ branch, not main": that was a misreading of the user's intent.)
 - **Planned work, not defects (unchanged):** stage 5 stitching of broken / switched tracks, 3D tracking and 3D cell isolation, Ultrack / TrackMate,
   density and frame-interval scans, choosing spots with promoter + enhancer + MS2 jointly, sister chromatids, E-P pool from the 100-simulation library.
 
+## Side views along z, natural tutorial voice, bug sweep (2026-10-25; user: "visualization of the spot along the X-Z axis in addition to X-Y", "update the tutorial in full", "default speed 1.5x", "still sounds like a robot")
+- **Side views (Cells page, `app/cells_tab.side_views`)**: for z-stack runs, below the x-y figure of "One cell through time": x-z and y-z cuts of the chosen spot's own colour stack
+  (`<ch>_zstack.tif`, frame of the slider; 3 pixel rows/columns averaged, zoomed 3 um sideways and 4 um up/down, each plane minus its own median background so the spot is not lost in
+  the fixed-pattern noise), with found (white +, from `loci_positions_3d[_cal].csv`; radio when both exist), true (cyan o) and drawn (red x) positions, plus the height of every spot
+  through time with the true heights as thick faint lines. Works for true and tracked IDs, with copies; plane heights from `imager_for_run(...).zk` (biplane too). 2D runs show a one-line notice.
+  Tested on the 3D, biplane and two-copy 3D runs (`tests/test_dashboard_pages.py::test_cells_side_views`). NOT done: x-z view in the Spot finding page's per-step images and in the player.
+- **Bugs found and fixed:** Cells page crashed on runs made before the `visible` column of `localization_errors.csv` (loci_demo_seed1_10849d); the tutorial said 26 image-error sources (there are 28; README said 22);
+  `build_data.py` dropped every shot not in the folder it was given (it now merges into `shots_data.js`, so single shots can be re-taken).
+- **Tutorial voice:** the browser voices sound robotic, so the player now plays recorded neural-voice clips (`docs/tutorial/audio/*.mp3` + `manifest.js`, made by
+  `scripts/tutorial/video/make_clips.py`, voice en-US-JennyNeural, 250 sentences, 17 MB, sentences sent to Microsoft's online TTS). A clip is used only if its hash matches the sentence in `engine.js`
+  (`hashText`), otherwise the browser voice speaks it, so after editing narration re-run `make_clips.py` (only changed sentences are synthesized). `docs/tutorial/audio/` is gitignored (like the MP4, not in
+  the history): a fresh clone has the browser voice until the clips are made or published. Voice list has "Natural voice (recorded)" first. Default speed is now 1.5x (storage key `rate15`).
+  The MP4 of 2026-10-20 does NOT have the new side-view scenes, the 28-source fix, or this voice; re-make it (README in docs/tutorial) and publish only with the user's OK.
+- New shot `pg_cells_3d` (capture_shots.py `cells_3d`, run `loci_3d_seed23_2163f4`); scene "cells" has 4 new sentences (250 sentences in 38 scenes now).
+
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
   pip freeze, polychrom commit `11a870c` (installer is pinned to it), model-weight SHA-256s, a frozen conda env copy

@@ -18,3 +18,6 @@ data/sweeps/*
 
 # copy of docs/tutorial that the dashboard serves (app/style.publish_tutorial)
 app/static/tutorial/
+
+# natural-voice clips of the tutorial (made by scripts/tutorial/video/make_clips.py; ~20 MB, kept out of the history)
+docs/tutorial/audio/

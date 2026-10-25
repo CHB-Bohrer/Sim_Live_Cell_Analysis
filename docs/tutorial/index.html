@@ -37,7 +37,7 @@
     <div class="sp"></div>
     <select class="voice hide-s" title="Narration voice"></select>
     <select class="rate" title="Speaking speed">
-      <option value="0.85">0.85×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option><option value="1.5">1.5×</option>
+      <option value="0.85">0.85×</option><option value="1">1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option><option value="1.5" selected>1.5×</option><option value="1.75">1.75×</option>
     </select>
     <button class="btn" id="mute" title="Voice on/off (M)">🔊 Voice</button>
     <button class="btn" id="capbtn" title="Captions (C)">CC</button>
@@ -49,13 +49,13 @@
     <h1>Sim Live Cell Analysis <span>· a narrated tour</span></h1>
     <p>A guided, animated walk through the whole program and its dashboard: what each stage of the pipeline does, how to start the dashboard,
        how to make a simulation, and what every page shows and how to use it. At the end of each part there is a short <b>Your turn</b> list
-       to try in the real dashboard. About 30 minutes in total; every part can be jumped to from the list on the left.</p>
+       to try in the real dashboard. About 50 minutes at normal speed (about 35 at the default 1.5×); every part can be jumped to from the list on the left.</p>
     <div class="row">
       <div><label>Narration voice</label><select class="voice"></select></div>
-      <div><label>Speed</label><select class="rate"><option value="0.85">0.85×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option></select></div>
+      <div><label>Speed</label><select class="rate"><option value="0.85">0.85×</option><option value="1">1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option><option value="1.5" selected>1.5×</option><option value="1.75">1.75×</option></select></div>
       <button class="btn" id="testvoice" style="align-self:flex-end">Test voice</button>
     </div>
-    <p class="note">The voice comes from your browser. <b>Microsoft Edge</b> offers the most natural voices (look for names ending in “Online (Natural)”, e.g. Aria or Jenny; they need an internet connection).
+    <p class="note">The default voice is a recorded natural neural voice (the clips in the <code>audio</code> folder); if they are missing, the voice comes from your browser. <b>Microsoft Edge</b> offers the most natural voices (look for names ending in “Online (Natural)”, e.g. Aria or Jenny; they need an internet connection).
        Chrome has Google voices, Safari its own. If no voice is listed, the captions still run at reading speed.</p>
     <div class="row">
       <button class="btn primary big" id="startbtn">▶ Start the tutorial</button>
@@ -66,6 +66,7 @@
 </div>
 
 <script src="shots_data.js"></script>
+<script src="audio/manifest.js" onerror="void 0"></script>
 <script src="engine.js"></script>
 <script src="anims.js"></script>
 <script src="scenes_a.js"></script>

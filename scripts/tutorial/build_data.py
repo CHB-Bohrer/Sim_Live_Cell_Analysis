@@ -20,9 +20,13 @@ OVERRIDES = {
     "pg_images": {"frame": [90, 405, 370, 90]},
     "pg_images_err": {"what": [90, 2270, 370, 179]},
     "pg_chrom": {"lib": [90, 285, 1120, 75], "sim": [90, 840, 1120, 70]},
+    "pg_cells_3d": {"sidefig": [90, 2000, 1120, 330]},          # the side-view figure (the last image on the page is another figure)
 }
 TAILS = {"pg_probes": ("use", 140)}
 data = {}
+old = dst / "shots_data.js"
+if old.exists():                      # keep the shots that are not in this folder, so single shots can be re-taken (capture_shots.py <out> <shot>)
+    data = json.loads(old.read_text(encoding="utf-8").split("=", 1)[1].rstrip().rstrip(";"))
 for j in sorted(src.glob("*.json")):
     d = json.loads(j.read_text(encoding="utf-8"))
     jpg = j.with_suffix(".jpg")

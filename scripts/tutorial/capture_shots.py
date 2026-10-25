@@ -249,6 +249,11 @@ def main():
             save_page(pg, "pg_cells", {"intro": INTRO, "ident": ("Cells identified by", EC), "table": ("Cell summary table", EXP), "playall": ("Play all cells together", EXP),
                                        "allframe": ("All cells at one frame", EC), "grid": ("css", "[data-testid=stImage]"), "onecell": ("One cell through time", EC),
                                        "cellsel": ("Clean track", ALERT), "legend": ("White + = spot found by the analysis", EC), "traces": ("Solid = copy 0", EC)})
+        if want("cells_3d"):                                   # the x-z / y-z side views need a z-stack run (added 2026-10-25)
+            select_run(pg, RUN_D); goto_page(pg, "Cells"); wait_text(pg, "Left and middle: the recorded stack"); idle(pg, 3)
+            save_page(pg, "pg_cells_3d", {"intro": INTRO, "onecell": ("One cell through time", EC), "side": ("Side views: where the spots are along z", EC),
+                                          "spotsel": ("Cut through spot", EC), "sidefig": ("css_last", "[data-testid=stImage]"), "sidecap": ("Left and middle: the recorded stack", EC)})
+            select_run(pg, RUN_A)
         if want("spots"):
             goto_page(pg, "Spot finding"); wait_gone(pg, "Running the spot finder")
             wait_text(pg, "4 · Compare methods on this run"); idle(pg, 2)   # else the bottom still shows the previous page's dimmed leftovers

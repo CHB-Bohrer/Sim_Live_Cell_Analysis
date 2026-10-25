@@ -3,7 +3,7 @@
 "use strict";
 const T = {
   scenes: [], chapters: [], si: -1, bi: 0, playing: false, frozen: false, started: false,
-  rate: 1, voice: null, voices: [], mute: false, caps: true, ctl: null, stage: null, doneSet: new Set(),
+  rate: 1.5, useClips: false, voice: null, voices: [], mute: false, caps: true, ctl: null, stage: null, doneSet: new Set(),
   token: 0, timers: [],
 };
 const $ = (s, el = document) => el.querySelector(s);
@@ -47,29 +47,53 @@ function loadVoices() {
   const vs = (window.speechSynthesis ? speechSynthesis.getVoices() : []).filter((v) => /^en[-_]/i.test(v.lang));
   vs.sort((a, b) => rankVoice(b) - rankVoice(a));
   T.voices = vs;
-  const saved = store("voice");
+  const saved = store("voice"), hasClips = !!(window.CLIPS && Object.keys(window.CLIPS).length);
   T.voice = vs.find((v) => v.name === saved) || vs[0] || null;
+  T.useClips = hasClips && (saved == null || saved === CLIPS_ID);            // the recorded natural voice is the default when its files are there
   for (const sel of $$("select.voice")) {
     sel.innerHTML = "";
-    if (!vs.length) sel.append(h("option", { value: "" }, "No voices found (captions only)"));
+    if (hasClips) sel.append(h("option", { value: CLIPS_ID }, "Natural voice (recorded)"));
+    if (!vs.length && !hasClips) sel.append(h("option", { value: "" }, "No voices found (captions only)"));
     vs.forEach((v) => sel.append(h("option", { value: v.name }, v.name.replace(/^Microsoft /, "").replace(/ - English.*/, "") + (v.localService ? "" : "  (online)"))));
-    if (T.voice) sel.value = T.voice.name;
+    if (T.useClips) sel.value = CLIPS_ID; else if (T.voice) sel.value = T.voice.name;
   }
 }
 function wordsOf(text) { return text.split(/(\s+)/); }
 
 /* ---------------------------------------------------------------- speech */
-let utter = null;
-function stopSpeech() { try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { } utter = null; }
-function speak(text, spans, token, fixedSec) {
+let utter = null, clipEl = null;
+function stopSpeech() {
+  try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { }
+  utter = null;
+  if (clipEl) { try { clipEl.onended = clipEl.onerror = clipEl.ontimeupdate = null; clipEl.pause(); } catch (e) { } clipEl = null; }
+}
+/* Recorded natural-voice clips: audio/manifest.js (made by scripts/tutorial/video/make_clips.py) maps "scene:beat" to {f: file, h: hash of the sentence}.
+   A clip is used only when its hash still matches the sentence, so an edited sentence falls back to the browser voice instead of reading the old text. */
+function hashText(s) { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x * 33) ^ s.charCodeAt(i)) >>> 0; return x.toString(16); }
+const CLIPS_ID = "__clips__";
+function clipFor(key, text) { const c = window.CLIPS && window.CLIPS[key]; return c && c.h === hashText(text) ? c.f : null; }
+function speak(text, spans, token, fixedSec, key) {
   return new Promise((resolve) => {
     const nWords = text.split(/\s+/).length;
     const est = fixedSec ? fixedSec * 1000 : (nWords / 2.55 / T.rate) * 1000 + 700;            // read-aloud time, also the fallback when there is no voice
     let done = false;
     const finish = () => { if (!done) { done = true; clearTimeout(wd); resolve(); } };
-    const silent = T.mute || !T.voice || !!fixedSec;
+    const clip = !T.mute && !fixedSec && T.useClips ? clipFor(key, text) : null;
+    const silent = T.mute || (!T.voice && !clip) || !!fixedSec;
     const wd = setTimeout(finish, silent ? est : est * 1.8 + 4000);
     T.timers.push(wd);
+    if (clip) {                                         // natural voice: play the recorded clip, words light up with its progress
+      stopSpeech();
+      const a = new Audio(clip);
+      a.preservesPitch = true; a.playbackRate = T.rate;
+      const mark = () => { if (token !== T.token || !a.duration) return; const k = Math.floor((a.currentTime / a.duration) * spans.length * 1.04); spans.forEach((s, i) => s.classList.toggle("said", i < k)); };
+      a.ontimeupdate = mark;
+      a.onended = () => { spans.forEach((s) => s.classList.add("said")); finish(); };
+      a.onerror = () => { if (clipEl === a) clipEl = null; T.useClips = false; finish(); };         // file missing: carry on with the browser voice from the next sentence
+      clipEl = a;
+      const p = a.play(); if (p && p.catch) p.catch(() => finish());
+      return;
+    }
     if (silent || !window.speechSynthesis) {            // no audio: reveal the words at reading speed
       const t0 = performance.now();
       const tick = () => {
@@ -149,7 +173,7 @@ async function runBeat(i, b, token) {
   if (!T.playing) { spans.forEach((s) => s.classList.add("said")); return; }
   const fixed = window.BEAT_DUR && window.BEAT_DUR[sc.id + ":" + b];
   (window.BEAT_LOG = window.BEAT_LOG || []).push([sc.id + ":" + b, performance.now()]);
-  await speak(beat.s, spans, token, fixed);
+  await speak(beat.s, spans, token, fixed, sc.id + ":" + b);
   if (token !== T.token || !T.playing) return;
   await sleep(beat.pause != null ? beat.pause : 450);
   if (token !== T.token || !T.playing) return;
@@ -439,14 +463,25 @@ T.boot = () => {
   $("#prevs").onclick = () => T.goto(T.si - 1, 0); $("#nexts").onclick = () => T.goto(T.si + 1, 0);
   $("#replay").onclick = () => T.goto(T.si, 0);
   $("#rail-toggle").onclick = () => $("#rail").classList.toggle("open");
-  const sp = store("rate"); if (sp) T.rate = sp;
-  for (const sel of $$("select.rate")) { sel.value = String(T.rate); sel.onchange = (e) => { T.rate = +e.target.value; store("rate", T.rate); $$("select.rate").forEach((s) => (s.value = String(T.rate))); }; }
+  const sp = store("rate15"); if (sp) T.rate = sp;       // new key: the old "rate" was saved when 1x was the default
+  for (const sel of $$("select.rate")) { sel.value = String(T.rate); sel.onchange = (e) => { T.rate = +e.target.value; store("rate15", T.rate); $$("select.rate").forEach((s) => (s.value = String(T.rate))); }; }
   $("#mute").onclick = () => { T.mute = !T.mute; $("#mute").classList.toggle("on", T.mute); $("#mute").textContent = T.mute ? "🔇 Silent" : "🔊 Voice"; if (T.mute) stopSpeech(); };
   $("#capbtn").onclick = () => { T.caps = !T.caps; $("#caption").classList.toggle("off", !T.caps); $("#capbtn").classList.toggle("on", T.caps); };
   $("#capbtn").classList.add("on");
-  for (const sel of $$("select.voice")) sel.onchange = (e) => { T.voice = T.voices.find((v) => v.name === e.target.value) || null; store("voice", e.target.value); $$("select.voice").forEach((s) => (s.value = e.target.value)); };
-  $("#testvoice").onclick = () => { stopSpeech(); if (T.voice) { const u = new SpeechSynthesisUtterance("Hello. This is how the narration will sound."); u.voice = T.voice; u.rate = T.rate; speechSynthesis.speak(u); } };
-  if (window.speechSynthesis) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; setTimeout(loadVoices, 600); setTimeout(loadVoices, 2000); }
+  for (const sel of $$("select.voice")) sel.onchange = (e) => {
+    const v = e.target.value; store("voice", v);
+    T.useClips = v === CLIPS_ID;
+    if (!T.useClips) T.voice = T.voices.find((x) => x.name === v) || null;
+    $$("select.voice").forEach((s) => (s.value = v));
+  };
+  $("#testvoice").onclick = () => {
+    stopSpeech();
+    const first = window.CLIPS && Object.values(window.CLIPS)[0];
+    if (T.useClips && first) { const a = new Audio(first.f); a.playbackRate = T.rate; a.preservesPitch = true; clipEl = a; a.play().catch(() => { }); return; }
+    if (T.voice) { const u = new SpeechSynthesisUtterance("Hello. This is how the narration will sound."); u.voice = T.voice; u.rate = T.rate; speechSynthesis.speak(u); }
+  };
+  loadVoices();
+  if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = loadVoices; setTimeout(loadVoices, 600); setTimeout(loadVoices, 2000); }
   document.addEventListener("keydown", (e) => {
     if (/select|input|textarea/i.test(e.target.tagName)) return;
     if (e.code === "Space") { e.preventDefault(); if (!T.started) return; T.toggle(); }

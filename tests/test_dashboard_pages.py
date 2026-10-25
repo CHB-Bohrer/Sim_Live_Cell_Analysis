@@ -61,3 +61,17 @@ def test_home_without_runs(apptest, tmp_path, monkeypatch):
     at = apptest(None, None)
     assert not at.exception, "\n".join(str(e.value) for e in at.exception)
     assert any("tutorial" in m.value for m in at.markdown), "the tutorial link is missing on the empty home page"
+
+
+def test_cells_side_views(apptest):
+    """The Cells page shows x-z / y-z side views (and no error) on a z-stack run, and says so plainly on a 2D run."""
+    runs = _runs()
+    if not runs:
+        pytest.skip("no saved showcase run on this machine (set SIMLIVE_TEST_RUNS to a finished run)")
+    for name in runs:
+        at = apptest(name, PAGES["cells"])
+        assert not at.exception, f"cells on {name}: " + "\n".join(str(e.value) for e in at.exception)
+        heads = [s.value for s in at.subheader]
+        assert any(h.startswith("Side views") for h in heads), f"{name}: no side-view section ({heads})"
+        is_3d = "3d" in name
+        assert any("is 2D" in i.value for i in at.info) != is_3d, f"{name}: the 2D notice does not match the run"
