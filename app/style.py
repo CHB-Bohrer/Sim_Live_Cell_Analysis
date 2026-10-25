@@ -253,7 +253,7 @@ def tutorial_banner(st) -> None:
     st.markdown(f'<div class="sl-tut"><span><b>New here?</b> A tutorial shows how to start a simulation, what every page shows and how to read '
                 f'its figures (about 50 minutes).</span>{open_link}<a class="sl-tut-alt" href="{TUTORIAL_VIDEO}" target="_blank" rel="noopener" '
                 f'title="The same tutorial as an MP4 with narration, on the project\'s GitHub releases page (720p or full size).">'
-                f'🎬 Watch it as a video (51 min)</a></div>', unsafe_allow_html=True)
+                f'🎬 Watch it as a video (49 min)</a></div>', unsafe_allow_html=True)
 
 
 GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked and scored. About 20 s."),

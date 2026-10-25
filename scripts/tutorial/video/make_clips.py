@@ -21,7 +21,8 @@ from playwright.sync_api import sync_playwright
 TUT = pathlib.Path(__file__).resolve().parents[3] / "docs" / "tutorial"
 OUT = TUT / "audio"
 OUT.mkdir(exist_ok=True)
-VOICE = sys.argv[1] if len(sys.argv) > 1 else "en-US-JennyNeural"
+EXPORT = len(sys.argv) > 2 and sys.argv[1] == "--export"          # --export <file.json>: only write the sentences (for make_clips_kokoro.py) and stop
+VOICE = sys.argv[1] if len(sys.argv) > 1 and not EXPORT else "en-US-JennyNeural"
 
 with sync_playwright() as p:
     b = p.chromium.launch(channel="msedge", headless=True)
@@ -30,6 +31,9 @@ with sync_playwright() as p:
     beats = pg.evaluate("T.scenes.flatMap(s => s.beats.map((b, i) => ({key: s.id + ':' + i, text: b.s, h: hashText(b.s)})))")
     b.close()
 print(len(beats), "sentences; voice", VOICE)
+if EXPORT:
+    pathlib.Path(sys.argv[2]).write_text(json.dumps(beats, indent=0), encoding="utf-8")
+    raise SystemExit(0)
 
 old = {}
 mf = OUT / "manifest.js"
