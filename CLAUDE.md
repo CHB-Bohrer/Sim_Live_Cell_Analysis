@@ -109,7 +109,7 @@ branch, not main": that was a misreading of the user's intent.)
   `scripts/tutorial/video/make_clips.py`, voice en-US-JennyNeural, 250 sentences, 17 MB, sentences sent to Microsoft's online TTS). A clip is used only if its hash matches the sentence in `engine.js`
   (`hashText`), otherwise the browser voice speaks it, so after editing narration re-run `make_clips.py` (only changed sentences are synthesized). `docs/tutorial/audio/` is gitignored (like the MP4, not in
   the history): a fresh clone has the browser voice until the clips are made or published. Voice list has "Natural voice (recorded)" first. Default speed is now 1.5x (storage key `rate15`).
-  The MP4 of 2026-10-20 does NOT have the new side-view scenes, the 28-source fix, or this voice; re-make it (README in docs/tutorial) and publish only with the user's OK.
+  The MP4 was re-made the same day with this voice, the side-view sentences and the 28-source fix: release `tutorial-video-2026-10-25` (51 min; 124 MB + 85 MB 720p; published at the user's request; the README, the dashboard home link and docs/tutorial/README point to it; the 2026-10-20 release stays). Local files: `C:SERSOHRSIMLIVEDATA	UTORIALIDEO_2026-10-25`. THE VIDEO NARRATES AT NORMAL SPEED (1X); ONLY THE WEB PLAYER DEFAULTS TO 1.5X.
 - New shot `pg_cells_3d` (capture_shots.py `cells_3d`, run `loci_3d_seed23_2163f4`); scene "cells" has 4 new sentences (250 sentences in 38 scenes now).
 
 ## Pinned versions (do not break)
@@ -634,7 +634,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   saved too early ends in the old page's leftovers (the first Spot finding shot ended in Trajectories plots, parts 3d / 4 were missing): `save_page` now waits until no
   `[data-stale="true"]` element is left. A scene with several pictures (`shot({ sets })`) stays on the last one chosen: switch back explicitly with `fs("main", ...)`.
 - MP4s are GitHub releases, NEVER in the git tree (user 2026-10-17: "don't add another 59 MB to the history"; the first 59 MB version is still in history). CURRENT: release `tutorial-video-2026-10-20`
-  (https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20; 52 min, with the copies scene; assets `sim_live_cell_analysis_tutorial.mp4` 110 MB and `_720p.mp4` 82 MB;
+  (https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20 (SUPERSEDED by tutorial-video-2026-10-25, see the 2026-10-25 section); 52 min, with the copies scene; assets `sim_live_cell_analysis_tutorial.mp4` 110 MB and `_720p.mp4` 82 MB;
   published 2026-10-20 at the user's request; README links point to it). Previous: `tutorial-video-2026-10-17` (48 min, kept). Local copies in `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-20\`
   (+ `release/` with the asset names) and older ones in `C:\Users\cbohr\SimLiveData\tutorial\`. Publishing a new release is outward-facing: ask the user first. `gh release create --target` needs a branch name or full SHA.
   Delete the audio cache before re-running `tts.py` (clips are keyed by scene:sentence, not by text). Found while checking the 2026-10-20 video: the recorder's frames lag the page's sentence log by 0.3-2.2 s, varying, so the voice LED the picture by ~0.7 s (also in the 2026-10-17

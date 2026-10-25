@@ -44,12 +44,12 @@ double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install,
 With the separate venv (playwright + `pip install edge-tts`): `python scripts/tutorial/video/make_clips.py [voice]` (default en-US-JennyNeural; try en-US-AvaMultilingualNeural or en-US-AriaNeural; changing the voice re-records
 everything, about 4 minutes). It sends the narration text to Microsoft's online service (the text is public in this repo). To share the clips, attach `docs/tutorial/audio` to a release.
 
-## The MP4 (52 min; 720p = 82 MB, full size 1600x900 = 110 MB)
-Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20
-This version (2026-10-20) has the two-copies / stray-spots scene and the 2026-10-20 screenshots. The previous one (48 min, without them, voice ~0.7 s ahead of the picture)
+## The MP4 (51 min; 720p = 85 MB, full size 1600x900 = 124 MB)
+Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25
+This version (2026-10-25) uses the natural-voice clips (en-US-JennyNeural, normal speed), has the Cells side-view sentences and the 2026-10-25 screenshots. The 2026-10-20 one (52 min, browser-grade voice, no side views) stays at https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20. The previous one (48 min, without them, voice ~0.7 s ahead of the picture)
 stays at https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17.
 It is NOT in the git tree, to keep the repository small (an earlier 46-minute version, `docs/tutorial/tutorial_720p.mp4`, is still in the git history; it was removed from the tree on 2026-10-17).
-Local copies: `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-20\` (and the older ones in `C:\Users\cbohr\SimLiveData\tutorial\`).
+Local copies: `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-25\` (and the older ones in `C:\Users\cbohr\SimLiveData\tutorial\`).
 The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
 How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):
 1. `tts.py`: exports every sentence of the tutorial and synthesizes one MP3 each (sends the narration text, already public in this repo, to Microsoft's service); writes `beats.json` with durations.

@@ -215,7 +215,7 @@ def intro(st, what: str, how: str) -> None:
 TUTORIAL_SRC = Path(__file__).resolve().parents[1] / "docs" / "tutorial"
 TUTORIAL_DST = Path(__file__).resolve().parent / "static" / "tutorial"      # Streamlit serves app/static at /app/static/
 TUTORIAL_URL = "app/static/tutorial/index.html"
-TUTORIAL_VIDEO = "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20"
+TUTORIAL_VIDEO = "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25"
 
 
 def publish_tutorial() -> bool:
@@ -253,7 +253,7 @@ def tutorial_banner(st) -> None:
     st.markdown(f'<div class="sl-tut"><span><b>New here?</b> A tutorial shows how to start a simulation, what every page shows and how to read '
                 f'its figures (about 50 minutes).</span>{open_link}<a class="sl-tut-alt" href="{TUTORIAL_VIDEO}" target="_blank" rel="noopener" '
                 f'title="The same tutorial as an MP4 with narration, on the project\'s GitHub releases page (720p or full size).">'
-                f'🎬 Watch it as a video (52 min)</a></div>', unsafe_allow_html=True)
+                f'🎬 Watch it as a video (51 min)</a></div>', unsafe_allow_html=True)
 
 
 GUIDE = [("➕ New simulation (sidebar)", "Cells move, are segmented, tracked and scored. About 20 s."),
