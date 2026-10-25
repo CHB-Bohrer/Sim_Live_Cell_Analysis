@@ -109,7 +109,7 @@ branch, not main": that was a misreading of the user's intent.)
   `scripts/tutorial/video/make_clips.py`, voice en-US-JennyNeural, 250 sentences, 17 MB, sentences sent to Microsoft's online TTS). A clip is used only if its hash matches the sentence in `engine.js`
   (`hashText`), otherwise the browser voice speaks it, so after editing narration re-run `make_clips.py` (only changed sentences are synthesized). `docs/tutorial/audio/` is gitignored (like the MP4, not in
   the history): a fresh clone has the browser voice until the clips are made or published. Voice list has "Natural voice (recorded)" first. Default speed is now 1.5x (storage key `rate15`).
-  The MP4 was re-made the same day with this voice, the side-view sentences and the 28-source fix: release `tutorial-video-2026-10-25` (51 min; 124 MB + 85 MB 720p; published at the user's request; the README, the dashboard home link and docs/tutorial/README point to it; the 2026-10-20 release stays). Local files: `C:SERSOHRSIMLIVEDATA	UTORIALIDEO_2026-10-25`. THE VIDEO NARRATES AT NORMAL SPEED (1X); ONLY THE WEB PLAYER DEFAULTS TO 1.5X.
+  The MP4 was re-made the same day with this voice, the side-view sentences and the 28-source fix: release `tutorial-video-2026-10-25` (51 min; 124 MB + 85 MB 720p; published at the user's request; the README, the dashboard home link and docs/tutorial/README point to it; the 2026-10-20 release stays). Local files: `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-25\`. The video narrates at normal speed (1x); only the web player defaults to 1.5x.
 - New shot `pg_cells_3d` (capture_shots.py `cells_3d`, run `loci_3d_seed23_2163f4`); scene "cells" has 4 new sentences (250 sentences in 38 scenes now).
 
 ## Pinned versions (do not break)
