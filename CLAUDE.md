@@ -110,9 +110,24 @@ branch, not main": that was a misreading of the user's intent.)
   `make_clips_kokoro.py beats.json` (kokoro venv `C:/Users/cbohr/kokoro_tmp/v`, model files in `kokoro_tmp/model`, setup + SHA-256s in the script header; downloaded 2026-10-25 with the user's OK, 350 MB). 250 sentences, 22 MB.
   `PRON` in the script respells names the model misreads (Viterbi, Cellpose ...; spoken only, captions unchanged): extend it if a word sounds wrong. A clip is used only if its hash matches the sentence in `engine.js`
   (`hashText`), otherwise the browser voice speaks it, so after editing narration re-run `make_clips.py` (only changed sentences are synthesized). `docs/tutorial/audio/` is gitignored (like the MP4, not in
-  the history): a fresh clone has the browser voice until the clips are made or published. Voice list has "Natural voice (recorded)" first. Default speed is now 1.5x (storage key `rate15`).
+  the history): a fresh clone has the browser voice until the clips are made or published. Voice list has "Natural voice (recorded)" first. Default speed 1.5x then (2x since 2026-10-26, see "Tutorial playback" below).
   The MP4 was re-made the same day with this voice, the side-view sentences and the 28-source fix: release `tutorial-video-2026-10-25` (49 min, Kokoro af_heart voice; 126 MB + 88 MB 720p; first uploaded with the Jenny voice, assets replaced the same day; published at the user's request; the README, the dashboard home link and docs/tutorial/README point to it; the 2026-10-20 release stays). Local files: `C:\Users\cbohr\SimLiveData\tutorial\video_2026-10-25\`. The video narrates at normal speed (1x); only the web player defaults to 1.5x.
 - New shot `pg_cells_3d` (capture_shots.py `cells_3d`, run `loci_3d_seed23_2163f4`); scene "cells" has 4 new sentences (250 sentences in 38 scenes now).
+
+## Tutorial playback (2026-10-26; user: "the movie consistently lags ... the animations tend to go and then stop", "default speed ... 2x")
+- **Cause found:** the PC itself. Windows' compositor (`dwm.exe`) kept the GPU's 3D engine at 81-97% with nothing else running (one 3440x1440 60 Hz screen;
+  uptime 18 days). A Chrome trace showed the page's own work at ~1% per frame, but `DXGISwapChainImageBacking::Present` holding single frames 0.3-0.8 s
+  (~18 frames/s). A blank page with one moving circle stalled the same way, so the tutorial code was not the cause. Check with
+  `Get-Counter "\GPU Engine(*)\Utilization Percentage"` (dwm should be a few %); a sign-out or reboot usually clears it. We do NOT change system settings.
+- **What the page did wrong:** its animation clock cut every frame's time step to 50 ms, so with late frames the canvas animations ran at ~40% of real
+  time (measured: 1.6 s of animation per 4 s), fell behind the voice and looked frozen. Now `engine.js` passes the real elapsed time (capped at 1 s) and
+  `Canvas` sub-steps its physics (`step()`) in pieces of <= 50 ms (`STEP`) and paints once: 3.8 s per 4 s at the same frame rate. Draw functions only use dt for
+  tweens / accumulators, which are fine with a large dt.
+- The next sentence's clip is now preloaded while the current one plays (`preloadAfter`, `takeClip`; the dashboard's static server takes ~0.25 s per file);
+  measured readyState 4 (fully loaded) at every play.
+- **Default speed 2x** (options now up to 2.5x; storage key `rate20`, so a 1.5x saved under `rate15` does not override the new default).
+- Test the tutorial with Playwright from the shot venv (`C:\Users\cbohr\shotenv_tmp\v`) over http (`python -m http.server` in docs/tutorial) with
+  `--autoplay-policy=no-user-gesture-required`; `headless=False` uses the real GPU. To measure the animation clock: `T.onFrame(d => sum += d)` vs wall time.
 
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,

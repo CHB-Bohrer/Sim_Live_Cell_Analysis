@@ -3,7 +3,7 @@
 "use strict";
 const T = {
   scenes: [], chapters: [], si: -1, bi: 0, playing: false, frozen: false, started: false,
-  rate: 1.5, useClips: false, voice: null, voices: [], mute: false, caps: true, ctl: null, stage: null, doneSet: new Set(),
+  rate: 2, useClips: false, voice: null, voices: [], mute: false, caps: true, ctl: null, stage: null, doneSet: new Set(),
   token: 0, timers: [],
 };
 const $ = (s, el = document) => el.querySelector(s);
@@ -72,6 +72,20 @@ function stopSpeech() {
 function hashText(s) { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x * 33) ^ s.charCodeAt(i)) >>> 0; return x.toString(16); }
 const CLIPS_ID = "__clips__";
 function clipFor(key, text) { const c = window.CLIPS && window.CLIPS[key]; return c && c.h === hashText(text) ? c.f : null; }
+/* The next sentence's clip is fetched while the current one plays (the dashboard's file server takes ~0.25 s per file). */
+let preClip = null;
+function preloadClip(file) {
+  if (!file || (preClip && preClip.f === file)) return;
+  const a = new Audio(); a.preload = "auto"; a.src = file; preClip = { f: file, a };
+}
+function takeClip(file) { if (preClip && preClip.f === file) { const a = preClip.a; preClip = null; return a; } return new Audio(file); }
+function preloadAfter(i, b) {
+  if (T.mute || !T.useClips) return;
+  const sc = T.scenes[i], nx = b + 1 < sc.beats.length ? [i, b + 1] : i + 1 < T.scenes.length ? [i + 1, 0] : null;
+  if (!nx) return;
+  const ns = T.scenes[nx[0]], beat = ns.beats[nx[1]];
+  preloadClip(clipFor(ns.id + ":" + nx[1], beat.s));
+}
 function speak(text, spans, token, fixedSec, key) {
   return new Promise((resolve) => {
     const nWords = text.split(/\s+/).length;
@@ -84,7 +98,7 @@ function speak(text, spans, token, fixedSec, key) {
     T.timers.push(wd);
     if (clip) {                                         // natural voice: play the recorded clip, words light up with its progress
       stopSpeech();
-      const a = new Audio(clip);
+      const a = takeClip(clip);
       a.preservesPitch = true; a.playbackRate = T.rate;
       const mark = () => { if (token !== T.token || !a.duration) return; const k = Math.floor((a.currentTime / a.duration) * spans.length * 1.04); spans.forEach((s, i) => s.classList.toggle("said", i < k)); };
       a.ontimeupdate = mark;
@@ -173,7 +187,9 @@ async function runBeat(i, b, token) {
   if (!T.playing) { spans.forEach((s) => s.classList.add("said")); return; }
   const fixed = window.BEAT_DUR && window.BEAT_DUR[sc.id + ":" + b];
   (window.BEAT_LOG = window.BEAT_LOG || []).push([sc.id + ":" + b, performance.now()]);
-  await speak(beat.s, spans, token, fixed, sc.id + ":" + b);
+  const spoken = speak(beat.s, spans, token, fixed, sc.id + ":" + b);
+  preloadAfter(i, b);
+  await spoken;
   if (token !== T.token || !T.playing) return;
   await sleep(beat.pause != null ? beat.pause : 450);
   if (token !== T.token || !T.playing) return;
@@ -201,10 +217,14 @@ T.prevBeat = () => { if (T.bi > 0) T.goBeat(T.bi - 1); else if (T.si > 0) T.goto
 T.goBeat = (b) => { T.goto(T.si, b); };
 
 /* ---------------------------------------------------------------- global animation clock */
+/* dt = the real time since the last frame (at most 1 s, e.g. after the tab was hidden). It used to be cut to 50 ms: when the
+   browser shows frames late (a busy GPU or desktop compositor can hold single frames for 0.3-0.8 s) the animations then ran
+   at a third of real time, fell behind the voice and looked as if they had stopped. Canvas physics is sub-stepped (STEP). */
 const frameFns = new Set(); let lastT = 0;
+const STEP = 0.05;
 T.onFrame = (fn) => { frameFns.add(fn); return () => frameFns.delete(fn); };
 function loop(now) {
-  const dt = Math.min(0.05, (now - lastT) / 1000 || 0); lastT = now;
+  const dt = lastT ? Math.min(1, (now - lastT) / 1000) : 0; lastT = now;
   const d = T.frozen ? 0 : dt;
   for (const fn of Array.from(frameFns)) { try { fn(d, now / 1000); } catch (e) { console.error(e); } }
   requestAnimationFrame(loop);
@@ -371,7 +391,11 @@ class Canvas {
     this.cv = h("canvas"); stage.append(this.cv); this.ctx = this.cv.getContext("2d");
     this.t = 0; this.drawFn = drawFn; this.instant = false;
     this.ro = new ResizeObserver(() => this.resize()); this.ro.observe(stage); this.resize();
-    this.off = T.onFrame((dt) => { this.t += dt; this.step && this.step(dt); this.paint(dt); });
+    this.off = T.onFrame((dt) => {
+      this.t += dt;
+      if (this.step) { const n = Math.max(1, Math.ceil(dt / STEP)); for (let k = 0; k < n; k++) this.step(dt / n); }
+      this.paint(dt);
+    });
   }
   resize() {
     const r = this.stage.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -463,8 +487,8 @@ T.boot = () => {
   $("#prevs").onclick = () => T.goto(T.si - 1, 0); $("#nexts").onclick = () => T.goto(T.si + 1, 0);
   $("#replay").onclick = () => T.goto(T.si, 0);
   $("#rail-toggle").onclick = () => $("#rail").classList.toggle("open");
-  const sp = store("rate15"); if (sp) T.rate = sp;       // new key: the old "rate" was saved when 1x was the default
-  for (const sel of $$("select.rate")) { sel.value = String(T.rate); sel.onchange = (e) => { T.rate = +e.target.value; store("rate15", T.rate); $$("select.rate").forEach((s) => (s.value = String(T.rate))); }; }
+  const sp = store("rate20"); if (sp) T.rate = sp;       // new key each time the default changes: older keys hold choices made under the old default (1x, then 1.5x)
+  for (const sel of $$("select.rate")) { sel.value = String(T.rate); sel.onchange = (e) => { T.rate = +e.target.value; store("rate20", T.rate); $$("select.rate").forEach((s) => (s.value = String(T.rate))); }; }
   $("#mute").onclick = () => { T.mute = !T.mute; $("#mute").classList.toggle("on", T.mute); $("#mute").textContent = T.mute ? "🔇 Silent" : "🔊 Voice"; if (T.mute) stopSpeech(); };
   $("#capbtn").onclick = () => { T.caps = !T.caps; $("#caption").classList.toggle("off", !T.caps); $("#capbtn").classList.toggle("on", T.caps); };
   $("#capbtn").classList.add("on");

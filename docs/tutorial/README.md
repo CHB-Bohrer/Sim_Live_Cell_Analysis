@@ -1,13 +1,13 @@
 # Narrated tutorial
 
-`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 50 minutes at 1x, 35 minutes at the default 1.5x speed, in 38 short scenes;
+`index.html` is a self-contained, animated, narrated tour of the whole program and its dashboard (about 50 minutes at 1x, about 25 minutes at the default 2x speed, in 38 short scenes;
 every scene can be jumped to from the list on the left). **Open it from the dashboard's home page ("Open the narrated tutorial") or by
 double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install, nothing is sent anywhere. The dashboard serves a copy
 (`app/static/tutorial`, refreshed from this folder whenever the home page loads; `app/style.publish_tutorial`), so edit the files HERE.
 
 - **Voice:** the default is a recorded voice made with Kokoro (a free text-to-speech model that runs locally; voice `af_heart`): one MP3 per sentence in `audio/`, played by the page itself, so it works offline once the files
   exist. They are made by `scripts/tutorial/video/make_clips_kokoro.py` (see below) and are NOT in git (17 MB): without them the page falls back to your browser's speech synthesis (Web Speech API;
-  Edge offers the most natural voices, names ending in "Online (Natural)"). Pick the voice and speed on the start screen or in the bottom bar; the default speed is 1.5x.
+  Edge offers the most natural voices, names ending in "Online (Natural)"). Pick the voice and speed on the start screen or in the bottom bar; the default speed is 2x.
   A clip is used only while its sentence is unchanged (hash check), so after editing narration run the two steps below again (only edited sentences are re-recorded).
   This is NOT Claude's own voice: there is no way to call it from a local page.
 - **Keys:** Space = play/pause, Left/Right = previous/next sentence, Shift + Left/Right = previous/next scene, M = voice on/off, C = captions.
