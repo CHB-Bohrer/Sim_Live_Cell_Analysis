@@ -133,6 +133,18 @@ branch, not main": that was a misreading of the user's intent.)
 - Test the tutorial with Playwright from the shot venv (`C:\Users\cbohr\shotenv_tmp\v`) over http (`python -m http.server` in docs/tutorial) with
   `--autoplay-policy=no-user-gesture-required`; `headless=False` uses the real GPU. To measure the animation clock: `T.onFrame(d => sum += d)` vs wall time.
 
+## Locus brightness in multi-copy linking (2026-10-26; user: "utilize the intensity of the individual loci ... to make the linking better")
+- Built: `locus_analysis.viterbi_intensity` (spots.DEFAULTS, default **false**): `dog_viterbi.IntensityModel` = AR(1) model of the path's DoG SNR
+  (level + bleaching trend, spread, lag-1 correlation, fitted to the path like D); each spot pays (z^2 - 1) / 2 nats on top of the usual costs.
+  Tests `tests/test_viterbi_intensity.py`. `scripts/sweep_copies_strays.py` gained `--variants` (extra: multi_int, multi_gauss_int) and
+  `--reanalyse TAG` (saved movies again -> `<TAG>_<variant>.csv`).
+- **Result: no net gain, so it stays off** (docs/SPOT_FINDING.md "Locus brightness in the linking"): 25 movies, placeholder probes: found 98 -> 95-98%,
+  stray picks slightly lower at 2-4 / min, other-copy picks up at 0.5 and 4 / min, 2 copies lost; slow probes (rates / 10, true lag-1 r 0.9): no gain
+  either. Cause: the per-frame MEASURED brightness is noisy (lag-1 r 0.43-0.88 vs true 0.83-0.92, CV ~0.3), copies are equally bright (same probes),
+  strays are 0.68 x a locus. A first likelihood-ratio version (vs the leftover candidates) was worse (the other copy counts as clutter) and was dropped.
+- Worth re-testing with the user's real numbers: locus photons per frame, probe residence time, stray brightness, and whether copies are labelled
+  differently. Not tried: a better per-candidate brightness (fitted amplitude instead of the DoG peak); brightness in `untangle` / `untangle_by_place`.
+
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
   pip freeze, polychrom commit `11a870c` (installer is pinned to it), model-weight SHA-256s, a frozen conda env copy
@@ -357,7 +369,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 213 CPU + 7 GPU tests at 2026-10-20. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 218 CPU + 7 GPU tests at 2026-10-26. Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 

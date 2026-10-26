@@ -3,6 +3,7 @@
     scripts\\run.cmd python scripts\\sweep_copies_strays.py
     scripts\\run.cmd python scripts\\sweep_copies_strays.py --rates 0,1,4 --seeds 51,52 --name quick
     scripts\\run.cmd python scripts\\sweep_copies_strays.py --name copies_strays_bright --rates 1 --set imaging_errors.stray_spots.brightness=1.5
+    scripts\\run.cmd python scripts\\sweep_copies_strays.py --reanalyse recheck4 --variants multi_gauss,multi_gauss_int   (saved movies again)
 
 Every movie: configs/loci_library.yaml (polymer-library loci; half the cells with two promoter-enhancer copies, copy 1 bursting twice as
 often, probes and MS2 on; --config configs/loci_demo.yaml for the stand-in loci),
@@ -13,6 +14,9 @@ The SAME crops are then analysed three ways:
   multi        the multi-copy linker without the pair gate (paths, coverage test, promoter-enhancer pairing),
   multi_gate   the multi-copy linker with the flat pair gate (1.5 um),
   multi_gauss  the multi-copy linker with the smooth (gauss) pair prior (the configs' default since 2026-10-19).
+Only with --variants: multi_int / multi_gauss_int = the same with the brightness model in the Viterbi paths (viterbi_intensity, 2026-10-26).
+--reanalyse TAG analyses the movies already listed in results.csv again with --variants (after a change of the analysis) and writes
+<TAG>_<variant>.csv next to it (resumable).
 Scores per analysis (stage6_analysis.localize.score_localization, with the stray-spot truth): found, wrong picks (frac_far), picks of a
 stray spot, picks of the other copy, copies found right per cell, missed / extra copies, promoter-enhancer distance error, and the MS2
 trace read at each found promoter (copies matched to the true ones): share of labelled copies traced, ON frames found, trace r.
@@ -32,6 +36,7 @@ from simlive.pipelines.tracking_demo import run_tracking_demo
 
 VARIANTS = {"one_path": {"max_copies": 1, "pair_prior": "none"}, "multi": {"pair_prior": "none"},
             "multi_gate": {"pair_prior": "gate", "pair_gate_um": 1.5}, "multi_gauss": {"pair_prior": "gauss"}}
+EXTRA = {"multi_int": {"pair_prior": "none", "viterbi_intensity": True}, "multi_gauss_int": {"pair_prior": "gauss", "viterbi_intensity": True}}
 KEEP = ("detection_rate", "frac_far", "frac_on_stray", "frac_on_other_copy", "median_error_um", "copy_number_right", "missed_copies",
         "extra_copies", "true_copies")
 
@@ -78,10 +83,32 @@ def main() -> None:
     ap.add_argument("--config", default=str(REPO_ROOT / "configs" / "loci_library.yaml"))
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VAL", help="extra overrides for every movie")
     ap.add_argument("--workers", type=int, default=None)
+    ap.add_argument("--variants", default=None, help="comma-separated analyses (default: the four of VARIANTS)")
+    ap.add_argument("--reanalyse", default=None, metavar="TAG", help="analyse the movies in results.csv again; writes <TAG>_<variant>.csv")
     a = ap.parse_args()
     out = DATA_ROOT / "sweeps" / a.name
     out.mkdir(parents=True, exist_ok=True)
     res_f = out / "results.csv"
+    variants = {**VARIANTS, **EXTRA}
+    chosen = {k: variants[k] for k in a.variants.split(",")} if a.variants else VARIANTS
+    if a.reanalyse:
+        runs = pd.read_csv(res_f).drop_duplicates("run")[["stray_rate_per_min", "seed", "run"]]
+        for name, over in chosen.items():
+            f = out / f"{a.reanalyse}_{name}.csv"
+            rows = pd.read_csv(f).to_dict("records") if f.exists() else []
+            for r in runs.itertuples():
+                if any(x["run"] == r.run for x in rows):
+                    continue
+                t0 = time.time()
+                rows.append({"stray_rate_per_min": r.stray_rate_per_min, "seed": r.seed, "analysis": name, "run": r.run,
+                             **analyse(DATA_ROOT / "runs" / r.run, over, a.workers)})
+                rows[-1]["seconds"] = round(time.time() - t0)
+                pd.DataFrame(rows).to_csv(f, index=False)
+                x = rows[-1]
+                print(f"{name} rate {r.stray_rate_per_min:g} seed {r.seed}: stray {x['frac_on_stray']:.4f} other copy "
+                      f"{x['frac_on_other_copy']:.4f} wrong {x['frac_far']:.4f} found {x['detection_rate']:.3f} "
+                      f"copies right {x['copy_number_right']:.2f} ({x['seconds']} s)", flush=True)
+        return
     done = pd.read_csv(res_f) if res_f.exists() else pd.DataFrame()
     rows = done.to_dict("records")
     for rate in [float(v) for v in a.rates.split(",")]:
@@ -95,12 +122,12 @@ def main() -> None:
             t0 = time.time()
             run = run_tracking_demo(cfg, DATA_ROOT / "runs", progress=lambda s: None)
             base = {"stray_rate_per_min": rate, "seed": seed}
-            for name, over in VARIANTS.items():
+            for name, over in chosen.items():
                 rows.append({**base, "analysis": name, "run": run.name, **analyse(run, over, a.workers)})
-            for r in rows[-len(VARIANTS):]:
+            for r in rows[-len(chosen):]:
                 r["seconds"] = round(time.time() - t0)
             pd.DataFrame(rows).to_csv(res_f, index=False)
-            g = {r["analysis"]: r for r in rows[-len(VARIANTS):]}
+            g = {r["analysis"]: r for r in rows[-len(chosen):]}
             print(f"rate {rate:g} seed {seed}: " + "; ".join(f"{k}: stray {v['frac_on_stray']:.3f} other copy {v['frac_on_other_copy']:.3f} "
                                                               f"copies right {v['copy_number_right']:.2f}" for k, v in g.items())
                   + f" ({time.time() - t0:.0f} s)", flush=True)

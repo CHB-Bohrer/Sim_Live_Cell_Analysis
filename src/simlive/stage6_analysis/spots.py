@@ -15,7 +15,7 @@ MAD_TO_SD = 1.4826
 DEFAULTS = dict(median_px=3, median_z="auto", refine="gaussian", fit_half_px=3, fit_half_z=2, smooth_sigma_px=1.0, smooth_sigma_z=0.8,
                 min_sep_px=4,
                 dog_sigma_px=(1.0, 3.0), dog_sigma_z=(0.8, 2.0), dog_snr=3.0, max_candidates=5, viterbi_max_gap=5, viterbi_miss_cost=2.0,
-                viterbi_D_px2=None, viterbi_iterations=3, z_scale=1.0,
+                viterbi_D_px2=None, viterbi_iterations=3, z_scale=1.0, viterbi_intensity=False,
                 # ellipsoid intensity of every detection (Chen et al. 2025): diameters (x, y, z) in px / planes
                 intensity_inner_px=(7, 7, 5), intensity_outer_px=(19, 19, 7), intensity_background="median")
 

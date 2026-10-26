@@ -92,11 +92,68 @@ def _link_cost(a: np.ndarray, b: np.ndarray, D: float, g: int, ndim: int) -> np.
     return d2 / (4 * D * g) + 0.5 * ndim * np.log(4 * np.pi * D * g)
 
 
-def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: float, reacquire: float | None = None) -> list:
+INT_Z2_CAP = 16.0           # brightness z^2 of one spot is capped (a real locus frame can be odd: an overlapping stray, a cosmic ray)
+
+
+class IntensityModel:
+    """The brightness of the spots a path follows, as a Gaussian AR(1) process in the DoG SNR (option `viterbi_intensity`; user 2026-10-26:
+    "utilize the intensity of the individual loci ... for we explicitly simulate the intensity of the loci using Gillespie"):
+        I_t = mu(t) + e_t,   e_t = rho e_{t-1} + innovation,   Var(e) = s^2,
+    mu(t) a straight line (bleaching), fitted with s (robust) and rho (lag-1 correlation of consecutive spots) to the path's own spots, like D.
+    Measurement noise is part of s and lowers rho, so the fit includes it. Every spot then pays (z^2 - 1) / 2 nats on top of the usual costs,
+    z = (I - predicted) / predicted sd, predicted from the path's previous spot (gap g: mean mu + rho^g e_prev, sd s sqrt(1 - rho^2g)) or,
+    at a start, from the level alone. A genuine spot costs nothing on average; a spot much dimmer (stray spot, noise peak) or much brighter
+    (cosmic ray) than the path pays. The other copy of a two-copy cell is about as bright, so brightness neither favours nor penalises it
+    unless rho is high and its brightness differs from the path's recent brightness; position decides as before.
+    A first version scored log p_path(I) - log p_clutter(I) instead of log SNR, with the clutter fitted to the candidates the path leaves. In
+    two-copy cells those include the other copy (locus-bright), so a real spot's brightness looked like clutter: on 12 sweep movies the share
+    of loci found fell from 98% to 92-96% and other-copy picks rose 0 -> 0.8-1.5%. Dropped."""
+
+    def __init__(self, t: np.ndarray, I: np.ndarray):
+        t, I = np.asarray(t, float), np.asarray(I, float)
+        if len(I) >= 6 and np.ptp(t) > 0:
+            b, a = np.polyfit(t, I, 1)
+        else:
+            a, b = float(np.median(I)) if len(I) else 1.0, 0.0
+        self.a, self.b = float(a), float(b)
+        res = I - self.mu(t)
+        mad = float(np.median(np.abs(res - np.median(res)))) * 1.4826 if len(res) else 0.0
+        self.s = max(mad, 0.05 * max(abs(self.a), 1.0), 0.3)
+        ok = np.diff(t) == 1
+        if ok.sum() >= 5:
+            r0, r1 = res[:-1][ok], res[1:][ok]
+            self.rho = float(np.clip(np.sum(r0 * r1) / max(np.sqrt(np.sum(r0 ** 2) * np.sum(r1 ** 2)), 1e-9), 0.0, 0.95))
+        else:
+            self.rho = 0.0
+
+    def mu(self, t):
+        return self.a + self.b * np.asarray(t, float)
+
+    def start_cost(self, t: int, I: np.ndarray) -> np.ndarray:
+        z2 = ((np.asarray(I, float) - self.mu(t)) / self.s) ** 2
+        return 0.5 * (np.minimum(z2, INT_Z2_CAP) - 1.0)
+
+    def link_cost(self, s: int, Is: np.ndarray, t: int, It: np.ndarray) -> np.ndarray:
+        """(z^2 - 1) / 2 of I_t = It[j] given I_s = Is[i], for every pair (gap t - s)."""
+        r = self.rho ** (t - s)
+        m = self.mu(t) + r * (np.asarray(Is, float)[:, None] - self.mu(s))
+        sd = self.s * np.sqrt(max(1.0 - r * r, 1e-3))
+        z2 = ((np.asarray(It, float)[None, :] - m) / sd) ** 2
+        return 0.5 * (np.minimum(z2, INT_Z2_CAP) - 1.0)
+
+    def as_dict(self) -> dict:
+        return {"a": self.a, "b": self.b, "s": self.s, "rho": self.rho}
+
+
+def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: float, reacquire: float | None = None,
+                  inten: tuple | None = None) -> list:
     """Lowest-cost path through the candidates (at most one per frame; frames may be skipped). Gaps of up to `max_gap` frames are bridged by
     the diffusion link; after a longer gap the path may pick the spot up again anywhere, at `reacquire` (-log of a uniform position over the
     cell, i.e. log of its size) plus the per-frame miss cost, so one path can hold several bursts separated by long OFF periods.
-    reacquire=None: no re-acquisition (one connected stretch). Returns the index chosen per frame or None."""
+    reacquire=None: no re-acquisition (one connected stretch). `inten` = (IntensityModel, SNR per frame): the brightness of a spot is then
+    scored given the path's previous spot (link) or the path's level (start / re-acquisition), see IntensityModel.
+    Returns the index chosen per frame or None."""
+    model, I = inten if inten is not None else (None, None)
     n = len(rel)
     ndim = next((r.shape[1] for r in rel if len(r)), 2)
     best = [np.full(len(r), np.inf) for r in rel]
@@ -111,9 +168,10 @@ def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: fl
                 run_min, run_arg = v, (s_new, j0)
         if not len(rel[t]):
             continue
-        best[t] = miss_cost * t - reward[t]                                 # start here (skipping the frames before)
+        start = model.start_cost(t, I[t]) if model is not None else 0.0
+        best[t] = miss_cost * t - reward[t] + start                         # start here (skipping the frames before)
         if run_arg is not None:                                             # pick the spot up again after a long gap
-            c = run_min + miss_cost * (t - 1) + reacquire - reward[t]
+            c = run_min + miss_cost * (t - 1) + reacquire - reward[t] + start
             better = c < best[t]
             best[t] = np.where(better, c, best[t])
             for j in np.nonzero(better)[0]:
@@ -125,6 +183,8 @@ def _viterbi_once(rel: list, reward: list, D: float, max_gap: int, miss_cost: fl
             if not len(rel[s]) or not np.isfinite(best[s]).any():
                 continue
             c = best[s][:, None] + _link_cost(rel[s], rel[t], D, g, ndim) + miss_cost * (g - 1) - reward[t][None, :]
+            if model is not None:
+                c = c + model.link_cost(s, I[s], t, I[t])
             i = np.argmin(c, axis=0)
             cj = c[i, np.arange(len(rel[t]))]
             better = cj < best[t]
@@ -158,7 +218,7 @@ def estimate_D(rel: list, choice: list, D_min: float = 0.25, max_gap: int = 5) -
 
 def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap: int = 5, viterbi_miss_cost: float = 2.0,
                   viterbi_D_px2: float | None = None, viterbi_iterations: int = 3, z_scale: float = 1.0, search_volume: float | None = None,
-                  reward_offset: list | None = None, **_) -> tuple[list, float]:
+                  reward_offset: list | None = None, viterbi_intensity: bool = False, model_out: dict | None = None, **_) -> tuple[list, float]:
     """Step 4. `peaks[i]`: candidate positions of frame i (crop px; (z, y, x) for stacks, z in planes), `snr[i]` their DoG signal-to-noise,
     `centre[i]` the nucleus centroid (y, x) in crop px; `z_scale` = plane spacing / pixel size, so distances are isotropic;
     `search_volume` = area (px^2) or volume (px^3, z scaled) of the cell region where candidates can appear; `reward_offset[i]` (optional,
@@ -167,6 +227,9 @@ def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap
     A candidate left off the path must be explained as a false one, which appear uniformly over the region at (mean candidates per frame
     - 1) per frame: each node's reward therefore includes log(search_volume / false candidates per frame), the usual clutter term of a
     track likelihood. Without it, skipping a frame is cheaper than keeping a well-placed but faint spot.
+    viterbi_intensity: after the usual passes, the brightness of the path's spots is modelled (`IntensityModel`) and the path found again
+    with a brightness-consistency cost added to every spot, D and the model re-fitted each time
+    (`viterbi_iterations` passes). `model_out` (a dict), if given, receives the final model's numbers.
     Returns (chosen candidate per frame or None, D in px^2 per frame)."""
     rel = []
     for i, p in enumerate(peaks):
@@ -186,18 +249,35 @@ def viterbi_track(peaks: list, snr: list, centre: np.ndarray, *, viterbi_max_gap
     if reward_offset is not None:
         reward = [r + np.asarray(o, float) for r, o in zip(reward, reward_offset)]
     reacq = float(np.log(max(float(search_volume), 1.0))) if search_volume else None
+    gap, miss = int(viterbi_max_gap), float(viterbi_miss_cost)
     if viterbi_D_px2:
-        return _viterbi_once(rel, reward, float(viterbi_D_px2), int(viterbi_max_gap), float(viterbi_miss_cost), reacq), float(viterbi_D_px2)
-    brightest = [0 if len(r) else None for r in rel]
-    D = estimate_D(rel, brightest, max_gap=int(viterbi_max_gap))
-    choice = brightest
-    for _ in range(max(int(viterbi_iterations), 1)):
-        choice = _viterbi_once(rel, reward, D, int(viterbi_max_gap), float(viterbi_miss_cost), reacq)
-        D_new = estimate_D(rel, choice, max_gap=int(viterbi_max_gap))
-        if abs(D_new - D) < 0.02 * D:
+        D = float(viterbi_D_px2)
+        choice = _viterbi_once(rel, reward, D, gap, miss, reacq)
+    else:
+        brightest = [0 if len(r) else None for r in rel]
+        D = estimate_D(rel, brightest, max_gap=gap)
+        choice = brightest
+        for _ in range(max(int(viterbi_iterations), 1)):
+            choice = _viterbi_once(rel, reward, D, gap, miss, reacq)
+            D_new = estimate_D(rel, choice, max_gap=gap)
+            if abs(D_new - D) < 0.02 * D:
+                D = D_new
+                break
             D = D_new
+    if not viterbi_intensity or sum(c is not None for c in choice) < 6:
+        return choice, D
+    I = [np.asarray(v, float) for v in snr]
+    for _ in range(max(int(viterbi_iterations), 1)):
+        on = [(t, j) for t, j in enumerate(choice) if j is not None]
+        model = IntensityModel(np.array([t for t, _ in on]), np.array([I[t][j] for t, j in on]))
+        new = _viterbi_once(rel, reward, D, gap, miss, reacq, inten=(model, I))
+        if not viterbi_D_px2:
+            D = estimate_D(rel, new, max_gap=gap)
+        if new == choice:
             break
-        D = D_new
+        choice = new
+    if model_out is not None:
+        model_out.update(model.as_dict(), D_px2=D)
     return choice, D
 
 

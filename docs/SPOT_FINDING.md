@@ -388,6 +388,37 @@ wrong picks in between, so every labelling had big steps and `untangle` (frame-t
   3D, no stray or other-copy picks; 3D median error 0.23 um (0.22 um calibrated), dominated by the placeholder axial colour shift (6.5% wrong
   picks before calibration, 0% after). 3D scores now also report `frac_on_stray` / `frac_on_other_copy` (`localize.wrong_object_distances`).
 
+### Locus brightness in the linking (2026-10-26; option `viterbi_intensity`, OFF by default)
+The user asked to use each locus's brightness (simulated exactly by the probe Gillespie model) to help link spots when a cell holds several copies.
+**What brightness could carry** (truth of the 25 sweep movies above, placeholder probe kinetics, 10 s frames): a copy's photons per frame vary
+with CV 0.25 and decorrelate within a frame or two (lag-1 correlation 0.21 promoter, 0.44 enhancer; theory: correlation times 6.7 s and 13 s);
+the two copies of a cell are equally bright on average (median ratio 1.03; same probes); stray spots are 0.68 x a locus (10-90%: 0.5-0.95 x).
+**What was built** (`dog_viterbi.IntensityModel`): the brightness (DoG SNR) of the spots on a path as a Gaussian AR(1) process (level with a
+linear trend for bleaching, spread, lag-1 correlation), fitted to the path's own spots like D; every spot then pays (z^2 - 1) / 2 nats (z = its
+brightness relative to the prediction from the path's previous spot; capped at z^2 = 16), added to the usual costs; path and model re-fitted
+`viterbi_iterations` times. A first version replaced log SNR by log p_path(I) - log p_clutter(I); in two-copy cells the clutter includes the
+other copy, so real spots looked like clutter (found 98 -> 92-96% on 12 movies); dropped. Tests: `tests/test_viterbi_intensity.py` (fits a known
+AR(1); keeps a path off a 4x brighter neighbour: 2 of 100 such frames vs 18 with log SNR alone).
+**Measured** (`scripts/sweep_copies_strays.py --reanalyse recheck4 --variants ...`; `$SIMLIVE_DATA/sweeps/copies_strays/recheck4_<variant>.csv`;
+smooth prior, means over 5 seeds):
+
+| strays / nucleus / min | 0 | 0.5 | 1 | 2 | 4 |
+|---|---|---|---|---|---|
+| found, without -> with brightness | 98.3 -> 97.9% | 98.3 -> 94.7% | 96.5 -> 96.1% | 94.9 -> 95.4% | 88.4 -> 87.9% |
+| picks on a stray | 0 -> 0 | 0.20 -> 0.12% | 0.48 -> 0.47% | 2.86 -> 2.63% | 5.29 -> 4.87% |
+| picks on the other copy | 0 -> 0.01% | 0 -> 0.66% | 0 -> 0 | 0.01 -> 0.01% | 0.82 -> 1.59% |
+
+Found fell in 13 of 25 movies by > 0.5 point; two copies were lost at 0.5 strays / min (one cell: the brightness cost made the second copy's
+path skip its dim frames, a third path took them, the copy was split between two paths and failed pairing). Without the prior: same picture
+(wrong picks 4.7 -> 6.3% at 2 / min). **Slow probes** (every probe rate / 10: same level and CV, true lag-1 correlation 0.86-0.93; 15 new movies,
+1 / 2 / 4 strays per min, `$SIMLIVE_DATA/sweeps/copies_strays_slowprobes`): found 94.3 -> 95.4%, 94.7 -> 92.6%, 92.7 -> 90.6%; stray picks 0.54 ->
+0.48%, 2.06 -> 1.97%, 5.22 -> 5.07%; other copy 0.2 -> 0.2%, 0.6 -> 0.4%, 0.8 -> 1.8%: no net gain. **Why:** the brightness MEASURED in one frame
+is noisy: along the path its lag-1 correlation is 0.43-0.88 where the true photons have 0.83-0.92, and its spread (CV ~0.3) covers the strays
+(0.68 x): a stray costs only ~0.5 nat more than a dim real frame, less than what the term costs on real dim frames. Brightness would help
+when (a) loci are brighter (less measurement noise: the placeholder is ~300 photons per locus per frame), (b) copies are labelled differently
+(different probe numbers / colours), or (c) strays are much dimmer or brighter than loci; all three are placeholders here. A better per-frame
+brightness than the DoG peak (e.g. the fitted amplitude for every candidate) was not tried.
+
 ## MS2 deconvolution: noise model fix (2026-10-19)
 
 The noise model sigma^2 = sigma_b^2 + beta G was a straight-line fit through binned frame-to-frame variances; one high bin set the slope and
