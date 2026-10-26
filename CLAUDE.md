@@ -126,6 +126,10 @@ branch, not main": that was a misreading of the user's intent.)
 - The next sentence's clip is now preloaded while the current one plays (`preloadAfter`, `takeClip`; the dashboard's static server takes ~0.25 s per file);
   measured readyState 4 (fully loaded) at every play.
 - **Default speed 2x** (options now up to 2.5x; storage key `rate20`, so a 1.5x saved under `rate15` does not override the new default).
+- **Scene "Distance, promoter, Pol II, MS2" (`A.transcription`) fixed** (user: "the graphs don't show anything"): its seed search found no example
+  and silently fell back to a flat distance with no bursts. Now 40 min, distance = smooth random walk (90 s, 750 +- 280 nm, ~10% in contact), the first
+  seed with 3-5 bursts (>= 2 starting in contact, >= 1 far, every burst >= 2 Pol II); faint full traces always drawn, contact shaded in every panel,
+  burst / Pol II counters, axes in nm / loops / minutes; the sweep restarts when a panel appears and lasts 26 s / speed. Narration unchanged (clips still match).
 - Test the tutorial with Playwright from the shot venv (`C:\Users\cbohr\shotenv_tmp\v`) over http (`python -m http.server` in docs/tutorial) with
   `--autoplay-policy=no-user-gesture-required`; `headless=False` uses the real GPU. To measure the animation clock: `T.onFrame(d => sum += d)` vs wall time.
 

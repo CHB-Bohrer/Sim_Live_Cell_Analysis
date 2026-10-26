@@ -346,53 +346,85 @@ A.probes = (stage) => {
 
 /* ================================================================ 8. transcription: distance -> promoter -> Pol II -> MS2 */
 A.transcription = (stage) => {
-  // pre-simulate 60 minutes at 1 s
-  const NS = 3600, F = 14, k0 = 1 / 700, koff = 1 / 55, kinit = 0.12, thr = 400;
-  let best = null;
-  for (let seed = 1; seed < 400 && !best; seed++) {
-    const r = rng(seed * 7919), d = new Float32Array(NS), on = new Uint8Array(NS), starts = [];
-    let x = 600, st = 0;
-    for (let i = 0; i < NS; i++) { x += (700 - x) * 0.08 + gauss(r) * 130; x = Math.max(60, x); d[i] = x; const near = x < thr ? 1 : 0; if (!st) { if (r() < k0 * (1 + (F - 1) * near)) st = 1; } else { if (r() < koff) st = 0; else if (r() < kinit) starts.push(i); } on[i] = st; }
-    const bursts = on.reduce((a, v, i) => a + (v && !on[i - 1] ? 1 : 0), 0);
-    if (bursts >= 3 && bursts <= 4 && starts.length > 12) best = { d, on, starts, r };
+  /* 40 minutes at 1 s. Distance = smooth random walk (correlation time 90 s, mean 750 nm, sd 280 nm: about 10% of the time
+     within 400 nm). k_on is 14x higher in contact. Rates are chosen so a few bursts fall in 40 min; the example is the first
+     seed that shows the point (several bursts, most of them starting in contact, one far, the first within 10 min, every burst starting >= 2 Pol II). */
+  const NS = 2400, MIN = NS / 60, F = 14, k0 = 1 / 1500, koff = 1 / 55, kinit = 0.12, thr = 400, TAU = 90, MU = 750, SD = 280, RIDE = 120;
+  const simulate = (seed) => {
+    const r = rng(seed * 7919 + 13), d = new Float32Array(NS), on = new Uint8Array(NS), starts = [];
+    let x = MU + gauss(r) * SD, st = 0;
+    for (let i = 0; i < NS; i++) {
+      x += (MU - x) / TAU + SD * Math.sqrt(2 / TAU) * gauss(r); x = Math.max(80, x); d[i] = x;
+      if (!st) { if (r() < k0 * (1 + (F - 1) * (x < thr ? 1 : 0))) st = 1; } else { if (r() < koff) st = 0; else if (r() < kinit) starts.push(i); }
+      on[i] = st;
+    }
+    const bursts = []; for (let i = 0; i < NS; i++) if (on[i] && !on[i - 1]) bursts.push(i);
+    const perBurst = bursts.map((b0) => { let n = 0; for (const s of starts) { if (s >= b0 && on.slice(b0, s + 1).every((v) => v)) n++; } return n; });
+    return { d, on, starts, r, bursts, near: bursts.filter((i) => d[i] < thr).length, minPol: Math.min(...perBurst) };
+  };
+  let best = null, bestScore = -1;
+  for (let seed = 1; seed < 3000; seed++) {
+    const s = simulate(seed), nb = s.bursts.length;
+    const ok = nb >= 3 && nb <= 5 && s.near >= 2 && nb - s.near >= 1 && s.bursts[0] > 60 && s.bursts[0] < 600 && s.starts.length >= 12 && s.minPol >= 2;
+    const score = (ok ? 100 : 0) + Math.min(nb, 5) + s.near;
+    if (score > bestScore) { best = s; bestScore = score; } if (ok) break;
   }
-  if (!best) { const d = new Float32Array(NS).fill(700), on = new Uint8Array(NS); best = { d, on, starts: [], r: rng(1) }; }
-  const rel = best.starts.map((s) => ({ s, hold: 90 + best.r() * 40 }));
-  const ms2 = new Float32Array(NS); rel.forEach(({ s, hold }) => { for (let i = s; i < NS; i++) { const a = i - s; if (a > hold + 31) break; ms2[i] += a < 31 ? 24 * a / 31 : (a < hold + 31 ? 24 : 0); } });
+  const rel = best.starts.map((s) => ({ s, hold: 20 + best.r() * 30 }));          // ride over the gene in RIDE s, then wait at the end
+  const ms2 = new Float32Array(NS);
+  rel.forEach(({ s, hold }) => { for (let i = s; i < NS; i++) { const a = i - s; if (a > RIDE + hold) break; ms2[i] += a < 31 ? 24 * a / 31 : 24; } });
+  const ms2max = Math.max(48, ...ms2);
   const S = { show: 0, tw: new Tween(0), play: 0, shade: false };
+  const sweep = () => 26 / (T.rate || 1);                                          // seconds per pass (follows the narration speed); each new panel starts a new pass
   const X0 = 90, X1 = 1220, W = X1 - X0, px = (i) => X0 + i / NS * W;
+  const trace = (c, arr, y, upto, step, col, lw, alpha) => {
+    c.globalAlpha = alpha; c.beginPath();
+    for (let i = 0; i <= upto; i += step) { i ? c.lineTo(px(i), y(arr[i])) : c.moveTo(px(i), y(arr[i])); }
+    c.strokeStyle = col; c.lineWidth = lw; c.stroke(); c.globalAlpha = 1;
+  };
   const cv = new Canvas(stage, (c, t, dt) => {
-    S.play = (S.play + dt / 20) % 1.1; const pi = Math.min(NS - 1, Math.floor(Math.min(S.play, 1) * NS));
-    txt(c, "Stage 1c: distance → promoter state → Pol II → MS2 spot", 640, 44, { size: 26, weight: 700, align: "center" });
+    S.play = Math.min(1, S.play + dt / sweep()); const pi = Math.min(NS - 1, Math.floor(S.play * NS));
+    txt(c, "Stage 1c: distance → promoter state → Pol II → MS2 spot", 640, 40, { size: 26, weight: 700, align: "center" });
+    const contact = (y0, h_) => { if (!S.shade) return; c.fillStyle = "rgba(45,212,191,.16)"; for (let i = 0; i < pi; i++) if (best.d[i] < thr) c.fillRect(px(i), y0, W / NS + 0.6, h_); };
     // distance
-    panel(c, 50, 70, 1180, 170, null); txt(c, "enhancer–promoter distance", 70, 100, { size: 17, color: PAL.teal, weight: 700 });
-    line(c, X0, 175, X1, 175, "#22365c", 1); const yd = (v) => 225 - clamp(v / 1400, 0, 1) * 130;
-    line(c, X0, yd(thr), X1, yd(thr), PAL.amber, 1.5, [6, 5]); txt(c, "contact", X1 - 4, yd(thr) - 6, { size: 14, color: PAL.amber, align: "right" });
-    if (S.shade) for (let i = 0; i < pi; i++) if (best.d[i] < thr) { c.fillStyle = "rgba(45,212,191,.22)"; c.fillRect(px(i), 85, W / NS + 0.6, 150); }
-    c.beginPath(); for (let i = 0; i <= pi; i += 4) { i ? c.lineTo(px(i), yd(best.d[i])) : c.moveTo(px(i), yd(best.d[i])); } c.strokeStyle = PAL.blue; c.lineWidth = 2; c.stroke();
+    panel(c, 50, 60, 1180, 170, null); txt(c, "enhancer–promoter distance (nm)", 70, 88, { size: 17, color: PAL.teal, weight: 700 });
+    const yd = (v) => 220 - clamp(v / 1600, 0, 1) * 120;
+    contact(96, 128);
+    line(c, X0, yd(thr), X1, yd(thr), PAL.amber, 1.5, [6, 5]); txt(c, "contact (400 nm)", X1 - 4, yd(thr) - 6, { size: 14, color: PAL.amber, align: "right" });
+    [0, 800, 1600].forEach((v) => txt(c, String(v), X0 - 8, yd(v) + 5, { size: 12, color: PAL.grey, align: "right" }));
+    trace(c, best.d, yd, NS - 1, 3, PAL.blue, 1.5, 0.18); trace(c, best.d, yd, pi, 3, PAL.blue, 2, 1);
+    if (S.shade) txt(c, "shaded = enhancer within 400 nm", 70 + 330, 88, { size: 14, color: PAL.teal });
     // promoter
-    c.globalAlpha = show(S.tw.step(dt, 3)); // promoter
+    c.globalAlpha = show(S.tw.step(dt, 3));
     if (S.show >= 1) {
-      panel(c, 50, 250, 1180, 100, null); txt(c, "promoter ON / OFF", 70, 280, { size: 17, color: PAL.purple, weight: 700 });
-      for (let i = 0; i < pi; i += 2) if (best.on[i]) { c.fillStyle = PAL.purple; c.fillRect(px(i), 292, W / NS * 2 + 0.6, 40); }
-      line(c, X0, 332, X1, 332, "#22365c", 1); txt(c, "k_on is raised while the enhancer is close", X1 - 8, 280, { size: 15, color: PAL.muted, align: "right" });
+      panel(c, 50, 240, 1180, 100, null); txt(c, "promoter ON / OFF", 70, 268, { size: 17, color: PAL.purple, weight: 700 });
+      contact(276, 58);
+      const ga = c.globalAlpha;
+      for (let i = 0; i < NS; i++) if (best.on[i]) { c.globalAlpha = ga * (i < pi ? 1 : 0.18); c.fillStyle = PAL.purple; c.fillRect(px(i), 284, W / NS + 0.6, 40); }
+      c.globalAlpha = ga;
+      const nb = best.bursts.filter((i) => i <= pi).length, nn = best.bursts.filter((i) => i <= pi && best.d[i] < thr).length;
+      txt(c, `bursts so far: ${nb}  (${nn} began in contact)  ·  k_on is ${F}× higher in contact`, X1 - 8, 268, { size: 15, color: PAL.muted, align: "right" });
     }
     c.globalAlpha = 1;
     if (S.show >= 2) {
-      panel(c, 50, 360, 1180, 130, null); txt(c, "Pol II on the gene (each carries MS2 loops)", 70, 390, { size: 17, color: PAL.amber, weight: 700 });
-      line(c, 140, 450, 1160, 450, PAL.grey, 4); rrect(c, 140, 440, 330, 20, 4, "rgba(74,222,128,.35)"); txt(c, "MS2 cassette", 150, 432, { size: 13, color: PAL.green });
-      txt(c, "TSS", 128, 456, { size: 13, color: PAL.muted, align: "right" });
-      rel.forEach(({ s, hold }) => { const a = pi - s; if (a >= 0 && a < hold + 31) { const x = 140 + clamp(a / 120, 0, 1) * 1020; circ(c, x, 450, 9, PAL.amber, "#7c5a05", 2); } });
+      panel(c, 50, 350, 1180, 130, null); txt(c, "Pol II on the gene now (each carries MS2 loops)", 70, 378, { size: 17, color: PAL.amber, weight: 700 });
+      line(c, 140, 440, 1160, 440, PAL.grey, 4); rrect(c, 140, 430, 330, 20, 4, "rgba(74,222,128,.35)"); txt(c, "MS2 cassette (24 loops)", 150, 422, { size: 13, color: PAL.green });
+      txt(c, "TSS", 128, 446, { size: 13, color: PAL.muted, align: "right" }); txt(c, "gene end: waits, then released", 1160, 468, { size: 13, color: PAL.muted, align: "right" });
+      let n = 0;
+      rel.forEach(({ s, hold }) => { const a = pi - s; if (a >= 0 && a < RIDE + hold) { n++; const x = 140 + clamp(a / RIDE, 0, 1) * 1020; circ(c, x - (a > RIDE ? (n % 4) * 8 : 0), 440, 9, PAL.amber, "#7c5a05", 2); } });
+      txt(c, `${n} Pol II`, X1 - 8, 378, { size: 15, color: PAL.amber, align: "right" });
     }
     if (S.show >= 3) {
-      panel(c, 50, 500, 1180, 200, null); txt(c, "MS2 signal = loops carried by all Pol II on the gene (the bright spot)", 70, 530, { size: 17, color: PAL.green, weight: 700 });
-      const yy = (v) => 680 - clamp(v / 150, 0, 1) * 130; line(c, X0, 680, X1, 680, "#22365c", 1);
-      c.beginPath(); for (let i = 0; i <= pi; i += 2) { i ? c.lineTo(px(i), yy(ms2[i])) : c.moveTo(px(i), yy(ms2[i])); } c.strokeStyle = PAL.green; c.lineWidth = 2.5; c.stroke();
+      panel(c, 50, 490, 1180, 200, null); txt(c, "MS2 signal = loops carried by all Pol II on the gene (the bright spot)", 70, 518, { size: 17, color: PAL.green, weight: 700 });
+      const yy = (v) => 670 - clamp(v / ms2max, 0, 1) * 130; line(c, X0, 670, X1, 670, "#22365c", 1);
+      contact(530, 142);
+      [0, Math.round(ms2max / 2), Math.round(ms2max)].forEach((v) => txt(c, String(v), X0 - 8, yy(v) + 5, { size: 12, color: PAL.grey, align: "right" }));
+      txt(c, "loops", X0 - 8, 528, { size: 12, color: PAL.grey, align: "right" });
+      trace(c, ms2, yy, NS - 1, 2, PAL.green, 1.5, 0.18); trace(c, ms2, yy, pi, 2, PAL.green, 2.5, 1);
     }
-    c.fillStyle = "rgba(255,255,255,.5)"; c.fillRect(px(pi), 80, 2, 620);
-    txt(c, "0", X0, 715, { size: 13, color: PAL.grey, align: "center" }); txt(c, "60 min", X1, 715, { size: 13, color: PAL.grey, align: "right" });
+    if (S.play < 1) { c.fillStyle = "rgba(255,255,255,.5)"; c.fillRect(px(pi), 66, 2, 624); }
+    for (let m = 0; m <= MIN; m += 10) txt(c, m ? m + " min" : "0", px(m * 60), 712, { size: 13, color: PAL.grey, align: "center" });
   });
-  return { instant: false, show(n) { S.show = n; S.tw.set(1, this.instant); return this; }, shade(on) { S.shade = on; return this; }, destroy() { cv.destroy(); } };
+  return { instant: false, show(n) { if (n !== S.show || this.instant) S.play = this.instant ? 1 : 0; S.show = n; S.tw.set(1, this.instant); return this; }, shade(on) { S.shade = on; return this; }, destroy() { cv.destroy(); } };
 };
 
 /* ================================================================ 9. from the MS2 trace to Pol II starts */
