@@ -52,7 +52,7 @@ def simulate_population(setup: ep.EPSetup, pool: PolymerPool, calib: Calibration
         cell = tx.simulate_cell(p, d, block, ft, setup.exposure_s, int(rng.integers(2**31)))
         f = cell.frames
         ids.append(np.full(T, c)); ts.append(ft); ds.append(f.d_nm.to_numpy()); ons.append(f.promoter_on.to_numpy())
-        vecs.append(v[np.minimum(np.round(ft / block).astype(int), len(v) - 1)])
+        vecs.append(v[np.minimum(np.floor(ft / block).astype(int), len(v) - 1)])      # the block in force at the frame (as d_true)
         if keep_blocks:
             blocks.append(v.astype(np.float32))
         starts[c] = cell.events.init_s.to_numpy()

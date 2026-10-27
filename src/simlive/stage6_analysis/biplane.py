@@ -19,8 +19,8 @@ from scipy.ndimage import binary_dilation
 from simlive.stage3_microscopy.calibration.fit import detect_beads
 
 
-def _centroid(img: np.ndarray, y: float, x: float, half: int = 6) -> tuple[float, float] | None:
-    """Background-subtracted centroid of the bead near (y, x) in one plane."""
+def _centroid(img: np.ndarray, y: float, x: float, half: int = 6) -> tuple[float, float, float] | None:
+    """Background-subtracted centroid of the bead near (y, x) in one plane, and its peak above that background."""
     y0, x0 = int(round(y)), int(round(x))
     ya, xa = max(y0 - half, 0), max(x0 - half, 0)
     w = img[ya:y0 + half + 1, xa:x0 + half + 1].astype(float)
@@ -30,7 +30,7 @@ def _centroid(img: np.ndarray, y: float, x: float, half: int = 6) -> tuple[float
     if w.sum() <= 0:
         return None
     yy, xx = np.indices(w.shape)
-    return ya + float((w * yy).sum() / w.sum()), xa + float((w * xx).sum() / w.sum())
+    return ya + float((w * yy).sum() / w.sum()), xa + float((w * xx).sum() / w.sum()), float(w.max())
 
 
 def estimate_plane_offset(stack_path, seg_path=None, dilate_px: int = 8, pair: int = 0, min_beads: int = 2) -> tuple[tuple[float, float], pd.DataFrame]:
@@ -49,8 +49,8 @@ def estimate_plane_offset(stack_path, seg_path=None, dilate_px: int = 8, pair: i
         fr = np.asarray(st[t])
         for i, (y, x) in enumerate(P0):
             a, b = _centroid(fr[ka], y, x), _centroid(fr[kb], y, x)
-            if a is not None and b is not None:
-                rows.append((t, i, b[0] - a[0], b[1] - a[1], float(fr[ka].max()), float(fr[kb].max())))
+            if a is not None and b is not None:      # peaks of THIS bead (until 2026-10-26 the whole plane's maximum, the same for every bead)
+                rows.append((t, i, b[0] - a[0], b[1] - a[1], a[2], b[2]))
     tab = pd.DataFrame(rows, columns=["t", "bead", "dy_px", "dx_px", "peak_a", "peak_b"])
     if tab.empty or tab.bead.nunique() < min_beads:
         return (0.0, 0.0), tab

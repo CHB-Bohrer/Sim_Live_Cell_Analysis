@@ -200,6 +200,14 @@ The error is dominated by MOTION, not photons: at D = 0.002 um^2/s at 1 min and 
 - The microscope matters through MOTION: the 0.15 s colour delay costs 120 nm per axis. The choice between 2D, z-stack and biplane matters less than that and than the cell number.
 - Null control still good; interval coverage fine for the true-ON analyses; the MS2-based ON estimate is the weak link.
 
+## Update 2026-10-26: measurement timing fixed (results above not yet re-run)
+`ep_acquisition.measure` took the polymer block at round(t / block_s), while the distance that drives the promoter uses floor (block k holds for
+[k, k + 1) x block_s; `transcription.simulate_cell`): on average the measurement was 0.23 s later than it claimed, and the E-P vector moves ~200 nm per axis
+per 0.46 s block. The measured-vs-true distance error exceeded the model's own sigma by 32 nm (2D) and 72 nm (biplane); with floor by 6 and 21 nm (150
+cells, 20 min, one seed). The EIV kernel did not know that extra error, so the modality comparison above (in particular biplane, which suffered most) should
+be re-run with `scripts/sweep_ep_polymer.py`. Still open: a z-stack measures ~2.5 s after the frame time (plane scan), so against the frame-time truth its
+error is ~2x what the kernel assumes (physical, but whether the promoter state should be taken at the measurement time instead is a modelling choice).
+
 ## Placeholders (not measured)
 Photons 6000 / s per locus, background 5 photons per pixel, z spread 2 um, focus scatter 0.3 um, 17 planes 0.8 um / 0.3 s per plane, biplane planes 0.6 um apart, piezo 30 nm, 0.15 s colour delay (Vutara preset: assumed), the gene (k_on 1/1200 s,
 k_off 1/45 s, k_init 0.15 /s), coupling = k_on x (1 + 11 h(d)) with h a Hill curve (d_half 400 nm, n = 4); the MSD below one block is extrapolated with the simulated exponent; the motion of a locus within an exposure is Gaussian; the errors of the two loci are independent.

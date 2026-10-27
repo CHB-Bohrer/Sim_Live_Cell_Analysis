@@ -80,6 +80,33 @@ def test_samplers_reproduce_the_exact_posterior_of_a_tiny_problem(sampler, kw):
     assert err < 0.03, f"{sampler}: largest error of a start probability {err:.3f}"
 
 
+def test_shift_moves_keep_the_posterior_where_only_they_can_mix():
+    """A flat-topped kernel sampled every 2 s cannot tell a start at step 2m from one at 2m + 1, and with little noise a flip (removing the
+    start, or adding a second) is never accepted: only the shift moves move a start between the two equally likely steps, so they must
+    split it 50:50. The shift move before 2026-10-26 (an event was only proposed to leave the step being scanned) gave about 2:1 here."""
+    kern = Kernel(1.0, np.array([0.0, 1.0, 1.0, 1.0, 1.0, 0.0]))
+    T, s, K = 4, 2, len(kern.values)
+    J0, N = K, K + (T - 1) * s + 1
+    idx = J0 + s * np.arange(T)
+
+    def model(I):
+        G = np.zeros(T)
+        for n in range(T):
+            u = idx[n] - np.flatnonzero(I)
+            G[n] = kern.values[u[(u > 0) & (u < K)]].sum()
+        return G
+
+    truth = np.zeros(N, int)
+    truth[8] = 1
+    sb, beta, p = 0.05, 0.0, 0.05
+    a = model(truth) + np.random.default_rng(2).normal(size=T) * sb
+    exact = _exact_marginals(a, sb, beta, p, N, model)
+    assert abs(exact[8] - exact[9]) < 1e-9 and exact[8] > 0.45            # the two steps are equally likely and hold the start
+    res = deconvolve_trace(a, kern, 2.0, np.full(T, p), sb, beta, n_burn=200, n_keep=4000, thin=1, max_shift_s=1.0, seed=4,
+                           sampler="gibbs_shift")
+    assert np.abs(res["p_fine"] - exact).max() < 0.05, np.round(res["p_fine"] - exact, 3)
+
+
 def test_check_passes_for_a_well_mixed_problem_and_flags_chains_that_have_not_mixed():
     kern, a, sb, beta, p, s, N, model = _tiny_problem()
     prior = np.full(len(a), p)

@@ -81,7 +81,9 @@ Reading it: dog_viterbi finds 7-16% more of the spots on the hard (faint, probe-
 error is unchanged. With bright spots (the 3D runs) it and median_peaks are about equal (both far better than the original). Its
 95th percentile is higher there only because the extra detections are the faint spots (100-300 photons), which no method locates well; filter
 on `snr` if a use needs only bright ones. Variants as described in the paper (`chen_literal`: centroid, mean background) and one-change
-variants are in each run's `stage6_analysis/method_comparison.csv` (🔎 Spot finding tab, part 4). The intensity follows the true photons only
+variants are in each run's `stage6_analysis/method_comparison.csv` (🔎 Spot finding tab, part 4; since 2026-10-26 every variant starts from the run's own
+`locus_analysis` settings: before, only `dilate_px` was taken, so on multi-copy runs every row was the one-copy finder; re-run `scripts/compare_localizers.py`
+on such runs). The intensity follows the true photons only
 moderately in 2D (r ~0.8 in the probe runs: shot noise of ~300-photon spots, flat-field). Read r only where the true brightness varies: in the
 3D runs the probe model is off, every spot has the same 600 photons apart from slow bleaching, so r is low (0.2-0.6) whatever the method; the
 measured intensity there mostly varies with the spot's height between the 0.8 um planes.

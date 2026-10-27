@@ -81,6 +81,17 @@ noise is ~30x larger) and hand them down; only the strength-1 replica is sampled
   truth-scored statistics the trapped modes cost little, but any per-start timing or interval from the dense run should come from the tempered chains.
   What tempering changes for sure is whether the chains agree, and so whether the reported posterior can be believed.
 
+## Update 2026-10-26: the shift move was not exact (fixed)
+The shift move of `gibbs_shift` / `gibbs_pt` proposed a move only for an event AT the step being scanned, so the reverse move of a pair was never proposed
+from the same step (and the scan revisits an event moved forward, not one moved back). That kernel does not keep the posterior: on its own, for one event on a
+flat target, its stationary distribution was up to 71% off; inside the sampler the Gibbs flips hid most of it (start probabilities ~0.01 off on the 14-step
+enumerable problem, 6 standard errors; the old test tolerance of 0.03 could not see it), but where only shifts can move a start (two equally likely steps,
+flips never accepted) it split the start 2:1 instead of 1:1. It is now a symmetric pair move: at step j, with d drawn, if exactly one of j and j + d holds an
+event, propose moving it to the other (`tests/test_mcmc_check.py::test_shift_moves_keep_the_posterior_where_only_they_can_mix`). The convergence tables above
+were measured with the old move: R-hat compares chains with each other, so a sampler can pass while sampling a slightly wrong distribution. Re-run
+`scripts/check_mcmc.py` to refresh them. On the showcase loci_demo_seed11_24bba2 (default spiky gene, `auto`) the scores did not change: found 0.786 -> 0.784,
+false per true 0.677 -> 0.676, 1-min rate r 0.880 -> 0.881; the dense gene (seed 8) has not been re-checked.
+
 ## What this means for earlier results
 - Totals, matching scores and 1-min rates in the showcase numbers (CLAUDE.md: 389 true / 401 inferred; 1-min r 0.80) stand: they are the same with the
   tempered sampler.

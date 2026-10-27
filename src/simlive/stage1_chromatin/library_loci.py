@@ -8,8 +8,10 @@ coordinates are mapped into the nucleus frame (so they rotate / deform / move wi
     length unit; both scale numbers come from `loci.calibration` = a file in configs/calibration/, see simlive.calibration.polymer, unless the
     config gives `nm_per_unit` / `block_duration_s` itself); the region keeps whatever physical size that gives (no rescaling to the nucleus). The polymer gets a random
     rotation per cell and is placed at a random territory centre inside the nucleus (fixed in the nucleus frame, drawn per
-    cell). A position whose loci would leave the nucleus (0.7 of its radius) in any frame is rejected and a new one is
-    drawn; an error is raised only if no position works.
+    cell). Only the territory centre deforms with the nucleus (it is stretched with the nucleus' aspect ratio and half thickness);
+    the polymer around it keeps its true size and shape and turns with the nucleus (`rigid_factors`; before 2026-10-26 the whole polymer
+    was stretched, so drawn promoter-enhancer distances were 0.89-1.14 x the polymer's, 5-95%). A position whose loci would leave the
+    nucleus (0.7 of its radius) in any frame is rejected and a new one is drawn; an error is raised only if no position works.
     (x, y) is the 2D image-plane position; z is kept as `zn` for later 3D work. `nm_per_unit` is only as good as the calibration's
     assumptions (contact fraction and working distance);
   - time: one saved block = `block_duration_s` seconds (from the MSD calibration: an ASSUMED single-locus D until the user supplies a measured MSD); frame k reads polymer time `offset + k * frame_interval_s / block_duration_s` (blocks, interpolated), where
@@ -45,6 +47,17 @@ def _territory_centre(p: np.ndarray, rng: np.random.Generator, cell_id, tries: i
             return c
     raise ValueError(f"cell {cell_id}: the loci' excursion ({np.linalg.norm(p, axis=-1).max():.2f} nuclear radii from "
                      f"the region centre) cannot fit inside the nucleus; lower nm_per_unit or pick loci nearer the centre")
+
+
+def rigid_factors(g: pd.DataFrame, radius_um: float, three_d: bool) -> np.ndarray:
+    """(frames, 3) factors that turn polymer offsets (in units of `radius_um`) into nucleus-frame offsets that `nucleus_to_lab_um` draws at their
+    TRUE size: that mapping stretches the nucleus frame by the nucleus' shape (x by radius x sqrt(aspect), y by radius / sqrt(aspect), z by the
+    half thickness z_semi_um), which is right for the territory centre (it moves with the deforming nucleus) but would stretch a promoter-enhancer
+    pair by -18% / +24% (aspect 1.0-1.57; found 2026-10-26) away from the polymer distance that drives transcription. g: the cell's cells.csv rows."""
+    r = g.radius_um.to_numpy(float)
+    s = np.sqrt(g.aspect.to_numpy(float))
+    fz = radius_um / g.z_semi_um.to_numpy(float) if three_d else radius_um / r
+    return np.stack([radius_um / (r * s), radius_um * s / r, fz], axis=1)
 
 
 def draw_pair(rng: np.random.Generator, n_monomers: int, beads: np.ndarray, separation_kb: float = 100.0, margin_kb: float = 1000.0) -> list[int]:
@@ -119,6 +132,7 @@ def simulate_library_loci(cells: pd.DataFrame, cfg: dict, rng: np.random.Generat
         pos = (1 - w) * ext[i0] + w * ext[i0 + 1]                               # linear interpolation between blocks
         nuc_um = float(g.radius_um.min())                                       # smallest nuclear radius of this cell
         p = (pos[..., None, :] * random_rotation(r)).sum(-1) * (nm_per_unit / 1000.0 / nuc_um)   # nuclear radii; no BLAS call here
+        p = p * rigid_factors(g, nuc_um, three_d)[:, None, :]                   # undo the nucleus' stretch for the polymer's own offsets
         if copy == 0:
             c = _territory_centre(p, r, cid)
         else:

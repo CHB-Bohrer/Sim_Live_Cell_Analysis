@@ -134,9 +134,10 @@ def measure(pop: ep.Population, blocks: np.ndarray, acq: Acquisition, seed: int 
     if acq.kind == "zstack":
         piezo = acq.piezo_nm ** 2 * ((P["a"] - E["a"]) ** 2).sum(1)
         var_z = var_z + piezo
-    # true vector at the mean time of the two measurements
+    # true vector at the mean time of the two measurements: block k holds for [k, k + 1) x block_s, as for the distance that drives the promoter
+    # (transcription.simulate_cell); until 2026-10-26 round() took the NEXT block in most frames (a 0.23 s late measurement on average)
     tmean = ft + 0.5 * (P["t"] + E["t"])
-    bi = np.minimum(np.round(tmean / calib.block_s).astype(int), blocks.shape[1] - 1)
+    bi = np.minimum(np.floor(tmean / calib.block_s).astype(int), blocks.shape[1] - 1)
     cidx = np.repeat(np.arange(n_cells), T)
     v = blocks[cidx, bi, :].astype(np.float64)
     noise = rng.normal(size=(F, 3)) * np.sqrt(np.stack([var_xy, var_xy, var_z], 1))

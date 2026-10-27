@@ -72,7 +72,9 @@ def compare(run: Path, keys: list[str] | None = None, n_workers: int | None = No
         raise FileNotFoundError(f"{out5} has no isolated cells (run the pipeline with isolation.sources including truth)")
     px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
     n_loci = int(cfg["loci"]["n_loci"])
-    base = {"dilate_px": (cfg.get("locus_analysis") or {}).get("dilate_px", 2)}
+    # every variant starts from the run's own locus_analysis settings (copies, pair prior, candidates ...), so "default" is what the pipeline ran;
+    # until 2026-10-26 only dilate_px was taken, and on multi-copy runs every row was the one-copy finder
+    base = {"dilate_px": 2, **{k: v for k, v in (cfg.get("locus_analysis") or {}).items() if k != "method"}}
     truth = truth_with_photons(run)
     cal_dir = s3 / "calibration"
     cal_opts = [False] + ([True] if calibrated and (cal_dir / "calibration.json").exists() else [])

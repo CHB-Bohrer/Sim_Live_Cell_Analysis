@@ -145,6 +145,45 @@ branch, not main": that was a misreading of the user's intent.)
 - Worth re-testing with the user's real numbers: locus photons per frame, probe residence time, stray brightness, and whether copies are labelled
   differently. Not tried: a better per-candidate brightness (fitted amplitude instead of the DoG peak); brightness in `untangle` / `untangle_by_place`.
 
+## Logic audit of the whole analysis (2026-10-26; user: "go through all logic of the live cell analysis and double check everything")
+- **Read and checked** (math and bookkeeping, not only "runs"): pipeline wiring and seed streams; cell motion, placement, z; toy / library loci, copies; probe
+  Gillespie + stationary theory; transcription telegraph + Pol II integrals + `expected_on`/`expected_ms2`; renderer coordinate maps (nucleus frame <-> lab,
+  drift, chromatic shift, truth_in_image), per-cell bleaching dose, stray spots, camera chain; isolation crops; DoG candidates, Viterbi costs (propagator,
+  miss / re-acquisition / clutter terms), D estimator (median chi-square), Gaussian fit; multi-copy linker (untangle, untangle_by_place, repair, pair priors:
+  Rayleigh 1.18 / Maxwell 1.54 medians correct); 3D localizer; MS2 trace; bleaching + flat-field self-calibration (dose cumsum); calibration estimators (row
+  noise pi/2 factor, DSNU, PTC, beads); fiducials; identity matching, stage 7b propagation, CTC gap splitting; E-P kernels (noncentral chi 3D, Rice 2D, shift
+  average), EIV fit, history model; polymer calibration; LEF 1D engine. All consistent except the six fixes below.
+- **FIXED (each with a regression test that fails on the old code where testable):**
+  1. `deconvolve._sweep` shift move was NOT posterior-invariant: only an event AT the scanned step was proposed a move (the reverse move of a pair never
+     proposed from the same step; events moved forward are revisited, moved back are not). Alone its stationary distribution was up to 71% off (exact
+     transition-matrix check); in the real sampler (flips hide most of it) start probabilities were off by ~0.01 on the enumerable test problem (6 SE),
+     and by 0.17 (a 2:1 split instead of 50:50) where only shifts can mix (`tests/test_mcmc_check.py::test_shift_moves_keep_the_posterior_where_only_they_can_mix`).
+     Now a symmetric pair move (if exactly one of steps j, j + d holds an event, propose to move it). Affects gibbs_shift, gibbs_pt and "auto". Re-scored
+     in memory on the showcase loci_demo_seed11_24bba2 (default spiky gene, 12 cells, auto, none tempered): found 0.786 -> 0.784, false per true 0.677 ->
+     0.676, 1-min rate r 0.880 -> 0.881, P(ON) accuracy 0.973 -> 0.975, i.e. the saved totals stand for sparse traces. NOT re-checked: the dense-gene runs
+     (seed 8, where shifts carry the mixing), posterior intervals, and the docs/MCMC_CONVERGENCE.md tables (re-run scripts/check_mcmc.py).
+  2. `library_loci`: the whole polymer was mapped through the nucleus frame, i.e. stretched by sqrt(aspect) / 1/sqrt(aspect) (and z by z_semi / radius),
+     so the drawn promoter-enhancer distance was 0.89-1.14 x (5-95%; 0.82-1.24 extremes) the polymer distance that drives transcription (measured on
+     loci_library_seed12_87a16d), contradicting the module's own "TRUE distances" spec. Now only the territory centre deforms with the nucleus; the polymer
+     keeps its nm size and turns with the nucleus (`rigid_factors`). Test with elongated, rotated, flattened nuclei. New library movies differ from old ones
+     (old runs keep the stretched geometry; their scores against their own truth stay valid).
+  3. E-P vector model (`ep_acquisition.measure`, `ep_polymer.simulate_population`): the polymer block was picked by round(t / block) while the distance that
+     drives the promoter uses floor (block k holds for [k, k+1) x block_s): a 0.23 s late measurement on average, while the E-P vector moves ~200 nm per axis
+     per block. Excess of the measured-vs-true error over the model's own sigma: 2D +32 -> +6 nm, biplane +72 -> +21 nm (150 cells, 20 min). The
+     2026-10-14 (b) E-P modality numbers (contrast 2D 4.77 / z-stack 4.25 / biplane 4.45) were made with it: re-run `scripts/sweep_ep_polymer.py` to update.
+  4. `biplane.estimate_plane_offset`: the "bead bright in both planes" filter compared the WHOLE plane's maximum (the same for every bead), so it never
+     filtered; now each bead's own peak.
+  5. `compare.compare` (method comparison, Spot finding page part 4) ran every variant with only `dilate_px` from the run's settings: on multi-copy runs
+     (max_copies 2, pair prior gauss, max_candidates 8 since 2026-10-19) its "default" row was the one-copy finder. Now variants start from the run's own
+     `locus_analysis`. Saved method_comparison.csv files of multi-copy runs are stale (re-run scripts/compare_localizers.py).
+  6. `ms2_trace` tracked the promoter with a hard-coded 2 px mask dilation; now `dilate_px` from locus_analysis (pipeline, error_effects, sweep script pass it).
+     No change for the current configs (all use 2).
+- **Checked, left as is:** `match_copies` has no distance cap (a junk path could be credited as a found copy): over all 507 matched copies of the saved
+  multi-copy runs none is > 1 um from its true copy (worst 0.59 um), so no score is affected. The E-P z-stack measurement is ~2.5 s after the frame time
+  (plane scan), so its error against the frame-time truth (314 nm rms) is ~2x the sigma the EIV kernel assumes (141 nm): physical, but the kernel does not
+  know it; open question whether the truth (promoter state) should be taken at the measurement time instead. `_apply_overrides` fails on a config node that
+  is null (`probes:` empty) - cosmetic.
+
 ## Pinned versions (do not break)
 - Exact working versions are saved in `environments/` (see `environments/PINNED.md`): env export, explicit conda list,
   pip freeze, polychrom commit `11a870c` (installer is pinned to it), model-weight SHA-256s, a frozen conda env copy
@@ -369,7 +408,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   masks as integer arrays whose value is the persistent cell ID.
 - **Tests:** pytest, in `tests/`. GPU tests marked `@pytest.mark.gpu`. They must run in a SEPARATE process from the
   CPU tests (torch vs numba/skimage DLL/OpenMP clash on Windows; neither import order works): plain `pytest` = CPU tests
-  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 218 CPU + 7 GPU tests at 2026-10-26. Prefer small deterministic tests with a
+  only (`addopts = -m 'not gpu'`), `pytest -m gpu` = GPU tests, `scripts\run_tests.cmd` runs both. 221 CPU + 7 GPU tests at 2026-10-26 (after the logic audit). Prefer small deterministic tests with a
   known analytic answer (e.g. free diffusion MSD).
 - Python 3.12, type hints on public functions, no wildcard imports.
 

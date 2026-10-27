@@ -434,7 +434,7 @@ def run_error_effects(run: Path, sources: list[str] | None = None, n_workers: in
             tr = None
             if has_tx:
                 tr = map_cells(ms2_trace, mini.s5, n_workers=n_workers, calib=str(cdir) if cdir else None,
-                               **{k: v for k, v in kw.items() if k not in ("dilate_px", "row_correct")})
+                               **{k: v for k, v in kw.items() if k != "row_correct"})
                 if kw.get("intensity_background") == "none" and len(tr):
                     tr["intensity"] = tr.intensity - offset_adu
             col = "intensity"

@@ -65,7 +65,7 @@ def analyse(run: Path, over: dict, workers: int | None) -> dict:
         out.update(dist_bias_nm=float(e.mean()), dist_rms_nm=float(np.sqrt((e ** 2).mean())), dist_p95_abs_nm=float(np.abs(e).quantile(0.95)))
     mt = ms2_truth(run)
     if mt is not None:
-        kw = {k: v for k, v in ana.items() if k not in ("dilate_px", "method")}
+        kw = {k: v for k, v in ana.items() if k != "method"}
         tr = relabel_to_true_copies(map_cells(ms2_trace, out5, n_workers=workers, px_um=px, **kw), mt, px)
         _, ms = score_ms2(tr[tr["copy"] < 50], mt, px)
         lab = mt[mt.ms2_labelled.astype(bool)] if "ms2_labelled" in mt else mt

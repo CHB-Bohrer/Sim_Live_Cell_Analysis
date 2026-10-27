@@ -6,6 +6,11 @@ segmentation + tracking (Trackastra) -> locus-to-cell linking -> analysis -> val
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits together and the build roadmap, and
 [CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** see the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
 
+**Logic audit (2026-10-26).** Every analysis module was re-checked; six logic errors were fixed (MCMC shift move not posterior-invariant; library loci
+stretched by the nuclear aspect ratio; E-P measurement timing off by half a polymer block; biplane bead filter; method comparison ignoring the run's settings;
+MS2 promoter mask). Saved deconvolutions, MCMC convergence tables, E-P modality numbers and multi-copy method comparisons predate the fixes and should be
+re-run; what changed and how much is in the "Logic audit" section of [CLAUDE.md](CLAUDE.md).
+
 ## New here? Take the narrated tutorial
 Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25)** (49 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 50 minutes of animated, narrated scenes covering the
 pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = recorded clips made locally with Kokoro (af_heart) (default speed 2x; without the clips, your browser's

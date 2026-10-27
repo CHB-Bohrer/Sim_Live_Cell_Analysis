@@ -66,12 +66,13 @@ MS2_POSITIONS = ("promoter", "own")
 
 
 def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, ms2_position: str = "promoter", px_um: float = 0.13,
-              **kw) -> pd.DataFrame:
+              dilate_px: int = 2, **kw) -> pd.DataFrame:
     """The MS2 spot of one isolated cell in every frame: whether a spot was detected, where (crop and lab pixels), its SNR and the ellipsoid
     intensity in the nuclear channel at that position (interpolated where nothing was detected). Keywords: the locus_analysis settings.
     ms2_position: "promoter" (default) = measure at the promoter (locus 0), tracked in its own colour with dog_viterbi (the MS2 spot sits on
-    the promoter; the measured chromatic shift is removed when calibrated); "own" = find the MS2 spot itself in the nuclear channel with
-    dog_viterbi, as Chen et al. do when no other label marks the gene."""
+    the promoter; the measured chromatic shift is removed when calibrated) inside the cell mask grown by `dilate_px`, as the locus finder
+    does; "own" = find the MS2 spot itself in the nuclear channel with dog_viterbi (mask shrunk by `erode_px`), as Chen et al. do when no
+    other label marks the gene."""
     if "nucleus" not in cell.channels:
         return pd.DataFrame(columns=COLUMNS)
     ci = ms2_inputs(cell, erode_px, calib)
@@ -93,9 +94,9 @@ def ms2_trace(cell, erode_px: int = ERODE_PX, calib: str | None = None, ms2_posi
     if ms2_position == "promoter" and "locus0" in cell.channels:
         from simlive.stage6_analysis.localize import analyse_cell_copies, channel_inputs
 
-        lc = channel_inputs(cell, "locus0", 2, calib)
+        lc = channel_inputs(cell, "locus0", dilate_px, calib)
         if MC.multicopy_on(kw) and "locus1" in cell.channels:     # every copy's promoter (paired with its enhancer), one trace per copy
-            res = analyse_cell_copies([lc, channel_inputs(cell, "locus1", 2, calib)], px_um=px_um, **kw)
+            res = analyse_cell_copies([lc, channel_inputs(cell, "locus1", dilate_px, calib)], px_um=px_um, **kw)
             for copy, fits in enumerate(res["copies"]):
                 if 0 not in fits:
                     continue
@@ -205,7 +206,7 @@ def analyse_run_ms2(run: Path, n_workers: int | None = None, progress=print) -> 
     if truth is None:
         return {}
     cfg = yaml.safe_load((run / "stage2_cells" / "params.yaml").read_text())
-    ana = {k: v for k, v in (cfg.get("locus_analysis") or {}).items() if k not in ("dilate_px", "method")}
+    ana = {k: v for k, v in (cfg.get("locus_analysis") or {}).items() if k != "method"}
     px_um = cfg["optics"]["pixel_size_nm"] / 1000.0
     out6 = run / "stage6_analysis" / "truth"
     out6.mkdir(parents=True, exist_ok=True)

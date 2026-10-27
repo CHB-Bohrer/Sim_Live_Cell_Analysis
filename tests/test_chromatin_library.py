@@ -75,6 +75,29 @@ def test_library_loci_follow_the_nucleus_and_polymer(fake_library):
     pd.testing.assert_frame_equal(out, again)                          # reproducible from the seed
 
 
+@pytest.mark.parametrize("three_d", [False, True])
+def test_library_loci_keep_true_distances_in_elongated_flattened_nuclei(fake_library, three_d):
+    """The nucleus' shape moves and deforms the territory, not the polymer: in the drawn (lab) coordinates the promoter-enhancer distance
+    equals the polymer's own distance in nm, whatever the aspect ratio, orientation and thickness (before 2026-10-26 it was stretched by
+    sqrt(aspect) along the long axis)."""
+    import pandas as pd
+    from simlive.stage1_chromatin.library_loci import simulate_library_loci
+    for s in fake_library.glob("demo_seed[123]"):
+        m = json.loads((s / "meta.json").read_text()); m["confinement_radius"] = 20.0
+        (s / "meta.json").write_text(json.dumps(m))
+    rows = [dict(t=k, cell_id=c, y_um=50.0, x_um=50.0, radius_um=6.0, aspect=1.2 + 0.2 * k, angle_rad=0.3 * c + 0.1 * k,
+                 **({"z_um": 6.0, "z_semi_um": 3.0} if three_d else {})) for c in (1, 2) for k in range(3)]
+    cfg = {"loci": {"library": "demo", "positions_kb": [20, 50], "block_duration_s": 10, "nm_per_unit": 50.0},
+           "acquisition": {"frame_interval_s": 10}}
+    out = simulate_library_loci(pd.DataFrame(rows), cfg, np.random.default_rng(0))
+    for _, g in out.groupby(["cell_id", "t"]):
+        g = g.sort_values("locus_id")
+        d = np.hypot(*np.diff(g[["y_um", "x_um"]].to_numpy(), axis=0)[0])
+        dz = np.diff(g.z_um.to_numpy())[0] if three_d else 6.0 * np.diff(g.zn.to_numpy())[0]   # 2D movies keep z in nuclear radii (6 um)
+        assert np.isclose(np.hypot(d, dz) * 1000, 30 * 50.0, rtol=1e-6)    # 30 polymer units apart = 1500 nm
+    assert (np.linalg.norm(out[["xn", "yn", "zn"]].to_numpy(), axis=1) <= 0.7 + 1e-9).all()   # still inside the nucleus
+
+
 def test_pool_restricts_and_pin_forces(fake_library):
     ids = sorted(lib.list_library("demo").sim_id)
     a = lib.assign_simulations("demo", [1, 2], np.random.default_rng(0), pool=ids[:2])

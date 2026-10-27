@@ -281,7 +281,7 @@ def _trace_ms2(A: _Analysis, src: str, out5: Path, out6: Path, scores: dict) -> 
     """The MS2 spot in the nuclear channel: Chen et al. 2025 intensity trace per cell (with and without the calibration)."""
     A.progress("Stage 6: finding the MS2 spot and its intensity trace in every cell")
     ms2_t = ms2_truth(A.run) if src == "truth" else None
-    kw = {k: v for k, v in A.ana.items() if k != "dilate_px"}
+    kw = dict(A.ana)                      # the same settings as the locus finder (dilate_px included: the promoter is tracked the same way)
     for tag, cdir in (("", None),) + ((("_cal", str(A.cal_dir)),) if A.apply_cal else ()):
         tr = map_cells(ms2_trace, out5, n_workers=A.n_workers, calib=cdir, px_um=A.px_um, **kw)
         if ms2_t is not None:                 # true identities: number the found copies like the true ones they sit on

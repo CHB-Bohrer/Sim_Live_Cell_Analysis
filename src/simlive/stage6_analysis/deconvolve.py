@@ -194,8 +194,13 @@ def _log_post(A, G, I, logit_p, sb2, beta):
 @njit(cache=True)
 def _sweep(A, G, I, kern, idx, logit_p, sb2, beta, s, J0, max_shift, invT):
     """One sweep at inverse temperature invT (the likelihood is raised to the power invT, the prior is not): single-step Gibbs updates
-    (add / remove an event at every fine step), then a Metropolis shift of every event by up to max_shift steps (max_shift < 1 = none), so an
-    event can slide in time without first disappearing. invT = 1 is the posterior."""
+    (add / remove an event at every fine step), then shift moves (max_shift < 1 = none), so an event can slide in time without first
+    disappearing. invT = 1 is the posterior.
+    Shift move at step j: draw d (1..max_shift, either sign); if exactly one of the steps j and j + d holds an event, propose to move it to
+    the other one (Metropolis). The proposal is the same from both sides of the pair, so every such move keeps the posterior invariant.
+    (Until 2026-10-26 only an event AT j was proposed a move: the reverse move of a pair was never proposed from the same step, and the scan
+    revisits an event moved forward but not one moved back. That kernel does not keep the posterior: for one event on a flat target its
+    stationary distribution was up to 71% off; the Gibbs flips hid most of it on easy traces.)"""
     N = len(logit_p)
     for j in range(N):
         # log-odds of "an event at j" vs "none", given everything else: likelihood difference + prior log-odds
@@ -209,22 +214,23 @@ def _sweep(A, G, I, kern, idx, logit_p, sb2, beta, s, J0, max_shift, invT):
             if np.random.random() >= 1.0 / (1.0 + np.exp(-lo)):
                 I[j] = 0
                 _apply(G, kern, idx, j, -1.0, s, J0)
+    if max_shift < 1:
+        return
     for j in range(N):
-        if max_shift < 1 or I[j] == 0:
-            continue
         d = np.random.randint(1, max_shift + 1) * (1 if np.random.random() < 0.5 else -1)
         k = j + d
-        if k < 0 or k >= N or I[k] == 1:
+        if k < 0 or k >= N or I[j] == I[k]:
             continue
-        dl = _delta_ll(A, G, kern, idx, j, -1.0, sb2, beta, s, J0)
-        _apply(G, kern, idx, j, -1.0, s, J0)
-        dl = invT * (dl + _delta_ll(A, G, kern, idx, k, 1.0, sb2, beta, s, J0)) + logit_p[k] - logit_p[j]
+        a, b = (j, k) if I[j] == 1 else (k, j)          # move the event at step a to the empty step b
+        dl = _delta_ll(A, G, kern, idx, a, -1.0, sb2, beta, s, J0)
+        _apply(G, kern, idx, a, -1.0, s, J0)
+        dl = invT * (dl + _delta_ll(A, G, kern, idx, b, 1.0, sb2, beta, s, J0)) + logit_p[b] - logit_p[a]
         if np.log(np.random.random()) < dl:
-            _apply(G, kern, idx, k, 1.0, s, J0)
-            I[j] = 0
-            I[k] = 1
+            _apply(G, kern, idx, b, 1.0, s, J0)
+            I[a] = 0
+            I[b] = 1
         else:
-            _apply(G, kern, idx, j, 1.0, s, J0)
+            _apply(G, kern, idx, a, 1.0, s, J0)
 
 
 @njit(cache=True)
