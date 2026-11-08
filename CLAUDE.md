@@ -12,6 +12,10 @@ below true; delete stale statements rather than appending contradictions. `docs/
 (pipeline, validation logic, roadmap) whose boxes are coloured built / stand-in / planned: recolour or edit them when a
 stage's status changes (GitHub renders them; to check syntax, render the blocks with mermaid.js in a browser).
 
+**Public status page (added 2026-11-08):** `status.json` at the repo root feeds the page at https://chb-bohrer.github.io/Sim_Live_Cell_Analysis/
+(and the Projects list on the lab site). When a stage changes state (built / stand-in / planned), or you finish a milestone, update `status.json` to match the
+Status section and `docs/ARCHITECTURE.md` section 6: node states, notes, `as_of` date. Keep it short, accurate and public-safe (no unpublished data, no credentials).
+
 **Pushing to GitHub (public repo):** the user said (2026-10-09) to push STRAIGHT TO `main` every time: after committing, run
 `git push origin HEAD:main` (fast-forward only; never force-push; never open a PR unless asked; the working branch may be pushed too).
 Before every push: run `git status -sb`, check the staged diff for secrets (password/token/key strings) and large files, and confirm

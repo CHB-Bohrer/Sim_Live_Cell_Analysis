@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "title": "Sim Live Cell Analysis",
+  "tagline": "Validate live-cell chromatin-locus analysis against simulated movies where the right answer is known.",
+  "kind": "Research software",
+  "stage": "Working prototype",
+  "as_of": "2026-10-26",
+  "repo": "CHB-Bohrer/Sim_Live_Cell_Analysis",
+  "links": [
+    {
+      "label": "Open the interactive tutorial",
+      "href": "docs/tutorial/index.html",
+      "primary": true
+    },
+    {
+      "label": "Watch the narrated video (49 min)",
+      "href": "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25"
+    },
+    {
+      "label": "How it works",
+      "href": "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/blob/main/docs/ARCHITECTURE.md"
+    },
+    {
+      "label": "Code on GitHub",
+      "href": "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis"
+    }
+  ],
+  "tags": [
+    "live-cell imaging",
+    "polychrom",
+    "Cellpose",
+    "Trackastra",
+    "MS2"
+  ],
+  "about": [
+    "In a real microscope movie nobody knows the right answer. Here the movie is invented, so we do, and we can measure how much each step of an analysis gets wrong.",
+    "The pipeline runs: polymer simulation, then moving cells, then a microscope image model, then segmentation and tracking, then linking each locus to its cell, then analysis, then grading against the known truth."
+  ],
+  "facts": [
+    {
+      "value": "50 min",
+      "label": "animated, narrated tutorial with a short \"Your turn\" list after each scene"
+    },
+    {
+      "value": "2D and 3D",
+      "label": "images, with presets for the Bruker Vutara VXL in widefield and biplane modes"
+    },
+    {
+      "value": "6",
+      "label": "logic errors found and fixed in the 26 Oct 2026 audit of every analysis module, each with a regression test"
+    },
+    {
+      "value": "Windows + GPU",
+      "label": "how it is run today: a conda environment with an NVIDIA GPU for the polymer engine"
+    }
+  ],
+  "board": {
+    "title": "Where it stands",
+    "intro": "Green boxes are built and running. Amber boxes work, but stand in for something that still has to be measured or supplied. Grey boxes are planned.",
+    "state_labels": {
+      "partial": "Stand-in"
+    },
+    "phases": [
+      {
+        "title": "Done",
+        "blurb": "Runs today.",
+        "nodes": [
+          {
+            "name": "Moving, dividing cells",
+            "state": "built",
+            "note": "Cells move, collide, deform, divide and walk in and out of view, with irregular, time-varying nuclear shapes."
+          },
+          {
+            "name": "Microscope image model",
+            "state": "built",
+            "note": "More than 20 switchable error sources (drift, blur, noise, camera defects, stray spots and more), as 2D images or 3D z-stacks."
+          },
+          {
+            "name": "Segmentation and tracking",
+            "state": "built",
+            "note": "Cellpose and Trackastra, scored against the truth with standard tracking metrics plus a count of identity switches."
+          },
+          {
+            "name": "One movie per cell, analysed in parallel",
+            "state": "built",
+            "note": "Each cell is isolated and analysed separately, with several promoter-enhancer copies per cell supported by a multi-copy linker."
+          },
+          {
+            "name": "Chromatin engine (polychrom)",
+            "state": "built",
+            "note": "Checked against published Mirny-lab results. Each cell can be given its own saved simulation; that path has so far been tested with a small test library."
+          },
+          {
+            "name": "Probe binding, distance-driven transcription and MS2",
+            "state": "built",
+            "note": "Transcription bursts respond to the promoter-enhancer distance; the MS2 signal is built from the polymerases on the gene."
+          },
+          {
+            "name": "Spot finder and MS2 to Pol II deconvolution",
+            "state": "partial",
+            "note": "A measured placeholder for the lab's own analysis: it finds loci, builds MS2 traces and deconvolves them into polymerase start times (after Chen et al. 2025)."
+          },
+          {
+            "name": "Calibration and error effects",
+            "state": "built",
+            "note": "Calibration from the images and from the movie, and a measured effect of each image error with and without its correction."
+          },
+          {
+            "name": "Do tracking mistakes change the locus results?",
+            "state": "built",
+            "note": "Locus results are scored through the tracker's IDs and through the true IDs. Stitching broken tracks is not built yet."
+          },
+          {
+            "name": "Dashboard and narrated tutorial",
+            "state": "built",
+            "note": "Dashboard with players, sweeps and a dark theme, plus the 50-minute tutorial."
+          },
+          {
+            "name": "Bruker Vutara VXL presets",
+            "state": "built",
+            "note": "Widefield and biplane 3D modes, with bleed-through computed from spectra."
+          }
+        ]
+      },
+      {
+        "title": "Next: make it real",
+        "blurb": "Needs the lab's own measurements.",
+        "nodes": [
+          {
+            "name": "Calibrate to a measured MSD",
+            "state": "partial",
+            "note": "The calibration file exists, but its inputs are assumptions: a single-locus diffusion coefficient, and a 100 kb pair being within 400 nm 10% of the time. They are to be replaced by measured values."
+          },
+          {
+            "name": "Measured brightness, error sizes and a real movie",
+            "state": "planned",
+            "note": "MS2 brightness, the size of each image error, and a real movie to compare with."
+          },
+          {
+            "name": "MS2 as a third witness; sister chromatids",
+            "state": "planned"
+          }
+        ]
+      },
+      {
+        "title": "Then: the real question",
+        "blurb": "Using it on the lab's own analysis.",
+        "nodes": [
+          {
+            "name": "Plug in the lab's own locus analysis",
+            "state": "planned",
+            "note": "The current spot finder is a stand-in; the real stage 6 analysis is still to come."
+          },
+          {
+            "name": "Stitch broken tracks",
+            "state": "planned",
+            "note": "Measuring the effect of tracking mistakes is built; repairing broken tracks is not."
+          }
+        ]
+      },
+      {
+        "title": "Finally: trust it",
+        "blurb": "Stress tests and real data.",
+        "nodes": [
+          {
+            "name": "Compare Ultrack and TrackMate on the same movies",
+            "state": "planned"
+          },
+          {
+            "name": "Scan cell density and frame interval over many seeds",
+            "state": "planned"
+          },
+          {
+            "name": "Check against a real, hand-tracked movie",
+            "state": "planned"
+          }
+        ]
+      }
+    ]
+  },
+  "works": [
+    "Simulate a movie, analyse it as if it were real data, and grade every step against the known truth.",
+    "Switch image errors on and off one at a time to see exactly what each does to the locus and MS2 results.",
+    "Open the dashboard, set parameters, run, and see the cells, loci, traces and scores in one place.",
+    "Follow the narrated tutorial, which covers the pipeline and every dashboard page."
+  ],
+  "limits": [
+    "Several inputs are assumptions until measured values are supplied: diffusion, MS2 brightness and error sizes.",
+    "The locus analysis is a measured stand-in. The lab's own analysis has not been plugged in yet.",
+    "Results saved before the 26 Oct 2026 audit should be re-run.",
+    "The dashboard runs on your own computer; this page cannot run it."
+  ],
+  "gallery": [
+    {
+      "src": "docs/ui_tour/01_start_page_run_summary.jpg",
+      "caption": "The dashboard's start page: a summary of what was simulated in a run."
+    },
+    {
+      "src": "docs/ui_tour/05_images_recorded_vs_errorfree_with_truth.jpg",
+      "caption": "Recorded images next to the same cells without image errors, with the true locus positions marked."
+    },
+    {
+      "src": "docs/ui_tour/15_cells_tab.jpg",
+      "caption": "One cell followed through time: nucleus, loci and the cell's mask, with the analysis against the truth."
+    }
+  ],
+  "source_note": "Summarised from the project's README, docs/ARCHITECTURE.md and the status notes in CLAUDE.md (latest commit 26 Oct 2026). When the status changes, edit status.json in this folder."
+}
