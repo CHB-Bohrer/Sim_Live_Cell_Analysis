@@ -53,7 +53,9 @@ def _apply_overrides(cfg: dict, overrides: list[str] | None) -> dict:
         node = cfg
         parts = key.split(".")
         for p in parts[:-1]:
-            node = node.setdefault(p, {})
+            if node.get(p) is None:          # a missing block, or one left empty in the YAML (`probes:` reads as None)
+                node[p] = {}
+            node = node[p]
         val = yaml.safe_load(raw)
         if isinstance(val, str):  # YAML reads "1e-05" as text; accept it as a number
             try:

@@ -4,7 +4,7 @@
   "tagline": "Validate live-cell chromatin-locus analysis against simulated movies where the right answer is known.",
   "kind": "Research software",
   "stage": "Working prototype",
-  "as_of": "2026-10-26",
+  "as_of": "2026-11-10",
   "repo": "CHB-Bohrer/Sim_Live_Cell_Analysis",
   "links": [
     {

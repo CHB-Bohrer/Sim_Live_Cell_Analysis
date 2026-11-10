@@ -2,7 +2,7 @@
 import json, pathlib, sys, time
 from playwright.sync_api import sync_playwright
 
-URL = "http://localhost:8502"
+URL = __import__("os").environ.get("TUT_URL", "http://localhost:8502")      # the dashboard to photograph (update_tutorial.py sets it)
 W, TALL = 1600, 9000
 RUN_A = "loci_demo_seed11_24bba2"          # showcase: Vutara, bursty gene, MS2, probes, calibration
 RUN_B = "tracking_demo_seed3_e15523"       # tracking errors (33 identity switches)

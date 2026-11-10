@@ -30,6 +30,7 @@ from simlive.stage6_analysis import spots as SP
 
 METHODS = ("dog_viterbi", "brightest")
 EXTRA_COPY = 50          # match_copies: a found copy that matches no true copy is numbered EXTRA_COPY + its own number
+MATCH_MAX_UM = 1.5       # match_copies: a found copy whose median distance to its true copy exceeds this is not that copy (worst real match in 507 saved copies: 0.59 um)
 COLUMNS = ["cell_id", "t", "locus_id", "copy", "crop_y_px", "crop_x_px", "lab_y_px", "lab_x_px", "u_um", "v_um", "snr", "n_candidates",
            "fit_ok", "intensity"]
 
@@ -278,7 +279,7 @@ def match_copies(pos: pd.DataFrame, truth: pd.DataFrame, px_um: float, cols=("la
                 if len(j):
                     C[a, b] = float(np.median(np.hypot(j._ey - j.y_um, j._ex - j.x_um)))
         rr, cc = linear_sum_assignment(C)
-        m = {found[a]: true[b] for a, b in zip(rr, cc)}
+        m = {found[a]: true[b] for a, b in zip(rr, cc) if C[a, b] <= MATCH_MAX_UM}      # a path that is nowhere near its true copy is an extra one
         new[g.index] = [m.get(f, EXTRA_COPY + int(f)) for f in g.copy_found]
     pos["copy"] = new.astype(int)
     return pos.drop(columns=["_ey", "_ex"] + (["locus_id"] if no_locus else []))

@@ -200,13 +200,32 @@ The error is dominated by MOTION, not photons: at D = 0.002 um^2/s at 1 min and 
 - The microscope matters through MOTION: the 0.15 s colour delay costs 120 nm per axis. The choice between 2D, z-stack and biplane matters less than that and than the cell number.
 - Null control still good; interval coverage fine for the true-ON analyses; the MS2-based ON estimate is the weak link.
 
-## Update 2026-10-26: measurement timing fixed (results above not yet re-run)
+## Update 2026-10-26 / re-run 2026-11-09: measurement timing fixed, conclusions unchanged
 `ep_acquisition.measure` took the polymer block at round(t / block_s), while the distance that drives the promoter uses floor (block k holds for
 [k, k + 1) x block_s; `transcription.simulate_cell`): on average the measurement was 0.23 s later than it claimed, and the E-P vector moves ~200 nm per axis
 per 0.46 s block. The measured-vs-true distance error exceeded the model's own sigma by 32 nm (2D) and 72 nm (biplane); with floor by 6 and 21 nm (150
-cells, 20 min, one seed). The EIV kernel did not know that extra error, so the modality comparison above (in particular biplane, which suffered most) should
-be re-run with `scripts/sweep_ep_polymer.py`. Still open: a z-stack measures ~2.5 s after the frame time (plane scan), so against the frame-time truth its
-error is ~2x what the kernel assumes (physical, but whether the promoter state should be taken at the measurement time instead is a modelling choice).
+cells, 20 min, one seed).
+
+All eleven scans were run again on 2026-11-09 (same seeds; old tables kept in `<sweep>/before_2026-10-26_fixes/results.csv`). Every number moved by less
+than the population-to-population scatter, so the results section above stands. Old -> new, contrast (mean +- sd; reference 4.19):
+
+| setting | 2D | z-stack | biplane |
+|---|---|---|---|
+| 600 cells x 1 h | 4.77 +- 1.00 -> 4.78 +- 1.23 | 4.25 +- 0.72 -> 4.34 +- 1.10 | 4.45 +- 0.80 -> 4.39 +- 0.81 |
+| width of the 95% interval | 5.1 -> 5.2 | 3.9 -> 3.6 | 3.1 -> 3.1 |
+| interval contains the reference | 95% -> 90% | 95% -> 95% | 100% -> 100% |
+| no coupling: contrast | 1.10 -> 0.79 | 1.33 -> 1.30 | 1.23 -> 1.04 |
+| 20% wrong picks | 3.68 -> 3.82 | 3.10 -> 3.14 | 3.26 -> 3.16 |
+| 3200 cells: contrast sd; interval width | | 0.51 -> 0.43; 1.9 -> 1.7 | 0.57 -> 0.50; 1.6 -> 1.6 |
+| frames every 20 / 40 / 80 s | | 3.26 / 2.18 / 1.54 -> 3.52 / 2.19 / 1.66 | 3.38 / 2.19 / 1.68 -> 3.30 / 2.22 / 1.76 |
+
+The truth rows and the invented-vs-polymer comparison do not use the acquisition model and are identical. What still holds: 3D narrows the interval
+relative to 2D; z-stack and biplane cannot be separated at 12-20 populations; wrong picks, cell number, frame interval and the colour delay matter far more
+than the modality.
+
+About the z-stack's timing (asked on 2026-10-26, settled): a z-stack measures ~2.5 s after the frame's nominal time (plane scan). The EIV kernel describes
+the error of the measured distance relative to the true distance AT THE MEASUREMENT TIME, which is what the fit needs; the 2.5 s only shifts the distance
+history against the promoter state, and the promoter integrates over ~45 s, so it is negligible. Nothing to change.
 
 ## Placeholders (not measured)
 Photons 6000 / s per locus, background 5 photons per pixel, z spread 2 um, focus scatter 0.3 um, 17 planes 0.8 um / 0.3 s per plane, biplane planes 0.6 um apart, piezo 30 nm, 0.15 s colour delay (Vutara preset: assumed), the gene (k_on 1/1200 s,

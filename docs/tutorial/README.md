@@ -28,7 +28,12 @@ double-clicking `index.html`** (Microsoft Edge recommended). Nothing to install,
 | 8 Configuration | Config page; command-line cheat sheet |
 | 9 Putting it together | three workflows, cautions, cheat sheet |
 
-## How it is made (to update it when the dashboard changes)
+## Updating it: one command
+`scripts\tutorial\update.cmd` says which screenshots are out of date and checks every sentence; `scripts\tutorial\update.cmd all` re-takes the
+stale screenshots, records the voice of edited sentences and checks again. The step-by-step guide for every kind of change is
+**[UPDATING.md](UPDATING.md)**; [NUMBERS.md](NUMBERS.md) lists the sentences that state a number (re-read them when results change).
+
+## How it is made (background; the command above does these steps)
 - Screenshots are REAL dashboard pages captured headlessly with Edge + Playwright: `scripts/tutorial/capture_shots.py` (needs a dashboard on
   port 8502 and a Python with `playwright`, ideally a separate venv: `python -m venv C:\Users\<you>\shotenv_tmp\v` then `pip install playwright`;
   it drives the installed Edge, no browser download). It writes tall page images plus the on-screen rectangle of every control.

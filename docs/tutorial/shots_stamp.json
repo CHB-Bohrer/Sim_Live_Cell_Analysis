@@ -1,0 +1,262 @@
+{
+ "home": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b",
+   "app/style.py": "bcc0f1b1f500"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "guide": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "glossary": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "sb_sim": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "sb_loci": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_movie": {
+  "captured": "2026-11-10 00:23",
+  "run": "tracking_demo_seed3_e15523",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b",
+   "app/fastview.py": "3edad0bbdb9e"
+  },
+  "run_results": 1791225315.909987,
+  "sweeps": 0.0
+ },
+ "pg_movie_player": {
+  "captured": "2026-11-10 00:23",
+  "run": "tracking_demo_seed3_e15523",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b",
+   "app/player.py": "08ecf5c4bcdb",
+   "app/fastview.py": "3edad0bbdb9e"
+  },
+  "run_results": 1791225315.909987,
+  "sweeps": 0.0
+ },
+ "pg_metrics": {
+  "captured": "2026-11-10 00:23",
+  "run": "tracking_demo_seed3_e15523",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1791225315.909987,
+  "sweeps": 0.0
+ },
+ "pg_traj": {
+  "captured": "2026-11-10 00:23",
+  "run": "tracking_demo_seed3_e15523",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1791225315.909987,
+  "sweeps": 0.0
+ },
+ "pg_scans": {
+  "captured": "2026-11-10 00:23",
+  "run": "tracking_demo_seed3_e15523",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b",
+   "app/sweep_plot.py": "b815ab0cc80b"
+  },
+  "run_results": 1791225315.909987,
+  "sweeps": 1791225375.7961993
+ },
+ "pg_cells": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/cells_tab.py": "4bfd8c6b5e6d"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_cells_3d": {
+  "captured": "2026-11-10 00:23",
+  "run": "loci_3d_seed23_2163f4",
+  "sources": {
+   "app/cells_tab.py": "4bfd8c6b5e6d"
+  },
+  "run_results": 1791761019.927206,
+  "sweeps": 0.0
+ },
+ "pg_cells_copies": {
+  "captured": "2026-11-10 00:23",
+  "run": "loci_library_seed12_87a16d",
+  "sources": {
+   "app/cells_tab.py": "4bfd8c6b5e6d"
+  },
+  "run_results": 1794285393.3863902,
+  "sweeps": 0.0
+ },
+ "pg_spots": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/spots_tab.py": "e46465d720e4"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 1791765417.6321201
+ },
+ "pg_spots_copies": {
+  "captured": "2026-11-10 00:23",
+  "run": "loci_library_seed12_87a16d",
+  "sources": {
+   "app/spots_tab.py": "e46465d720e4"
+  },
+  "run_results": 1794285393.3863902,
+  "sweeps": 1793022020.8547013
+ },
+ "pg_metrics_prop": {
+  "captured": "2026-11-10 00:23",
+  "run": "loci_library_seed12_87a16d",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1794285393.3863902,
+  "sweeps": 0.0
+ },
+ "pg_images": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/images_tab.py": "05a6e436344e"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_images_build": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/images_tab.py": "05a6e436344e"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_images_err": {
+  "captured": "2026-11-10 00:23",
+  "run": "loci_demo_seed8_f5c88d",
+  "sources": {
+   "app/images_tab.py": "05a6e436344e",
+   "app/errors_view.py": "c0f1ab6028e5"
+  },
+  "run_results": 1794284965.7801323,
+  "sweeps": 0.0
+ },
+ "pg_cal": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/calibration_tab.py": "3f2c7ae08717"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_stage": {
+  "captured": "2026-11-10 00:23",
+  "run": "loci_3d_seed23_2163f4",
+  "sources": {
+   "app/stage_tab.py": "b1b3253498a3"
+  },
+  "run_results": 1791761019.927206,
+  "sweeps": 0.0
+ },
+ "pg_tx": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/transcription_tab.py": "992aef91bb0a"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_ms2": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/ms2_tab.py": "7a74debc3e7d"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_ep": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/ep_tab.py": "435f1ea95793",
+   "app/sweep_plot.py": "b815ab0cc80b"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 1794281479.1902404
+ },
+ "pg_probes": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/probe_tab.py": "1fa8288ad1fb"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_lib": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/library_tab.py": "c7fa27433b9f"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_chrom": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/chromatin_tab.py": "91bd047bbfc2",
+   "app/chromatin_view.py": "ae48fe530b53"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ },
+ "pg_cfg": {
+  "captured": "2026-11-10 00:44",
+  "run": "loci_demo_seed11_24bba2",
+  "sources": {
+   "app/dashboard.py": "7a48639dd35b"
+  },
+  "run_results": 1794289248.2999997,
+  "sweeps": 0.0
+ }
+}

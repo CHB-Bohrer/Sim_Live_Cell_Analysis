@@ -92,6 +92,17 @@ were measured with the old move: R-hat compares chains with each other, so a sam
 `scripts/check_mcmc.py` to refresh them. On the showcase loci_demo_seed11_24bba2 (default spiky gene, `auto`) the scores did not change: found 0.786 -> 0.784,
 false per true 0.677 -> 0.676, 1-min rate r 0.880 -> 0.881; the dense gene (seed 8) has not been re-checked.
 
+Re-run 2026-11-09 with the fixed move (same settings as the tables above; old files in `before_2026-10-26_fixes` next to the new ones):
+
+| | gibbs_shift (plain) | gibbs_pt (tempered) |
+|---|---|---|
+| constructed traces | 5 / 5 (was 5 / 5) | 5 / 5 |
+| sparse gene (seed 7) | **12 / 12** (was 9 / 12, the three misses were ESS 320-353) | 12 / 12 |
+| dense gene (seed 8) | 3 / 12 (unchanged) | **12 / 12** (was 11 / 12) |
+
+So the trapping of the plain sampler on dense, nearly noise-free traces is real and not a product of the old move; tempering remains the cure, and `auto` still
+tempers 9 of the 12 dense cells. Scores against the simulation moved in the third decimal (dense: found 0.830 -> 0.832, false per true 0.198 -> 0.194, rate r 0.798).
+
 ## What this means for earlier results
 - Totals, matching scores and 1-min rates in the showcase numbers (CLAUDE.md: 389 true / 401 inferred; 1-min r 0.80) stand: they are the same with the
   tempered sampler.

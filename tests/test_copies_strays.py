@@ -322,3 +322,22 @@ def test_an_extra_copy_and_picks_of_a_stray_are_counted():
     assert sc["extra_copies"] == 1 and sc["extra_detections"] == len(extra)
     assert sc["frac_on_stray"] == pytest.approx(1 / len(pos))
     assert (match_copies(pd.concat([pos, extra]), truth1, px)["copy"] >= EXTRA_COPY).sum() == len(extra)
+
+
+def test_a_path_far_from_every_true_copy_is_not_credited_as_one():
+    """Two true copies, one found on its locus, the other "found" path sits 6 um from both: it must be an extra copy, and the true copy it
+    would have been assigned to (the only one left) counts as missed (until 2026-11-09 the assignment had no distance limit)."""
+    truth = _truth_two_copies()
+    px = 0.1
+    good = truth[truth["copy"] == 0].assign(lab_y_px=lambda d: d.y_um / px, lab_x_px=lambda d: d.x_um / px)
+    junk = truth[truth["copy"] == 1].assign(lab_y_px=15.0 / px, lab_x_px=9.0 / px)
+    m = match_copies(pd.concat([good, junk]), truth, px)
+    assert set(m.loc[m.copy_found == 0, "copy"]) == {0} and (m.loc[m.copy_found == 1, "copy"] >= EXTRA_COPY).all()
+    _, sc = score_localization(pd.concat([good, junk]), truth, px)
+    assert sc["missed_copies"] == 1 and sc["extra_copies"] == 1
+
+
+def test_overrides_reach_into_a_block_left_empty_in_the_yaml(tmp_path):
+    f = tmp_path / "c.yaml"
+    f.write_text("seed: 1\nloci:\n  probes:\n")
+    assert load_config(f, ["loci.probes.enabled=true"])["loci"]["probes"] == {"enabled": True}
