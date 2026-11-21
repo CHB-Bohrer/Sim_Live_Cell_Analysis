@@ -1,6 +1,6 @@
 import json, time, pathlib, shutil
 from playwright.sync_api import sync_playwright
-BASE = "file:///C:/Users/cbohr/OneDrive/Documents/Sim_Live_Cell_Analysis/docs/tutorial/index.html"
+BASE = (pathlib.Path(__file__).resolve().parents[3] / "docs" / "tutorial" / "index.html").as_uri()
 B = json.load(open("vid/beats.json"))
 dur = {k: round(v + 0.12, 3) for k, v in B["dur"].items()}
 vd = pathlib.Path("vid/rec"); shutil.rmtree(vd, ignore_errors=True); vd.mkdir()

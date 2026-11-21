@@ -1,7 +1,7 @@
 import asyncio, json, subprocess, re, pathlib, sys
 import edge_tts, imageio_ffmpeg
 from playwright.sync_api import sync_playwright
-BASE = "file:///C:/Users/cbohr/OneDrive/Documents/Sim_Live_Cell_Analysis/docs/tutorial/index.html"
+BASE = (pathlib.Path(__file__).resolve().parents[3] / "docs" / "tutorial" / "index.html").as_uri()
 OUT = pathlib.Path("vid/audio"); OUT.mkdir(parents=True, exist_ok=True)
 FF = imageio_ffmpeg.get_ffmpeg_exe()
 VOICE = sys.argv[1] if len(sys.argv) > 1 else "en-US-JennyNeural"

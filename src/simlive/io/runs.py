@@ -16,9 +16,10 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-# Where simulation outputs live (runs, sweeps, chromatin library). Defaults to <repo>/data, but scripts\run.cmd points
-# it at C:\Users\<you>\SimLiveData so large files stay out of the OneDrive-synced repo folder.
-DATA_ROOT = Path(os.environ.get("SIMLIVE_DATA", REPO_ROOT / "data"))
+# Where simulation outputs live (runs, sweeps, chromatin library): $SIMLIVE_DATA, else the folder `simulation_data`
+# next to the repo folder (scripts\run.cmd sets the same), else <repo>/data.
+_SIBLING_DATA = REPO_ROOT.parent / "simulation_data"
+DATA_ROOT = Path(os.environ.get("SIMLIVE_DATA", _SIBLING_DATA if _SIBLING_DATA.is_dir() else REPO_ROOT / "data"))
 
 
 INSTRUMENTS = Path(__file__).resolve().parents[3] / "configs" / "instruments"
