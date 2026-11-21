@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ import numpy as np
 import pandas as pd
 import tifffile
 
+from simlive.io.images import write_tiff
 from simlive.io.runs import run_id_for, stage_dir, write_provenance
 from simlive.stage2_cells.motion import add_z, simulate_cells, z_enabled
 from simlive.stage1_chromatin.copies import copy_settings
@@ -104,13 +106,13 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     mv = imager.render_movie(progress=progress, dtype=np.uint16 if cfg.get("image_dtype") == "uint16" else np.float32)
     for name, arr in mv["images"].items():                                   # one image channel (colour) per locus + the nucleus
         if imager.is3d:        # full stacks (T, Z, Y, X) for 3D analysis; the 2D projection feeds segmentation, tracking and isolation
-            tifffile.imwrite(s3 / f"{name}_zstack.tif", arr, photometric="minisblack")
+            write_tiff(s3 / f"{name}_zstack.tif", arr)
             arr = imager.project(arr, imager.projection).astype(arr.dtype)
-        tifffile.imwrite(s3 / f"{name}.tif", arr, photometric="minisblack")
+        write_tiff(s3 / f"{name}.tif", arr)
     if imager.is3d:
-        tifffile.imwrite(s3 / "labels_3d.tif", mv["labels"], photometric="minisblack")
+        write_tiff(s3 / "labels_3d.tif", mv["labels"])
         mv["labels"] = mv["labels"].max(axis=1)                              # nuclei never overlap laterally, so max over z keeps the IDs
-    tifffile.imwrite(s3 / "labels.tif", mv["labels"], photometric="minisblack")
+    write_tiff(s3 / "labels.tif", mv["labels"])
     # ground truth of the imaging itself: what drift / focus / power / blur each frame really had, and the truth in image coordinates
     st_truth = save_imaging_truth(imager, cells, truth, s3)
     if imager.is3d and imager.E.on("piezo"):               # where the planes really were, and what the piezo's position sensor logged
@@ -135,22 +137,30 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
     if seg_cfg.get("diameter_px") == "auto":  # expected nuclear diameter in pixels, from the geometry settings
         seg_cfg["diameter_px"] = 2 * cfg["geometry"]["cell_radius_um"] / (cfg["optics"]["pixel_size_nm"] / 1000.0)
     auto_lab = segment(img, method, **seg_cfg)
-    tifffile.imwrite(s4 / "auto_segmentation.tif", auto_lab)
+    write_tiff(s4 / "auto_segmentation.tif", auto_lab)
     tcfg = dict(cfg["tracking"]); tname = tcfg.pop("tracker")
     tracker = make_tracker(tname, **tcfg)
 
     stage_dir(run, "stage7_validation")
-    gt_dir = write_ctc(*ctc_ground_truth(gt_lab, cells), s7 / "ctc_gt")      # cells that leave and re-enter: one CTC track per stretch
+    # The CTC folders (one mask file per frame) are only the scorer's input format: copies of labels.tif / tracked_*.tif.
+    # They are written to a scratch folder and deleted after scoring (they were ~9 GB over 148 runs); only the small
+    # track tables are kept, as ctc_tracks_<name>.txt.
+    ctc_tmp = s7 / "_ctc_scratch"
+    shutil.rmtree(ctc_tmp, ignore_errors=True)
+    gt_dir = write_ctc(*ctc_ground_truth(gt_lab, cells), ctc_tmp / "gt")      # cells that leave and re-enter: one CTC track per stretch
+    shutil.copyfile(gt_dir / "man_track.txt", s7 / "ctc_tracks_gt.txt")
     metrics = {}
     for variant, masks in (("gt_masks", gt_lab), ("auto_masks", auto_lab)):
         progress(f"Stage 4: tracking on {variant} ({tname})")
         t0 = time.time()
         res = tracker.track(img, masks)
-        tifffile.imwrite(s4 / f"tracked_{variant}.tif", res.masks)
+        write_tiff(s4 / f"tracked_{variant}.tif", res.masks)
         res.table.to_csv(s4 / f"tracks_{variant}.csv", index=False)
         progress(f"Stage 7: scoring {variant} (tracking took {time.time() - t0:.0f}s)")
-        pred_dir = write_ctc(res.masks, res.table, s7 / f"ctc_pred_{variant}")
+        pred_dir = write_ctc(res.masks, res.table, ctc_tmp / f"pred_{variant}")
         m = evaluate(gt_dir, pred_dir)
+        shutil.copyfile(pred_dir / "man_track.txt", s7 / f"ctc_tracks_pred_{variant}.txt")
+        shutil.rmtree(pred_dir, ignore_errors=True)
         matches = match_ids(gt_lab, res.masks)
         totals, per, events = identity_summary(matches)
         matches.to_csv(s7 / f"id_matches_{variant}.csv", index=False)
@@ -158,6 +168,7 @@ def run_tracking_demo(cfg: dict, out_root: Path, progress: Callable[[str], None]
         events.to_csv(s7 / f"id_switch_events_{variant}.csv", index=False)
         m["Identity"] = totals
         metrics[variant] = m
+    shutil.rmtree(ctc_tmp, ignore_errors=True)
     write_provenance(s4, cfg, seed)
     write_provenance(s7, cfg, seed)
     (s7 / "metrics.json").write_text(json.dumps(metrics, indent=2, default=str))

@@ -8,7 +8,7 @@ Output: <out>/cell_table.csv   one row per (cell, frame): centroid, area, orient
         cell's centroid in every frame it exists. `mask` marks only that cell's pixels (neighbours are zero), so
         analysis can ignore neighbouring cells' loci that fall inside the crop.
 
-Memory: stacks are memory-mapped (never loaded whole), each worker reads only its own cell's pixels, crops are saved
+Memory: stacks are memory-mapped or, when compressed, read one frame at a time (never loaded whole), each worker reads only its own cell's pixels, crops are saved
 as uint16 on disk, and the pool size is capped (`n_workers`). Peak per-worker memory is a few crops, not a movie.
 """
 from __future__ import annotations
@@ -19,14 +19,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import tifffile
+from simlive.io.images import open_stack, write_tiff
 
-
-def _memmap(path):
-    try:
-        return tifffile.memmap(path, mode="r")
-    except ValueError:  # compressed / non-contiguous files can't be memory-mapped (tifffile raises ValueError)
-        return tifffile.imread(path)
+_memmap = open_stack     # memory-map old uncompressed stacks; compressed ones are read frame by frame (PageStack)
 
 
 def build_cell_table(labels_path: str | Path) -> pd.DataFrame:
@@ -88,8 +83,8 @@ def _extract_cell(job: dict) -> dict:
             crops[name][i] = np.clip(np.rint(_crop(np.asarray(st[r.t]), y0, x0, S, job["pad"][name])), 0, 65535)
         mask[i] = _crop(np.asarray(labels[r.t]), y0, x0, S, 0) == cid
     for name, arr in crops.items():
-        tifffile.imwrite(d / f"{name}.tif", arr, photometric="minisblack")  # 3-4 frame stacks would otherwise be read as RGB
-    tifffile.imwrite(d / "mask.tif", mask, photometric="minisblack")
+        write_tiff(d / f"{name}.tif", arr)  # minisblack: 3-4 frame stacks would otherwise be read as RGB
+    write_tiff(d / "mask.tif", mask)
     fr = g.copy(); fr["crop_y0"], fr["crop_x0"] = y0s, x0s
     fr.to_csv(d / "frames.csv", index=False)
     t = g.t.to_numpy()

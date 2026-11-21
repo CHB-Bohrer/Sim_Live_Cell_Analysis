@@ -14,6 +14,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import tifffile
+
+from simlive.io.images import open_stack
 from scipy.ndimage import binary_dilation
 
 from simlive.stage3_microscopy.calibration.fit import detect_beads
@@ -36,11 +38,11 @@ def _centroid(img: np.ndarray, y: float, x: float, half: int = 6) -> tuple[float
 def estimate_plane_offset(stack_path, seg_path=None, dilate_px: int = 8, pair: int = 0, min_beads: int = 2) -> tuple[tuple[float, float], pd.DataFrame]:
     """Offset (dy, dx) in pixels of the second plane of a biplane pair relative to the first, from the fiducial beads (default: the lowest pair).
     Returns ((dy, dx), table of every bead x frame measurement). (0, 0) if fewer than `min_beads` beads are usable."""
-    st = tifffile.memmap(stack_path, mode="r")
+    st = open_stack(stack_path)
     f0 = np.asarray(st[0])
     P0 = detect_beads(f0.max(axis=0))
     if seg_path is not None and len(P0):
-        seg = tifffile.memmap(seg_path, mode="r")
+        seg = open_stack(seg_path)
         m = binary_dilation(np.asarray(seg[0]) > 0, iterations=dilate_px)
         P0 = P0[[not m[int(round(y)), int(round(x))] for y, x in P0]]
     rows = []

@@ -22,6 +22,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import tifffile
+
+from simlive.io.images import open_stack
 from scipy.ndimage import binary_dilation
 
 
@@ -38,7 +40,7 @@ def fit_exponential(t_s: np.ndarray, s: np.ndarray) -> tuple[float, float]:
 def nuclear_bleach(images: str | Path, labels: str | Path, dt_s: float, gap_px: int = 8) -> pd.DataFrame:
     """Per frame: mean in the nuclei, mean of the empty background, their difference, and the bleaching factor from an exponential fit of the
     difference (`b_est`) and, for comparison, of the raw nuclear mean (`b_naive`, background left in). One frame in memory at a time."""
-    img, lab = tifffile.memmap(str(images), mode="r"), tifffile.memmap(str(labels), mode="r")
+    img, lab = open_stack(str(images)), open_stack(str(labels))
     rows = []
     st = np.ones((2 * gap_px + 1, 2 * gap_px + 1), bool)
     for t in range(len(img)):

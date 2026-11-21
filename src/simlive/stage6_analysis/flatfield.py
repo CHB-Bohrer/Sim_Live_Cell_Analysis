@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import tifffile
+
+from simlive.io.images import open_stack
 from scipy.ndimage import binary_dilation, find_objects
 
 
@@ -95,7 +97,7 @@ def _dose(track: pd.DataFrame, f: np.ndarray) -> pd.Series:
 def nuclear_signals(images, labels, ring_px: tuple = (4, 14), border_px: int = 2) -> pd.DataFrame:
     """Per cell and frame: background-subtracted mean nuclear brightness (mean inside the mask minus the median of a ring 4-14 px around it,
     other nuclei excluded), centroid and whether the nucleus touches the image edge. One frame in memory at a time."""
-    img, lab = tifffile.memmap(str(images), mode="r"), tifffile.memmap(str(labels), mode="r")
+    img, lab = open_stack(str(images)), open_stack(str(labels))
     if img.ndim == 4:                          # (T, Z, Y, X) stacks: use their max projection like the rest of the 2D analysis
         img = img.max(axis=1)
     ny, nx = lab.shape[-2:]

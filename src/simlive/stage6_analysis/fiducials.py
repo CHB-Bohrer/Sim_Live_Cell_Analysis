@@ -19,6 +19,8 @@ import warnings
 import numpy as np
 import pandas as pd
 import tifffile
+
+from simlive.io.images import open_stack
 from scipy.ndimage import binary_dilation
 
 from simlive.stage3_microscopy.calibration.fit import _fit_bead, detect_beads
@@ -30,13 +32,13 @@ def track_fiducials(stack_path, z_um=None, seg_path=None, dilate_px: int = 8, ha
     shifts = DataFrame(t, dy_px, dx_px, dz_um, n_beads) = median displacement of the beads relative to frame 0 (z in um, nominal plane heights),
     fits = (T, n_beads, 5) array of the individual fits (y, x, sigma_xy, z, sigma_z). z_per_frame {t: plane heights}: use these (e.g. the piezo's
     logged heights) instead of the nominal ones to turn a bead's profile along the planes into a height."""
-    st = tifffile.memmap(stack_path, mode="r")
+    st = open_stack(stack_path)
     three_d = st.ndim == 4
     T = st.shape[0]
     f0 = np.asarray(st[0])
     P0 = detect_beads(f0.max(axis=0) if three_d else f0)
     if seg_path is not None and len(P0):
-        seg = tifffile.memmap(seg_path, mode="r")
+        seg = open_stack(seg_path)
         m = binary_dilation(np.asarray(seg[0]) > 0, iterations=dilate_px)
         P0 = P0[[not m[int(round(y)), int(round(x))] for y, x in P0]]
     n = len(P0)

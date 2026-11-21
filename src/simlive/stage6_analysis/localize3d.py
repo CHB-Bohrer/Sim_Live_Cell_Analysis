@@ -18,6 +18,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import tifffile
+
+from simlive.io.images import open_stack
 from scipy.ndimage import gaussian_filter, shift
 
 from simlive.stage6_analysis import dog_viterbi as DV
@@ -87,7 +89,7 @@ def localize_loci_3d(cell, stacks: dict, z_um: list, n_loci: int = 2, method: st
     multi = method == "dog_viterbi" and MC.multicopy_on(kw)
     pending = {}                    # multi-copy: colour -> (refined candidates per frame, settings), linked after all colours are read
     for k, name in enumerate(chans):
-        st = tifffile.memmap(stacks[name], mode="r")
+        st = open_stack(stacks[name])
         pad = float(np.percentile(np.asarray(st[0, len(z) // 2]), 1))
 
         def volume(i, r):
