@@ -21,3 +21,4 @@ app/static/tutorial/
 
 # natural-voice clips of the tutorial (made by scripts/tutorial/video/make_clips.py; ~20 MB, kept out of the history)
 docs/tutorial/audio/
+docs/manual/_build.html

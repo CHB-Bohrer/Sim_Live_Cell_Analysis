@@ -14,6 +14,8 @@ seed-to-seed scatter, so the earlier conclusions stand. Details in the "Logic au
 **Keeping the tutorial current:** `scripts\tutorial\update.cmd` reports which screenshots are out of date and checks every sentence; `scripts\tutorial\update.cmd all`
 brings it up to date. Guide: [docs/tutorial/UPDATING.md](docs/tutorial/UPDATING.md).
 
+**How it works, in one readable PDF:** [docs/manual/SimLive_manual.pdf](docs/manual/SimLive_manual.pdf) (one chapter per stage, each with a check that it works; see docs/manual/README.md to update it).
+
 ## New here? Take the narrated tutorial
 Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25)** (49 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 50 minutes of animated, narrated scenes covering the
 pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = recorded clips made locally with Kokoro (af_heart) (default speed 2x; without the clips, your browser's

@@ -1,0 +1,32 @@
+# One entry per chapter: its source file, the code it describes (a change there means the chapter needs a look),
+# and the scripts that make its figures (rerun only when that validation result changes).
+title: "Sim Live Cell Analysis: how the software works"
+chapters:
+  - file: sections/00_overview.md
+    code: [src/simlive/pipelines/]
+    figures: []
+  - file: sections/01_chromatin.md
+    code: [src/simlive/stage1_chromatin/polymer3d.py, src/simlive/stage1_chromatin/lef1d.py, src/simlive/stage1_chromatin/analysis.py,
+           src/simlive/stage1_chromatin/library.py, src/simlive/stage1_chromatin/library_loci.py, src/simlive/calibration/, configs/chromatin/]
+    figures: []          # from saved validation sims: docs/img/chromatin/*.png (scripts/validate_chromatin.py, GPU; do not rerun for the manual)
+  - file: sections/02_probes_transcription.md
+    code: [src/simlive/stage1_chromatin/probes.py, src/simlive/stage1_chromatin/transcription.py]
+    figures: [figure_scripts/fig_probes_transcription.py]
+  - file: sections/03_cells_microscope.md
+    code: [src/simlive/stage2_cells/, src/simlive/stage3_microscopy/]
+    figures: [figure_scripts/fig_calibration.py]
+  - file: sections/04_segment_track.md
+    code: [src/simlive/stage4_segtrack/, src/simlive/stage5_linking/]
+    figures: []
+  - file: sections/05_spots_ms2.md
+    code: [src/simlive/stage6_analysis/]
+    figures: [figure_scripts/fig_spot_precision.py, figure_scripts/fig_deconvolution.py]
+  - file: sections/06_validation.md
+    code: [src/simlive/stage7_validation/]
+    figures: []          # docs/img/ep_polymer_summary.png, from saved E-P sweeps
+  - file: sections/07_status.md
+    code: [status.json]
+    figures: []
+  - file: sections/99_maintenance.md
+    code: [docs/manual/build.py, docs/manual/stale.py, docs/manual/manifest.yaml]
+    figures: []

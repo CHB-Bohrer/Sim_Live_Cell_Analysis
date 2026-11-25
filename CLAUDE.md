@@ -56,6 +56,13 @@ Before every push: run `git status -sb`, check the staged diff for secrets (pass
 `data/runs/` and `data/sweeps/` are still ignored. If a check fails, do not push; tell the user. (Earlier text said "push the working
 branch, not main": that was a misreading of the user's intent.)
 
+## Manual PDF (added 2026-11-25; project instruction: keep a readable, modular PDF of how the software works, with evidence each part works)
+- `docs/manual/SimLive_manual.pdf`, built from `docs/manual/sections/*.md` by `docs/manual/build.py` (pandoc + Playwright Chromium). Map of chapter -> code
+  -> figure scripts in `docs/manual/manifest.yaml`. Figures: `docs/manual/figure_scripts/fig_*.py` (CPU, < 1 min each: probes/transcription vs exact theory,
+  blind calibration, spot precision vs the Mortensen limit, deconvolution vs exact posterior); chromatin + E-P figures reuse `docs/img/`.
+- **Update rule (user wants low cost):** after a code change run `python docs/manual/stale.py`; edit only the chapters it lists, in the same PR as the code;
+  rerun a figure script only when the result it shows changed; never rerun GPU sims or sweeps just for the manual.
+
 ## The experiment being simulated (from the user; some details still open)
 - Loci: promoter (locus 0) and enhancer (locus 1), 100 kb apart (user, 2026-10-09), plus MS2 bursting at the promoter. MS2 is a THIRD
   colour, but the SAME colour as the nuclear NLS-GFP (MS2-MCP has an NLS and accumulates in the nucleus), so MS2 spots are drawn into the
