@@ -4,19 +4,26 @@ Repo for validating live-cell microscopy analysis of chromatin loci against simu
 Package name: `simlive` (src layout). Owner is a biophysicist (GitHub: CHB-Bohrer; repo
 https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for how to run everything.
 
-## Project location (moved 2026-11-21; user: "I want all of this project stored within a folder in my dropbox")
-- Everything is in `C:\Users\cbohr\Dropbox\Sim_Live_Cell_Analysis\` (Dropbox syncs it; the user chose to include all ~115 GB of data):
+## Project location (moved 2026-11-21 into Dropbox, then 2026-11-25 one level down)
+- 2026-11-25, user: "I want you to make a larger folder call Live_Cell_Microscopy investigations and store everything for this project in
+  there". The whole `Dropbox\Sim_Live_Cell_Analysis` folder (code, simulation_data, README.md) was moved with one rename into
+  `Dropbox\Live_Cell_Microscopy_Investigations\` (underscore, no space). Fixed afterwards: the SimLiveData junction, the `.pth` and
+  `direct_url.json` of both conda envs, the doc paths, the Claude memory folder (copied). No code change was needed: `run.cmd` and
+  `DATA_ROOT` find `simulation_data` relative to the repo. 229 CPU tests passed from the new place. Gotcha: the first move attempt failed
+  with "Access denied" because Windows Explorer held a handle on `simulation_data\tutorial\voice_samples`; restarting Explorer fixed it.
+- 2026-11-21, user: "I want all of this project stored within a folder in my dropbox".
+- Everything is in `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\` (Dropbox syncs it; the user chose to include all ~115 GB of data):
   `code\` = this git repo, `simulation_data\` = what used to be `C:\Users\cbohr\SimLiveData` (runs, sweeps, chromatin library, tutorial shots
   and videos), `README.md` there = a map of the folder (not in git). The old OneDrive copy (`OneDrive\Documents\Sim_Live_Cell_Analysis`) was
   sent to the Recycle Bin after the move was verified (225 CPU tests passed from the new place).
 - `C:\Users\cbohr\SimLiveData` is now a JUNCTION to `simulation_data` so absolute paths saved in old run files keep working. Do not delete
   the junction's target through it.
 - The `simlive` conda env (and `simlive-frozen-2026-10-05`) import the code through an editable install: their
-  `site-packages\__editable__.simlive-0.1.0.pth` now holds `...\Dropbox\Sim_Live_Cell_Analysis\code\src`. If the repo moves again, edit that
+  `site-packages\__editable__.simlive-0.1.0.pth` now holds `...\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\code\src`. If the repo moves again, edit that
   line (or `pip install -e . --no-deps`), otherwise the env silently imports nothing / the old copy.
 - NOT in Dropbox on purpose (path-bound, rebuildable): conda envs in `C:\Users\cbohr\miniforge3`, the tutorial venvs `C:\Users\cbohr\shotenv_tmp`
   and `C:\Users\cbohr\kokoro_tmp` (moving a venv breaks it).
-- Claude Code: open sessions in `...\Dropbox\Sim_Live_Cell_Analysis\code` (the auto-memory was copied to that project's memory folder).
+- Claude Code: open sessions in `...\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\code` (the auto-memory was copied to that project's memory folder).
 
 ## Disk space: compressed images, fewer copies (2026-11-21; user: "do you really need to save that many? ... cut it down ... use some logic")
 - Measured before: 115 GB / 42,000 files, of which runs 96 GB (stage3 movies 40, stage5 per-cell crops 37, stage7 CTC copies 9.2 in 26,000
@@ -148,7 +155,7 @@ branch, not main": that was a misreading of the user's intent.)
   `PRON` in the script respells names the model misreads (Viterbi, Cellpose ...; spoken only, captions unchanged): extend it if a word sounds wrong. A clip is used only if its hash matches the sentence in `engine.js`
   (`hashText`), otherwise the browser voice speaks it, so after editing narration re-run `make_clips.py` (only changed sentences are synthesized). `docs/tutorial/audio/` is gitignored (like the MP4, not in
   the history): a fresh clone has the browser voice until the clips are made or published. Voice list has "Natural voice (recorded)" first. Default speed 1.5x then (2x since 2026-10-26, see "Tutorial playback" below).
-  The MP4 was re-made the same day with this voice, the side-view sentences and the 28-source fix: release `tutorial-video-2026-10-25` (49 min, Kokoro af_heart voice; 126 MB + 88 MB 720p; first uploaded with the Jenny voice, assets replaced the same day; published at the user's request; the README, the dashboard home link and docs/tutorial/README point to it; the 2026-10-20 release stays). Local files: `C:\Users\cbohr\Dropbox\Sim_Live_Cell_Analysis\simulation_data\tutorial\video_2026-10-25\`. The video narrates at normal speed (1x); only the web player defaults to 1.5x.
+  The MP4 was re-made the same day with this voice, the side-view sentences and the 28-source fix: release `tutorial-video-2026-10-25` (49 min, Kokoro af_heart voice; 126 MB + 88 MB 720p; first uploaded with the Jenny voice, assets replaced the same day; published at the user's request; the README, the dashboard home link and docs/tutorial/README point to it; the 2026-10-20 release stays). Local files: `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data\tutorial\video_2026-10-25\`. The video narrates at normal speed (1x); only the web player defaults to 1.5x.
 - New shot `pg_cells_3d` (capture_shots.py `cells_3d`, run `loci_3d_seed23_2163f4`); scene "cells" has 4 new sentences (250 sentences in 38 scenes now).
 
 ## Tutorial playback (2026-10-26; user: "the movie consistently lags ... the animations tend to go and then stop", "default speed ... 2x")
@@ -459,7 +466,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   Every stage output directory contains: data files, `params.yaml` (resolved config), `seed.txt`, `provenance.json`
   (git commit, package versions, timestamp), and ground truth where applicable.
 - **Run layout:** `$SIMLIVE_DATA/runs/<run_id>/stageN_<name>/...` where `SIMLIVE_DATA` defaults to
-  `C:\Users\cbohr\Dropbox\Sim_Live_Cell_Analysis\simulation_data` = the folder `simulation_data` NEXT TO the repo folder (set in `scripts\run.cmd`;
+  `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data` = the folder `simulation_data` NEXT TO the repo folder (set in `scripts\run.cmd`;
   `simlive.io.runs.DATA_ROOT` does the same when the env var is unset). See "Project location" at the top. `run_id` encodes the config hash + seed. Outputs are gitignored and must be
   reproducible from config + seed. Chromatin simulations go in `$SIMLIVE_DATA/chromatin/`.
 - **Configs:** YAML in `configs/`, one per stage plus sweep files that expand to a list of resolved configs.
@@ -757,7 +764,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   layout change needs only a re-capture. Runs shown: `loci_demo_seed11_24bba2` (most pages), `tracking_demo_seed3_e15523` (tracking errors), `loci_demo_seed8_f5c88d` (Images part 2 measured effects), `loci_3d_seed23_2163f4` (Stage page),
   `loci_library_seed12_87a16d` (two copies + stray spots: shots `pg_cells_copies`, `pg_spots_copies`).
   The capture needs the test dashboard on port 8502 and takes ~10 min; it does not use the GPU. `python capture_shots.py <out> <shot> ...` re-takes single shots.
-  Shots of 2026-10-20 in `C:\Users\cbohr\Dropbox\Sim_Live_Cell_Analysis\simulation_data\tutorial\shots_2026-10-20b`. Hand-set rectangles live in `build_data.py` `OVERRIDES` (used where the label text
+  Shots of 2026-10-20 in `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data\tutorial\shots_2026-10-20b`. Hand-set rectangles live in `build_data.py` `OVERRIDES` (used where the label text
   also appears higher up, e.g. a dataframe column called "simulation"); check them after a re-capture by drawing them onto the shot (they went stale once when a table was added).
   Check every sentence for script errors / missing rectangles with a Playwright loop over `T.scenes` (each beat: open `index.html#s=<id>&b=<n>`, collect console errors and
   the engine's "no rect" / "missing shot" warnings).
@@ -772,7 +779,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
 - MP4s are GitHub releases, NEVER in the git tree (user 2026-10-17: "don't add another 59 MB to the history"; the first 59 MB version is still in history). CURRENT: release `tutorial-video-2026-10-20`
   (https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20 (SUPERSEDED by tutorial-video-2026-10-25, see the 2026-10-25 section); 52 min, with the copies scene; assets `sim_live_cell_analysis_tutorial.mp4` 110 MB and `_720p.mp4` 82 MB;
   published 2026-10-20 at the user's request; README links point to it). Previous: `tutorial-video-2026-10-17` (48 min, kept). Local copies (video_2026-10-20/-25/-25b folders) were DELETED 2026-11-21 to save space: the releases are the copies. Formerly in `simulation_data\tutorial\video_2026-10-20\`
-  (+ `release/` with the asset names) and older ones in `C:\Users\cbohr\Dropbox\Sim_Live_Cell_Analysis\simulation_data\tutorial\`. Publishing a new release is outward-facing: ask the user first. `gh release create --target` needs a branch name or full SHA.
+  (+ `release/` with the asset names) and older ones in `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data\tutorial\`. Publishing a new release is outward-facing: ask the user first. `gh release create --target` needs a branch name or full SHA.
   Delete the audio cache before re-running `tts.py` (clips are keyed by scene:sentence, not by text). Found while checking the 2026-10-20 video: the recorder's frames lag the page's sentence log by 0.3-2.2 s, varying, so the voice LED the picture by ~0.7 s (also in the 2026-10-17
   video). `mix.py` now finds each caption change in the recording and places the audio there (voice now 0.17-0.63 s after its caption, median 0.22 s, 49 sentences checked).
   The player also pre-decodes the current and next scene's screenshots (`engine.js` `decodedImg` / `keepDecoded`) so switching to a 9000 px picture does not stall it.
@@ -810,7 +817,7 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   time, a 1 h movie without repeating) at the validated 10 Mb region; every cell draws its own random 100 kb pair (`loci.positions_kb: random`, `pair_separation_kb`, `pair_margin_kb` 1000; `library_loci.draw_pair`; pairs recorded in
   `stage1_chromatin/library_pairs.csv`), so 100 simulations serve hundreds of cells. Movies longer than ~61 min still repeat the trajectory. Still open: whether a surrogate distance process (PLAN_transcription step 5) should take
   over for hours-long movies; loops live only ~46 s at this timescale (real cohesin: minutes), which a slower extrusion per block would fix at the price of even more blocks.
-- **Library run (2026-10-15 18:24 to 2026-10-18 19:10, FINISHED 100/100, no failures; detached via PowerShell `Start-Process`, output `C:\Users\cbohr\Dropbox\Sim_Live_Cell_Analysis\simulation_data\logs\library_loop_extrusion.out.log`):**
+- **Library run (2026-10-15 18:24 to 2026-10-18 19:10, FINISHED 100/100, no failures; detached via PowerShell `Start-Process`, output `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data\logs\library_loop_extrusion.out.log`):**
   `scripts\run.cmd python scripts\run_chromatin_library.py --config configs\chromatin\library_loop_extrusion.yaml --library loop_extrusion --n 100`, seeds 1000-1099, folder `$SIMLIVE_DATA/chromatin/loop_extrusion/library_loop_extrusion_seed<seed>`
   (the simulation NAME is `library_loop_extrusion`, so set `loci.library: loop_extrusion`). Watch it in the 🗂 Library tab or `status.json`; resumable: after a reboot / sleep run the same command again. WHILE IT RUNS do not edit
   `configs/chromatin/library_loop_extrusion.yaml`, `polymer3d.py`, `lef1d.py` or `io/runs.py` (each simulation is a new process that re-reads them) and do not run GPU tests or other GPU work. The plain-polymer library
