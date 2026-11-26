@@ -215,7 +215,7 @@ def intro(st, what: str, how: str) -> None:
 TUTORIAL_SRC = Path(__file__).resolve().parents[1] / "docs" / "tutorial"
 TUTORIAL_DST = Path(__file__).resolve().parent / "static" / "tutorial"      # Streamlit serves app/static at /app/static/
 TUTORIAL_URL = "app/static/tutorial/index.html"
-TUTORIAL_VIDEO = "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25"
+TUTORIAL_VIDEO = "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-11-26"
 
 
 def publish_tutorial() -> bool:

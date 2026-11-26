@@ -51,20 +51,25 @@ Two steps, two virtual environments (the setup of the second is in the header of
 2. kokoro venv: `python scripts/tutorial/video/make_clips_kokoro.py C:/Users/<you>/kokoro_tmp/beats.json af_heart` (other voices: af_bella, am_michael, bf_emma; optional third argument = speed). About 10 minutes for all 250 sentences, much less after an edit.
 `make_clips.py` without `--export` is the older route with Microsoft's online voices (edge-tts, sends the text to Microsoft). To share the clips, attach `docs/tutorial/audio` to a release.
 
-## The MP4 (49 min; 720p = 88 MB, full size 1600x900 = 126 MB)
-Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25
-This version (2026-10-25) uses the Kokoro af_heart clips (normal speed; the first 2026-10-25 upload used Microsoft Jenny and was replaced the same day), has the Cells side-view sentences and the 2026-10-25 screenshots. The 2026-10-20 one (52 min, browser-grade voice, no side views) stays at https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20. The previous one (48 min, without them, voice ~0.7 s ahead of the picture)
-stays at https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17.
+## The MP4 (49 min; 720p = 98 MB, full size 1600x900 = 128 MB)
+Download it from the release: https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-11-26
+This version (2026-11-26) matches the interactive tutorial as of commit 57073b5: the recorded Kokoro af_heart clips at normal speed (1x; only the web player defaults to 2x),
+the redrawn transcription scene (2026-10-26), the stray-spot wording fix and the 2026-11-10 screenshots of the re-run results. Earlier releases stay:
+https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25 (49 min, Kokoro, older screenshots),
+https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-20 (52 min, Microsoft Jenny voice) and
+https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-17 (48 min, voice ~0.7 s ahead of the picture).
 It is NOT in the git tree, to keep the repository small (an earlier 46-minute version, `docs/tutorial/tutorial_720p.mp4`, is still in the git history; it was removed from the tree on 2026-10-17).
-The releases ARE the copies: the local working folders (raw recordings, audio, encoded MP4s) were deleted on 2026-11-21 to save space; only the
-2026-10-17 MP4s remain locally in `simulation_data\tutorial\`. Download a release asset if you need the file on disk.
-The same tutorial as a video with narration. Voice = Microsoft's online neural voice `en-US-JennyNeural` via the `edge-tts` package (NOT Claude's voice; there is none to call).
-How it was made (scripts in `scripts/tutorial/video/`, run with the same separate venv as the screenshots plus `pip install edge-tts imageio-ffmpeg numpy scipy`):
-1. `tts.py`: exports every sentence of the tutorial and synthesizes one MP3 each (sends the narration text, already public in this repo, to Microsoft's service); writes `beats.json` with durations.
+The releases are the copies; the 2026-11-26 working folder (`simulation_data\tutorial\video_2026-11-26\`, with `vid/` and `release/`) is kept locally for now.
+Voice = the same recorded Kokoro clips the player uses (`docs/tutorial/audio`, made on this PC, see above), NOT Claude's voice (there is none to call).
+How it was made (scripts in `scripts/tutorial/video/`, run from the working folder with the screenshot venv plus `imageio-ffmpeg numpy scipy`):
+1. Make sure every sentence has a matching clip (`scripts\tutorial\update.cmd` reports none missing). Then copy each `docs/tutorial/audio/<scene>_<n>.mp3` to `vid/audio/` and
+   write `vid/beats.json` = `{"voice", "beats": [{id, text}], "dur": {"scene:n": seconds}}` with the sentence list read from the player (`T.scenes`), as `tts.py` does
+   (`beats_from_kokoro.py` does exactly this and also checks each clip's hash against `hashText`). `tts.py` is the older route: it synthesizes
+   the clips with Microsoft's online voice (edge-tts; sends the text to Microsoft) and caches them by scene and sentence number, not by text (delete `vid/audio` first).
 2. `record.py`: plays `index.html#s=welcome&b=0&play=1` silently with every sentence lasting exactly its audio length (`window.BEAT_DUR`), screen-records it with Playwright and logs when each sentence started.
    Playwright's video recorder needs an ffmpeg at `%LOCALAPPDATA%\ms-playwright\ffmpeg-1013\ffmpeg-win64.exe`; the `imageio-ffmpeg` binary was copied there.
-3. `mix.py`: places each MP3 where that sentence's caption appears in the recording, then encodes H.264 + AAC. The recorder's frames arrive 0.3-2.2 s
-   (median 0.8 s) after the page logs a sentence, by a varying amount, so audio placed at the logged time led the picture (the 2026-10-17 video has this);
-   `--no-sync` restores the old placement. Checked on the 2026-10-20 video at 49 sentences spread over the whole length: the voice starts 0.17-0.63 s after its caption
-   (median 0.22 s, mostly the silence at the start of each voice clip).
-Takes about 55 minutes in real time. Re-do it whenever the narration or the dashboard changes (delete `vid/audio` first: `tts.py` caches clips by scene and sentence number, not by text).
+3. `mix.py <out.mp4>`: places each MP3 where that sentence's caption appears in the recording, then encodes H.264 + AAC. The recorder's frames arrive late after the page
+   logs a sentence, by a varying amount, so audio placed at the logged time would lead the picture (the 2026-10-17 video has this); `--no-sync` restores that placement.
+   Caption lag goes to `vid/caption_lag.json`; 2026-11-26: all 250 found, median 0.10 s, range 0.02-0.30 s.
+4. 720p copy: `ffmpeg -i full.mp4 -vf scale=1280:720 -c:v libx264 -crf 27 -pix_fmt yuv420p -c:a copy -movflags +faststart <name>_720p.mp4`.
+Takes about an hour in real time (the recording alone ~50 min). Re-do it whenever the narration or the dashboard changes.

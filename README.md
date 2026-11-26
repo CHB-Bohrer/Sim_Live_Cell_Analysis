@@ -15,9 +15,9 @@ seed-to-seed scatter, so the earlier conclusions stand. Details in [docs/notes/a
 brings it up to date. Guide: [docs/tutorial/UPDATING.md](docs/tutorial/UPDATING.md).
 
 ## New here? Take the narrated tutorial
-Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25)** (49 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 50 minutes of animated, narrated scenes covering the
+Watch the video **[narrated MP4 on the Releases page](https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-11-26)** (49 min, 720p or full size), or double-click **[docs/tutorial/index.html](docs/tutorial/index.html)** (best in Microsoft Edge): about 50 minutes of animated, narrated scenes covering the
 pipeline, starting the dashboard, both simulation forms, and every dashboard page, each ending with a short "Your turn" list. Voice = recorded clips made locally with Kokoro (af_heart) (default speed 2x; without the clips, your browser's
-speech synthesis, where Edge's "Natural" voices sound best); the MP4 predates the newest scenes. Details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
+speech synthesis, where Edge's "Natural" voices sound best); the MP4 (2026-11-26) matches the current scenes. Details and how to regenerate it in [docs/tutorial/README.md](docs/tutorial/README.md).
 
 ## Quick start (Windows)
 
