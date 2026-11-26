@@ -167,7 +167,7 @@ SC("cli", "The command line", (st) => {
   const cmds = [
     ["scripts\\run.cmd python scripts\\run_tracking_demo.py --set motion.speed_scale=0.5 --set seed=2", "# one tracking run with changed settings"],
     ["scripts\\run.cmd python scripts\\run_tracking_demo.py --config configs\\loci_library.yaml --set loci.transcription.enabled=true", "# loci from the saved library, with MS2"],
-    ["scripts\\run.cmd python scripts\\sweep.py --name speed --seeds 1-5 --grid motion.speed_scale=1,0.5,0.25", "# a grid x seeds, results in SimLiveData\\sweeps"],
+    ["scripts\\run.cmd python scripts\\sweep.py --name speed --seeds 1-5 --grid motion.speed_scale=1,0.5,0.25", "# a grid x seeds, results in simulation_data\\sweeps"],
     ["scripts\\run.cmd python scripts\\compare_localizers.py --run loci_demo_seed11_24bba2", "# redo only the locus analysis of a finished run"],
     ["scripts\\run.cmd python scripts\\deconvolve_ms2.py --run loci_demo_seed11_24bba2", "# MS2 trace -> Pol II starts"],
     ["scripts\\run.cmd pytest", "# the CPU tests; pytest -m gpu for the graphics-card tests"],
@@ -199,7 +199,7 @@ SC("cautions", "Things to remember", (st) => new Reveal(st, `<h3>Read the result
   <div class="card2 warn"><h4>One run is not evidence</h4><p>Compare conditions over several seeds. Differences smaller than the bars in Scans are not reliable.</p></div>
   <div class="card2 warn"><h4>One graphics card</h4><p>Chromatin simulations and the movie pipeline share it: run them one after the other. A library takes hours.</p></div>
   <div class="card2 warn"><h4>Restart after code edits</h4><p>Streamlit does not reliably reload helper modules. Restart the dashboard after editing files in <code>app/</code>.</p></div>
-  <div class="card2"><h4>Reproducible by design</h4><p>Same config and seed → same run folder. Everything is in <code>SimLiveData</code>, outside the repository.</p></div>
+  <div class="card2"><h4>Reproducible by design</h4><p>Same config and seed → same run folder. Everything is in <code>simulation_data</code>, the folder next to the code, not in git.</p></div>
   <div class="card2"><h4>Where to read more</h4><p><code>README.md</code>, <code>docs/ARCHITECTURE.md</code>, <code>docs/SPOT_FINDING.md</code>, <code>docs/IMAGE_ERRORS.md</code>, <code>docs/EP_CURVE.md</code>.</p></div></div>`), [
   ["Before you start, a few things to keep in mind.", (r) => r.to(0)],
   ["Many values are placeholders or assumptions until you supply measurements. The results show how the method behaves, not biology.", (r) => r.only([0])],
