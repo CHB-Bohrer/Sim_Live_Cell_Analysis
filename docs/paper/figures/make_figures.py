@@ -123,6 +123,59 @@ def ep_recovery():
     return fig
 
 
+@figure("val-calibration", "checks.json")
+def calibration():
+    rows = checks()["calibration"]["rows"]
+    by = {}
+    for r in rows:
+        by.setdefault(r["quantity"], []).append(r["ratio"])
+    names = sorted(by, key=lambda q: sorted(by[q])[len(by[q]) // 2])
+    fig, ax = plt.subplots(figsize=(6.4, 0.24 * len(names) + 0.9))
+    ax.axvspan(0.95, 1.05, color=BAND, lw=0)
+    ax.axvline(1, color=REF, ls="--", lw=1)
+    for i, q in enumerate(names):
+        v = sorted(by[q])
+        ax.hlines(i, v[0], v[-1], color=BLUE, lw=3, alpha=0.45)
+        ax.plot(v[len(v) // 2], i, "o", color=BLUE, ms=4.5)
+    ax.set_yticks(range(len(names)), names, fontsize=7.5)
+    ax.set(xlim=(0.3, 1.5), xlabel="estimate / true value (dot: middle channel; bar: range over channels)",
+           title="Blind calibration estimates")
+    ax.grid(axis="y", visible=False)
+    return fig
+
+
+@figure("val-spot-precision", "checks.json")
+def spot_precision():
+    r = checks()["spot_precision"]["rows"]
+    n = [x["photons"] for x in r]
+    fig, ax = plt.subplots(1, 2, figsize=(7.0, 2.7))
+    ax[0].plot(n, [100 * x["limit_px"] for x in r], "--", color=REF, label="physical limit (Mortensen 2010)")
+    ax[0].plot(n, [100 * x["rms_px"] for x in r], "o", color=BLUE, ms=5, label="spot finder")
+    ax[0].set(xscale="log", yscale="log", xlabel="photons in the spot", ylabel="error per axis (nm at 100 nm/px)",
+              title="Error falls as 1/sqrt(photons)")
+    ax[0].set_yticks([1, 2, 5, 10, 20]); ax[0].set_yticklabels(["1", "2", "5", "10", "20"]); ax[0].legend(fontsize=7.5)
+    ax[1].axhline(1, color=REF, ls="--", lw=1)
+    ax[1].plot(n, [x["ratio"] for x in r], "o-", color=BLUE, ms=5)
+    ax[1].set(xscale="log", ylim=(0.8, 1.6), xlabel="photons in the spot", ylabel="error / limit", title="Close to the limit")
+    for a in ax:
+        a.set_xticks([200, 1000, 10000]); a.set_xticklabels(["200", "1,000", "10,000"]); a.minorticks_off()
+    return fig
+
+
+@figure("val-deconvolution", "checks.json")
+def deconvolution():
+    c = checks()["deconvolution"]
+    x = list(range(len(c["exact"])))
+    label = {"gibbs_shift": "default sampler", "gibbs_pt": "parallel tempering", "chen_block": "Chen et al. block sampler"}
+    fig, ax = plt.subplots(figsize=(5.2, 2.7))
+    ax.bar(x, c["exact"], color=BAND, edgecolor=REF, lw=0.6, label="exact (all 16,384 patterns)")
+    for (name, e), m, col in zip(c["samplers"].items(), "o^s", (BLUE, AQUA, ORANGE)):
+        ax.plot(x, e, m, ms=4.5, mfc="none", color=col, label=label.get(name, name))
+    ax.set(xlabel="time step (s)", ylabel="P(a polymerase starts here)", title="Samplers against the exact posterior")
+    ax.legend(fontsize=7)
+    return fig
+
+
 def main():
     force = "--force" in sys.argv
     wanted = [a for a in sys.argv[1:] if not a.startswith("--")] or list(FIGURES)

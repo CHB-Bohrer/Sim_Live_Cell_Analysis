@@ -103,7 +103,120 @@ def check_ep_recovery():
             "params": {"n_measurements": n, "n_cells": 300, "sigma_nm": 70.0, "dims": 2, "seed": 2}}
 
 
-CHECKS = {"probes": check_probes, "transcription": check_transcription, "ep_recovery": check_ep_recovery}
+def check_calibration():
+    """Blind calibration: simulate dark / flat / bead acquisitions of one instrument, estimate it without looking."""
+    from simlive.io.runs import REPO_ROOT, load_config
+    from simlive.stage3_microscopy.calibration.run import run_calibration, settings_for
+    from simlive.stage3_microscopy.render import entropy_for
+    short = {"dark": {"n_frames": 40, "exposures_s": [0.01, 1.0, 5.0], "extra_frames": 8},
+             "flat": {"levels_photons": [0, 300, 1000, 3000, 8000, 20000], "n_frames": 10},
+             "flicker": {"level_photons": 3000, "n_frames": 80},
+             "beads": {"n_beads": 30, "photons": 30000, "n_frames": 6, "n_frames_3d": 4, "z_um": 1.0}}
+    cfg = load_config(REPO_ROOT / "configs" / "loci_demo.yaml", ["geometry.fov_um=[30, 30]"])
+    _, table = run_calibration(cfg, entropy_for(3), {**settings_for(cfg), **short}, progress=lambda *_: None)
+    # limits = the tolerances of tests/test_calibration.py (percent unless noted)
+    limits = {"gain": 3, "read noise": 5, "row noise": 15, "offset pattern (DSNU)": 10, "dark current": 15,
+              "pixel gain spread (PRNU)": 10, "PSF width (lateral sigma)": 3}
+    rows, ok = [], True
+    for _, r in table.iterrows():
+        if r.truth != r.truth or r.estimate != r.estimate or float(r.truth) == 0:
+            continue
+        row = {"quantity": r.quantity, "channel": r.channel, "estimate": float(r.estimate), "truth": float(r.truth),
+               "ratio": float(r.estimate) / float(r.truth)}
+        if r.quantity in limits:
+            ok &= abs(row["ratio"] - 1) * 100 < limits[r.quantity]
+        elif r.quantity.startswith("chromatic shift"):
+            ok &= abs(row["estimate"] - row["truth"]) < 0.03
+        elif r.quantity == "hot pixels found":
+            ok &= row["estimate"] == row["truth"]
+        rows.append(row)
+    within = sum(abs(x["ratio"] - 1) < 0.05 for x in rows)
+    return {"title": "Blind calibration against the simulated instrument", "passed": bool(ok), "rows": rows,
+            "limit": "gain, PSF width within 3%; read noise 5%; DSNU, PRNU 10%; dark current, row noise 15%; colour shift 0.03 px; every hot pixel",
+            "summary": f"{within} of {len(rows)} estimates within 5% (short acquisitions; flicker and cosmic rays rough by design)",
+            "params": {"config": "loci_demo", "fov_um": 30, "instrument_seed": 3, **{k: str(v) for k, v in short.items()}}}
+
+
+def check_spot_precision():
+    """Spot finder (DoG + Gaussian fit) on drawn spots: error against the physical limit (Mortensen et al. 2010)."""
+    from scipy.special import erf
+    from simlive.stage6_analysis import dog_viterbi as DV
+    from simlive.stage6_analysis import spots as SP
+    S, sigma, bg, read = 41, 0.85, 20.0, 1.5
+
+    def spot(cy, cx, n):
+        s2, i = np.sqrt(2) * sigma, np.arange(S)
+        gy = 0.5 * (erf((i + 0.5 - cy) / s2) - erf((i - 0.5 - cy) / s2))
+        gx = 0.5 * (erf((i + 0.5 - cx) / s2) - erf((i - 0.5 - cx) / s2))
+        return n * np.outer(gy, gx)
+
+    yy, xx = np.indices((S, S))
+    region = np.hypot(yy - S // 2, xx - S // 2) <= 16
+    rng = np.random.default_rng(1)
+    sa2, b = sigma ** 2 + 1 / 12, bg + read ** 2
+    rows = []
+    for n in (150, 250, 400, 700, 1200, 2000, 3500, 6000, 10000):
+        err, found = [], 0
+        for _ in range(200):
+            cy, cx = rng.uniform(17, 23, 2)
+            img = rng.poisson(spot(cy, cx, n) + bg).astype(float) + rng.normal(0, read, (S, S)) + 100.0
+            c = DV.dog_candidates(img, region)
+            if c is None or not len(c["peaks"]):
+                continue
+            r = SP.refine_peak(c, 0, **SP.DEFAULTS)
+            if np.hypot(r["pos"][0] - cy, r["pos"][1] - cx) < 3:
+                found += 1
+                err += [r["pos"][0] - cy, r["pos"][1] - cx]
+        rms = float(np.sqrt(np.mean(np.square(err))))
+        limit = float(np.sqrt(sa2 / n * (16 / 9 + 8 * np.pi * sa2 * b / n)))
+        rows.append({"photons": n, "rms_px": rms, "limit_px": limit, "ratio": rms / limit, "found": found / 200})
+    ok = all(r["ratio"] < 1.25 and r["found"] > 0.98 for r in rows)
+    return {"title": "Spot position error against the physical limit", "passed": bool(ok), "rows": rows,
+            "limit": "error within 1.25x the Mortensen limit and > 98% found, at every brightness",
+            "summary": f"error {min(r['ratio'] for r in rows):.2f} to {max(r['ratio'] for r in rows):.2f}x the limit, 150 to 10,000 photons",
+            "params": {"psf_sigma_px": sigma, "background_photons": bg, "read_noise": read, "spots_per_level": 200, "seed": 1}}
+
+
+def check_deconvolution():
+    """MS2 -> Pol II samplers on a problem small enough to sum all 2^14 start patterns exactly (tests/test_mcmc_check.py)."""
+    import itertools
+    from simlive.stage6_analysis.deconvolve import Kernel, deconvolve_trace
+    kern = Kernel(1.0, np.array([0.0, 0.5, 1.0, 1.0, 0.0]))
+    T, s, K = 5, 2, 5
+    N = K + (T - 1) * s + 1
+    idx = K + s * np.arange(T)
+
+    def model(I):
+        G = np.zeros(T)
+        for n in range(T):
+            u = idx[n] - np.flatnonzero(I)
+            G[n] = kern.values[u[(u > 0) & (u < K)]].sum()
+        return G
+
+    rng = np.random.default_rng(5)
+    truth = np.zeros(N, int); truth[[6, 11]] = 1
+    sb, beta, p = 0.25, 0.05, 0.08
+    G0 = model(truth)
+    a = G0 + rng.normal(size=T) * np.sqrt(sb ** 2 + beta * G0)
+    logw, states = [], []
+    for bits in itertools.product((0, 1), repeat=N):
+        I = np.array(bits); G = model(I); v = sb ** 2 + beta * np.clip(G, 0, None)
+        logw.append((-0.5 * (a - G) ** 2 / v - 0.5 * np.log(v)).sum() + I.sum() * np.log(p / (1 - p))); states.append(I)
+    w = np.exp(np.array(logw) - max(logw)); w /= w.sum()
+    exact = (w[:, None] * np.array(states)).sum(0)
+    samplers = {"gibbs_shift": {}, "gibbs_pt": {"n_replicas": 4, "beta_min": 0.1}, "chen_block": {"block_s": 4.0}}
+    est = {name: deconvolve_trace(a, kern, 2.0, np.full(T, p), sb, beta, n_burn=300, n_keep=20000, thin=3, max_shift_s=3.0,
+                                  seed=3, sampler=name, **kw)["p_fine"].tolist() for name, kw in samplers.items()}
+    worst = {name: float(np.abs(np.array(e) - exact).max()) for name, e in est.items()}
+    return {"title": "MS2 deconvolution samplers against the exact posterior", "passed": bool(max(worst.values()) < 0.03),
+            "exact": exact.tolist(), "samplers": est, "worst": worst,
+            "limit": "every start probability within 0.03 of the exact value, for every sampler",
+            "summary": "largest error " + ", ".join(f"{k} {v:.3f}" for k, v in worst.items()),
+            "params": {"fine_steps": int(N), "patterns": 2 ** int(N), "n_keep": 20000, "seed": 3}}
+
+
+CHECKS = {"probes": check_probes, "transcription": check_transcription, "ep_recovery": check_ep_recovery,
+          "calibration": check_calibration, "spot_precision": check_spot_precision, "deconvolution": check_deconvolution}
 
 
 def manifest():
@@ -131,7 +244,8 @@ def main():
         print(f"{'PASS' if res['passed'] else 'FAIL'}  {name}: {res['summary']}")
     OUT.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8", newline="\n")
     lines = ["| Check | Compared against | Limit (set in advance) | Result | Run |", "| --- | --- | --- | --- | --- |"]
-    kind = {"probes": "exact theory", "transcription": "exact expectation", "ep_recovery": "the curve put in"}
+    kind = {"probes": "exact theory", "transcription": "exact expectation", "ep_recovery": "the curve put in",
+            "calibration": "the simulated instrument", "spot_precision": "the physical limit", "deconvolution": "the exact posterior"}
     for name in CHECKS:
         if name in data:
             r = data[name]; m = r["manifest"]

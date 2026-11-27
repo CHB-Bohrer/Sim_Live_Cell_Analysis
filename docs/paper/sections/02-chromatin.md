@@ -55,6 +55,10 @@ The engine was validated by reproducing known polymer behaviour (5 conditions, 2
 | Designed loop anchors in contact | about 35 times a typical pair | far above the control (0.9) |
 | Insulation across impermeable boundaries | 1.36-fold | target of at least 1.5, set in advance: **not met** |
 
+![Contact probability against genomic separation, from the saved validation simulations (not re-run for this document). Left: the plain polymer (grey) falls with slope −1.43 between the ideal chain (−1.5) and the fractal globule (−1); loop extrusion flattens it. Right: loop extrusion raises contacts about 3-fold near the loop size (~150 kb) and lowers them beyond about 1 Mb, as in Fudenberg et al. (2016). Source: `scripts/validate_chromatin.py`.](../img/chromatin/contact_probability.png)
+
+![Mean-squared displacement of single monomers: sub-diffusive, exponent 0.49, as expected for a Rouse polymer (0.5). Left: lab frame; right: chain centre of mass removed. Same saved simulations.](../img/chromatin/msd.png)
+
 Eleven of twelve checks pass. The insulation check does not, and it is reported as a miss. The effect is real (controls give 0.82 to 1.11) but weaker than the target, and the threshold was not lowered to make it pass. More seeds would tighten the number.
 
 ::: {.box}

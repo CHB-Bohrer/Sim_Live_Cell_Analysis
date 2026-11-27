@@ -7,7 +7,7 @@ chromatin-studio software paper: small section files, generated figures, one bui
 | Path | What it holds |
 |---|---|
 | `sections/NN-name.md` | One section each, in file-name order. The comment at the top names the code it describes (`Code:`) and the checks to re-run (`Check:`). |
-| `analysis/checks.py` | Three short checks on the real code (probes, transcription, E-P curve recovery). Writes `data/checks.json` with a run manifest and `data/checks-table.md`. |
+| `analysis/checks.py` | Six short checks on the real code (probes, transcription, E-P curve recovery, blind calibration, spot precision, MS2 deconvolution samplers). Writes `data/checks.json` with a run manifest and `data/checks-table.md`. |
 | `data/recorded-results.md` | Results quoted from larger runs whose data lives outside the repository, each with its source document. Edit by hand when a source changes. |
 | `figures/make_figures.py` | Draws every figure from `data/`. Redraws only what changed. |
 | `stale.py` | Lists the sections a code change made stale, from the `Code:` lines and the git difference since the last documented commit. |

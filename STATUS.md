@@ -13,12 +13,13 @@ This is the short front page. Rules for every session are in `CLAUDE.md`; the de
 - Tests: 225 CPU + 7 GPU at 2026-11-10. Narrated tutorial: 38 scenes, video release `tutorial-video-2026-10-25`.
 
 ## Last session
+- 2026-11-27: design document gained three generated checks with figures (blind calibration, spot precision against the Mortensen limit, MS2 samplers against the exact posterior; all pass) and the saved polymer P(s) / MSD figures. The separate `docs/manual` PDF (PR #2) was folded into it and removed, at the owner's choice.
 - 2026-11-27: design document added: `docs/paper/sim-live-paper.pdf` (25 pages, 14 sections mapped to code, three checks re-run from the code, all passing; recorded results quoted with sources; 14 decisions with reasons). `docs/paper/stale.py` lists what a code change makes stale.
 - 2026-11-27: `CLAUDE.md` condensed from 857 lines (118 KB) to 170 lines (17 KB). Its 22 topic sections were moved word for word into nine files under `docs/notes/`; a line-by-line check found nothing lost. The session handoff rule now points new entries to `STATUS.md` and the notes.
 - 2026-11-27: added `STATUS.md`, `THOUGHTS.md`, `scripts/thoughts.py`, `scripts/next_steps.py` and the owner's standing preferences. No code or results changed.
 
 ## Next
-- [auto] Design document: add generated checks for the 1D loop-extrusion engine and for the spot finder on a synthetic spot (`docs/paper/analysis/checks.py`).
+- [auto] Design document: add a generated check for the 1D loop-extrusion engine (`docs/paper/analysis/checks.py`).
 - [ask] Design document, decision D01: the reason for simulating chromatin as a separate library is not in the notes. What was it?
 - [ask] Start the plain-polymer library (about 73 h of GPU).
 - [ask] Re-make and publish the tutorial MP4 (pictures changed slightly on 2026-11-10).

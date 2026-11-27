@@ -1440,5 +1440,535 @@
    "numba": "0.68.1",
    "platform": "Linux"
   }
+ },
+ "calibration": {
+  "title": "Blind calibration against the simulated instrument",
+  "passed": true,
+  "rows": [
+   {
+    "quantity": "gain",
+    "channel": "nucleus",
+    "estimate": 0.9970028760122397,
+    "truth": 1.0,
+    "ratio": 0.9970028760122397
+   },
+   {
+    "quantity": "offset",
+    "channel": "nucleus",
+    "estimate": 100.01680975230968,
+    "truth": 100.0,
+    "ratio": 1.0001680975230969
+   },
+   {
+    "quantity": "read noise",
+    "channel": "nucleus",
+    "estimate": 1.5445604825595218,
+    "truth": 1.5424380898475647,
+    "ratio": 1.001375998638731
+   },
+   {
+    "quantity": "row noise",
+    "channel": "nucleus",
+    "estimate": 0.5876057483502575,
+    "truth": 0.6,
+    "ratio": 0.9793429139170958
+   },
+   {
+    "quantity": "offset pattern (DSNU)",
+    "channel": "nucleus",
+    "estimate": 1.0078742250230015,
+    "truth": 1.0062187910079956,
+    "ratio": 1.0016452028423635
+   },
+   {
+    "quantity": "dark current",
+    "channel": "nucleus",
+    "estimate": 0.1972496183690056,
+    "truth": 0.2,
+    "ratio": 0.9862480918450279
+   },
+   {
+    "quantity": "hot pixels found",
+    "channel": "nucleus",
+    "estimate": 13.0,
+    "truth": 13.0,
+    "ratio": 1.0
+   },
+   {
+    "quantity": "cosmic-ray rate",
+    "channel": "nucleus",
+    "estimate": 0.020833333333333332,
+    "truth": 0.05,
+    "ratio": 0.41666666666666663
+   },
+   {
+    "quantity": "pixel gain spread (PRNU)",
+    "channel": "nucleus",
+    "estimate": 0.010038991367607152,
+    "truth": 0.010024148039519787,
+    "ratio": 1.0014807570707103
+   },
+   {
+    "quantity": "vignetting (loss at the corners)",
+    "channel": "nucleus",
+    "estimate": 0.15204201628562103,
+    "truth": 0.15,
+    "ratio": 1.0136134419041403
+   },
+   {
+    "quantity": "illumination tilt",
+    "channel": "nucleus",
+    "estimate": 0.029857744559856146,
+    "truth": 0.03,
+    "ratio": 0.995258151995205
+   },
+   {
+    "quantity": "flicker",
+    "channel": "nucleus",
+    "estimate": 0.007839737671052905,
+    "truth": 0.01,
+    "ratio": 0.7839737671052905
+   },
+   {
+    "quantity": "flicker memory",
+    "channel": "nucleus",
+    "estimate": 0.6988106345120682,
+    "truth": 0.8,
+    "ratio": 0.8735132931400852
+   },
+   {
+    "quantity": "gain",
+    "channel": "locus0",
+    "estimate": 1.0007160675694076,
+    "truth": 1.0,
+    "ratio": 1.0007160675694076
+   },
+   {
+    "quantity": "offset",
+    "channel": "locus0",
+    "estimate": 100.00672888531112,
+    "truth": 100.0,
+    "ratio": 1.0000672888531112
+   },
+   {
+    "quantity": "read noise",
+    "channel": "locus0",
+    "estimate": 1.5474823679341232,
+    "truth": 1.5450085401535034,
+    "ratio": 1.001601174178865
+   },
+   {
+    "quantity": "row noise",
+    "channel": "locus0",
+    "estimate": 0.5955470448177483,
+    "truth": 0.6,
+    "ratio": 0.9925784080295806
+   },
+   {
+    "quantity": "offset pattern (DSNU)",
+    "channel": "locus0",
+    "estimate": 1.003244004306995,
+    "truth": 1.0031309127807617,
+    "ratio": 1.000112738551661
+   },
+   {
+    "quantity": "dark current",
+    "channel": "locus0",
+    "estimate": 0.19923282584114455,
+    "truth": 0.2,
+    "ratio": 0.9961641292057227
+   },
+   {
+    "quantity": "hot pixels found",
+    "channel": "locus0",
+    "estimate": 19.0,
+    "truth": 19.0,
+    "ratio": 1.0
+   },
+   {
+    "quantity": "cosmic-ray rate",
+    "channel": "locus0",
+    "estimate": 0.020833333333333332,
+    "truth": 0.05,
+    "ratio": 0.41666666666666663
+   },
+   {
+    "quantity": "pixel gain spread (PRNU)",
+    "channel": "locus0",
+    "estimate": 0.010001856387399725,
+    "truth": 0.009991193190217018,
+    "ratio": 1.0010672596335288
+   },
+   {
+    "quantity": "vignetting (loss at the corners)",
+    "channel": "locus0",
+    "estimate": 0.14992764211191859,
+    "truth": 0.15,
+    "ratio": 0.9995176140794573
+   },
+   {
+    "quantity": "illumination tilt",
+    "channel": "locus0",
+    "estimate": 0.03032704842258209,
+    "truth": 0.03,
+    "ratio": 1.0109016140860696
+   },
+   {
+    "quantity": "flicker",
+    "channel": "locus0",
+    "estimate": 0.007573539064061325,
+    "truth": 0.01,
+    "ratio": 0.7573539064061324
+   },
+   {
+    "quantity": "flicker memory",
+    "channel": "locus0",
+    "estimate": 0.5929882904570523,
+    "truth": 0.8,
+    "ratio": 0.7412353630713153
+   },
+   {
+    "quantity": "gain",
+    "channel": "locus1",
+    "estimate": 0.9993779864089254,
+    "truth": 1.0,
+    "ratio": 0.9993779864089254
+   },
+   {
+    "quantity": "offset",
+    "channel": "locus1",
+    "estimate": 100.01724335652385,
+    "truth": 100.0,
+    "ratio": 1.0001724335652384
+   },
+   {
+    "quantity": "read noise",
+    "channel": "locus1",
+    "estimate": 1.5497728080023423,
+    "truth": 1.5482937097549438,
+    "ratio": 1.000955308568445
+   },
+   {
+    "quantity": "row noise",
+    "channel": "locus1",
+    "estimate": 0.5946176847114433,
+    "truth": 0.6,
+    "ratio": 0.9910294745190722
+   },
+   {
+    "quantity": "offset pattern (DSNU)",
+    "channel": "locus1",
+    "estimate": 1.001231429801941,
+    "truth": 1.001172661781311,
+    "ratio": 1.0000586991863374
+   },
+   {
+    "quantity": "dark current",
+    "channel": "locus1",
+    "estimate": 0.1954195900172367,
+    "truth": 0.2,
+    "ratio": 0.9770979500861834
+   },
+   {
+    "quantity": "hot pixels found",
+    "channel": "locus1",
+    "estimate": 10.0,
+    "truth": 10.0,
+    "ratio": 1.0
+   },
+   {
+    "quantity": "cosmic-ray rate",
+    "channel": "locus1",
+    "estimate": 0.0625,
+    "truth": 0.05,
+    "ratio": 1.25
+   },
+   {
+    "quantity": "pixel gain spread (PRNU)",
+    "channel": "locus1",
+    "estimate": 0.009977581710135327,
+    "truth": 0.00998684298247099,
+    "ratio": 0.9990726526539049
+   },
+   {
+    "quantity": "vignetting (loss at the corners)",
+    "channel": "locus1",
+    "estimate": 0.1503595844766992,
+    "truth": 0.15,
+    "ratio": 1.0023972298446613
+   },
+   {
+    "quantity": "illumination tilt",
+    "channel": "locus1",
+    "estimate": 0.030198350727402186,
+    "truth": 0.03,
+    "ratio": 1.0066116909134062
+   },
+   {
+    "quantity": "flicker",
+    "channel": "locus1",
+    "estimate": 0.009657039142255925,
+    "truth": 0.01,
+    "ratio": 0.9657039142255924
+   },
+   {
+    "quantity": "flicker memory",
+    "channel": "locus1",
+    "estimate": 0.7554936325061893,
+    "truth": 0.8,
+    "ratio": 0.9443670406327366
+   },
+   {
+    "quantity": "chromatic shift y",
+    "channel": "locus0",
+    "estimate": 0.24758967822012323,
+    "truth": 0.25,
+    "ratio": 0.9903587128804929
+   },
+   {
+    "quantity": "chromatic shift x",
+    "channel": "locus0",
+    "estimate": -0.15008229237568926,
+    "truth": -0.15,
+    "ratio": 1.0005486158379284
+   },
+   {
+    "quantity": "chromatic shift y",
+    "channel": "locus1",
+    "estimate": -0.3000399012220072,
+    "truth": -0.3,
+    "ratio": 1.0001330040733574
+   },
+   {
+    "quantity": "chromatic shift x",
+    "channel": "locus1",
+    "estimate": 0.19893669337036357,
+    "truth": 0.2,
+    "ratio": 0.9946834668518179
+   },
+   {
+    "quantity": "PSF width (lateral sigma)",
+    "channel": "nucleus",
+    "estimate": 0.8074111018490513,
+    "truth": 0.807196420273966,
+    "ratio": 1.0002659595232255
+   },
+   {
+    "quantity": "PSF width (lateral sigma)",
+    "channel": "locus0",
+    "estimate": 0.8916333932065936,
+    "truth": 0.8899355928391315,
+    "ratio": 1.0019077789236923
+   },
+   {
+    "quantity": "PSF width (lateral sigma)",
+    "channel": "locus1",
+    "estimate": 0.984463643567048,
+    "truth": 0.9859070376844811,
+    "ratio": 0.9985359734110195
+   }
+  ],
+  "limit": "gain, PSF width within 3%; read noise 5%; DSNU, PRNU 10%; dark current, row noise 15%; colour shift 0.03 px; every hot pixel",
+  "summary": "38 of 46 estimates within 5% (short acquisitions; flicker and cosmic rays rough by design)",
+  "params": {
+   "config": "loci_demo",
+   "fov_um": 30,
+   "instrument_seed": 3,
+   "dark": "{'n_frames': 40, 'exposures_s': [0.01, 1.0, 5.0], 'extra_frames': 8}",
+   "flat": "{'levels_photons': [0, 300, 1000, 3000, 8000, 20000], 'n_frames': 10}",
+   "flicker": "{'level_photons': 3000, 'n_frames': 80}",
+   "beads": "{'n_beads': 30, 'photons': 30000, 'n_frames': 6, 'n_frames_3d': 4, 'z_um': 1.0}"
+  },
+  "manifest": {
+   "commit": "1aea1bc",
+   "dirty": false,
+   "date": "2026-11-27",
+   "python": "3.13.18",
+   "numpy": "2.5.3",
+   "scipy": "1.18.1",
+   "numba": "0.68.1",
+   "platform": "Linux"
+  }
+ },
+ "spot_precision": {
+  "title": "Spot position error against the physical limit",
+  "passed": true,
+  "rows": [
+   {
+    "photons": 150,
+    "rms_px": 0.18555285337595417,
+    "limit_px": 0.16027994745765875,
+    "ratio": 1.157679774164961,
+    "found": 1.0
+   },
+   {
+    "photons": 250,
+    "rms_px": 0.11247030519183816,
+    "limit_px": 0.1074263762242723,
+    "ratio": 1.046952425883153,
+    "found": 1.0
+   },
+   {
+    "photons": 400,
+    "rms_px": 0.07928683420916882,
+    "limit_px": 0.07649205568151014,
+    "ratio": 1.0365368469020533,
+    "found": 1.0
+   },
+   {
+    "photons": 700,
+    "rms_px": 0.05351744717458156,
+    "limit_px": 0.05279810044045721,
+    "ratio": 1.0136244813378388,
+    "found": 1.0
+   },
+   {
+    "photons": 1200,
+    "rms_px": 0.04036431706855804,
+    "limit_px": 0.03802630309747044,
+    "ratio": 1.0614841249514768,
+    "found": 1.0
+   },
+   {
+    "photons": 2000,
+    "rms_px": 0.030010551989815212,
+    "limit_px": 0.028409125652373867,
+    "ratio": 1.0563701381393105,
+    "found": 1.0
+   },
+   {
+    "photons": 3500,
+    "rms_px": 0.021297733609933905,
+    "limit_px": 0.020951260388209575,
+    "ratio": 1.0165371063747224,
+    "found": 1.0
+   },
+   {
+    "photons": 6000,
+    "rms_px": 0.01537252770948706,
+    "limit_px": 0.01577505419228219,
+    "ratio": 0.9744833534079355,
+    "found": 1.0
+   },
+   {
+    "photons": 10000,
+    "rms_px": 0.012378534103586516,
+    "limit_px": 0.012119840932153444,
+    "ratio": 1.0213446012106289,
+    "found": 1.0
+   }
+  ],
+  "limit": "error within 1.25x the Mortensen limit and > 98% found, at every brightness",
+  "summary": "error 0.97 to 1.16x the limit, 150 to 10,000 photons",
+  "params": {
+   "psf_sigma_px": 0.85,
+   "background_photons": 20.0,
+   "read_noise": 1.5,
+   "spots_per_level": 200,
+   "seed": 1
+  },
+  "manifest": {
+   "commit": "1aea1bc",
+   "dirty": false,
+   "date": "2026-11-27",
+   "python": "3.13.18",
+   "numpy": "2.5.3",
+   "scipy": "1.18.1",
+   "numba": "0.68.1",
+   "platform": "Linux"
+  }
+ },
+ "deconvolution": {
+  "title": "MS2 deconvolution samplers against the exact posterior",
+  "passed": true,
+  "exact": [
+   0.07999999999999849,
+   0.07999999999999849,
+   0.00014771707933642166,
+   0.00014771707933642166,
+   0.00010912728889844365,
+   0.0015457493818833888,
+   0.2733400000379013,
+   0.708394133791559,
+   0.005664134929121157,
+   0.0014849134491976563,
+   0.27582719852340987,
+   0.7182571889213989,
+   0.13742825769057015,
+   0.07999999999999849
+  ],
+  "samplers": {
+   "gibbs_shift": [
+    0.08175,
+    0.07545,
+    0.00015,
+    0.0001,
+    0.0001,
+    0.0011,
+    0.2695,
+    0.71165,
+    0.006,
+    0.00175,
+    0.2761,
+    0.71735,
+    0.1382,
+    0.0786
+   ],
+   "gibbs_pt": [
+    0.07855,
+    0.07765,
+    0.0001,
+    0.0,
+    0.0,
+    0.00155,
+    0.2738,
+    0.70715,
+    0.0058,
+    0.0015,
+    0.27925,
+    0.71315,
+    0.1385,
+    0.0791
+   ],
+   "chen_block": [
+    0.08685,
+    0.0778,
+    0.00015,
+    0.0001,
+    0.0001,
+    0.0011,
+    0.25565,
+    0.7283,
+    0.0047,
+    0.0015,
+    0.2462,
+    0.74705,
+    0.1331,
+    0.06875
+   ]
+  },
+  "worst": {
+   "gibbs_shift": 0.004549999999998486,
+   "gibbs_pt": 0.005107188921398942,
+   "chen_block": 0.029627198523409864
+  },
+  "limit": "every start probability within 0.03 of the exact value, for every sampler",
+  "summary": "largest error gibbs_shift 0.005, gibbs_pt 0.005, chen_block 0.030",
+  "params": {
+   "fine_steps": 14,
+   "patterns": 16384,
+   "n_keep": 20000,
+   "seed": 3
+  },
+  "manifest": {
+   "commit": "1aea1bc",
+   "dirty": false,
+   "date": "2026-11-27",
+   "python": "3.13.18",
+   "numpy": "2.5.3",
+   "scipy": "1.18.1",
+   "numba": "0.68.1",
+   "platform": "Linux"
+  }
  }
 }

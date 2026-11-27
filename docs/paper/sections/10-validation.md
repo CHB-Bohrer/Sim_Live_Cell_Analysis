@@ -9,7 +9,7 @@ Sources: data/checks.json, data/recorded-results.md.
 # Validation summary
 
 ::: {.box}
-**Short version.** Three checks are re-run from the code and write their own numbers. The larger results are quoted from documented runs. The unit tests (225 on CPU and 7 on GPU at 2026-11-10) cover the rest and are not repeated here.
+**Short version.** Six checks are re-run from the code and write their own numbers. The larger results are quoted from documented runs. The unit tests (225 on CPU and 7 on GPU at 2026-11-10) cover the rest and are not repeated here.
 :::
 
 ## Generated checks
