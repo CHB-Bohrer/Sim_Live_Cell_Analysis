@@ -104,7 +104,7 @@ So the trapping of the plain sampler on dense, nearly noise-free traces is real 
 tempers 9 of the 12 dense cells. Scores against the simulation moved in the third decimal (dense: found 0.830 -> 0.832, false per true 0.198 -> 0.194, rate r 0.798).
 
 ## What this means for earlier results
-- Totals, matching scores and 1-min rates in the showcase numbers (CLAUDE.md: 389 true / 401 inferred; 1-min r 0.80) stand: they are the same with the
+- Totals, matching scores and 1-min rates in the showcase numbers (docs/notes/spot_finding.md: 389 true / 401 inferred; 1-min r 0.80) stand: they are the same with the
   tempered sampler.
 - Posterior intervals and the start times of dense bursts from the plain sampler were not reliable.
 - The placeholder (sparse) gene is fine with either sampler.

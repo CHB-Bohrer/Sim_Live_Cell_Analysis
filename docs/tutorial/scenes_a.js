@@ -111,7 +111,7 @@ SC("run", "What happens when you press Run", (st) => {
   const o = { instant: false }; o.term = new Term(st);
   o.destroy = () => o.term.destroy();
   o.lines = (from, to) => { const L = [
-    ["Run folder: C:\\Users\\you\\SimLiveData\\runs\\loci_demo_seed11_24bba2", "dim"], ["Stage 2: simulating cell motion and shape", ""], ["Stage 1: simulating loci inside each nucleus", ""],
+    ["Run folder: ...\\Sim_Live_Cell_Analysis\\simulation_data\\runs\\loci_demo_seed11_24bba2", "dim"], ["Stage 2: simulating cell motion and shape", ""], ["Stage 1: simulating loci inside each nucleus", ""],
     ["Stage 1b: stochastic probe binding at the promoter and enhancer (sets each locus' brightness)", ""], ["Stage 1c: stochastic transcription driven by promoter-enhancer distance (the MS2 signal)", ""],
     ["Stage 3: rendering nucleus + locus0 + locus1 (MS2 spots are in the nuclear channel)", ""], ["Stage 4: segmenting", ""], ["Stage 4: tracking on gt_masks (trackastra)", ""], ["Stage 4: tracking on auto_masks (trackastra)", ""],
     ["Stage 5: isolating cells (identity source: truth)", ""], ["Stage 6: locating loci in 12 cells in parallel", ""], ["Stage 6: photobleaching correction (background removed first)", ""],
