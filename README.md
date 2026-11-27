@@ -4,7 +4,7 @@ Validate live-cell chromatin-locus analysis against simulations with known groun
 Pipeline: polymer dynamics (polychrom/OpenMM) -> cells + motion -> microscopy forward model ->
 segmentation + tracking (Trackastra) -> locus-to-cell linking -> analysis -> validation.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for diagrams of how it fits together and the build roadmap, and
-[CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** see the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
+[CLAUDE.md](CLAUDE.md) for stages and conventions. **Status:** one-page summary in [STATUS.md](STATUS.md) (parked ideas in [THOUGHTS.md](THOUGHTS.md)); full detail in the Status section of CLAUDE.md (stages 1-5, 7a built; the chromatin library, image-error model and dashboard are in use; the real stage 6 analysis is still to come).
 
 **Logic audit (2026-10-26) and re-run (2026-11-09).** Every analysis module was re-checked; six logic errors were fixed (MCMC shift move not posterior-invariant; library loci
 stretched by the nuclear aspect ratio; E-P measurement timing off by half a polymer block; biplane bead filter; method comparison ignoring the run's settings;

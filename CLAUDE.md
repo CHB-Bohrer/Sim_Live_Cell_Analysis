@@ -4,6 +4,23 @@ Repo for validating live-cell microscopy analysis of chromatin loci against simu
 Package name: `simlive` (src layout). Owner is a biophysicist (GitHub: CHB-Bohrer; repo
 https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for how to run everything.
 
+## Owner's standing preferences (added 2026-11-27)
+- **Short status page.** `STATUS.md` is the one-page view of where the project stands and what is next. This file (`CLAUDE.md`) stays the full record and the session handoff rule below still applies.
+  Rewrite it at the end of a session (under 40 lines; replace, do not append).
+- **Parked thoughts.** When the owner mentions an idea that is not for now ("park this", "note for later", an aside outside the
+  current task), add it to `THOUGHTS.md` in their words with a concrete **Revisit when** condition, and say in one line which
+  condition you recorded. Do not act on it. List the entries with `scripts\run.cmd python scripts\thoughts.py` at the start of a session and at wrap-up;
+  when the current work meets an entry's condition, raise it in a sentence or two and let the owner decide, then record it as
+  adopted or dropped. Never delete an entry.
+- **Do the obvious next thing, at most two.** When the next step is clear, do it instead of asking: it follows directly from the
+  task or is tagged `[auto]` in `STATUS.md` (`scripts\run.cmd python scripts\next_steps.py --auto`), git can undo it, it needs no long GPU run, money or
+  new dependency, and it does not change the scientific direction or what a result means. After the task the owner asked for, do
+  at most TWO such follow-ups per session and write every other one into `STATUS.md` under Next as `- [auto] ...`; they are
+  picked up next session, or all at once when the owner says "go ahead with the next steps". Ask first for anything tagged
+  `[ask]`, a choice between scientific alternatives, deleting data, publishing, or changing a tolerance or expected value so a
+  check passes. Note self-started work in `STATUS.md` under Last session with `(auto)`.
+- **Git.** Commit and push without asking for confirmation, following "Pushing to GitHub" below (straight to `main`, the checks before every push still apply). In force until the owner says otherwise.
+
 ## Project location (moved 2026-11-21 into Dropbox, then 2026-11-25 one level down)
 - 2026-11-25, user: "I want you to make a larger folder call Live_Cell_Microscopy investigations and store everything for this project in
   there". The whole `Dropbox\Sim_Live_Cell_Analysis` folder (code, simulation_data, README.md) was moved with one rename into
