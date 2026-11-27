@@ -22,11 +22,13 @@ https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for
 - **Git.** Commit and push without asking for confirmation, following "Pushing to GitHub" below (straight to `main`, the checks before every push still apply). In force until the owner says otherwise.
 
 ## Where the project lives (details: `docs/notes/location_and_disk.md`)
-- Everything is in `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\`: `code\` = this git repo,
-  `simulation_data\` = runs, sweeps, chromatin library, tutorial files (`SIMLIVE_DATA`; found relative to the repo by `scripts\run.cmd`).
+- The git repo is `C:\Users\cbohr\Projects\Sim_Live_Cell_Analysis` (OUTSIDE Dropbox since 2026-11-27; GitHub is its backup).
+- The data stays in Dropbox: `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data` = runs, sweeps,
+  chromatin library, tutorial files (`SIMLIVE_DATA`; `scripts\run.cmd` and `simlive.io.runs.DATA_ROOT` look for it by that path when there is no
+  `simulation_data` next to the repo).
 - `C:\Users\cbohr\SimLiveData` is a JUNCTION to `simulation_data`. Do not delete the junction's target through it.
 - The conda envs import the code through an editable install; if the repo moves, fix the `.pth` line (see the notes) or the env imports nothing.
-- Open Claude Code sessions in the `code` folder. Dropbox locks files while uploading (`os.replace` can fail with WinError 5: retry).
+- Open Claude Code sessions in `C:\Users\cbohr\Projects\Sim_Live_Cell_Analysis`. Dropbox locks data files while uploading (`os.replace` can fail with WinError 5: retry).
 
 ## Session handoff rule (always follow)
 **Before ending a work session, or after any significant change, without being asked:**
@@ -124,8 +126,8 @@ Run the tracker twice: (a) on ground-truth masks (isolates linking error), (b) o
   Every stage output directory contains: data files, `params.yaml` (resolved config), `seed.txt`, `provenance.json`
   (git commit, package versions, timestamp), and ground truth where applicable.
 - **Run layout:** `$SIMLIVE_DATA/runs/<run_id>/stageN_<name>/...` where `SIMLIVE_DATA` defaults to
-  `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data` = the folder `simulation_data` NEXT TO the repo folder (set in `scripts\run.cmd`;
-  `simlive.io.runs.DATA_ROOT` does the same when the env var is unset). See "Project location" at the top. `run_id` encodes the config hash + seed. Outputs are gitignored and must be
+  `C:\Users\cbohr\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data` (set in `scripts\run.cmd`; `simlive.io.runs.DATA_ROOT` does the same
+  when the env var is unset; a folder `simulation_data` next to the repo folder wins if there is one). See "Project location" at the top. `run_id` encodes the config hash + seed. Outputs are gitignored and must be
   reproducible from config + seed. Chromatin simulations go in `$SIMLIVE_DATA/chromatin/`.
 - **Configs:** YAML in `configs/`, one per stage plus sweep files that expand to a list of resolved configs.
   Never hardcode parameters in code.

@@ -10,7 +10,7 @@ This is the short front page. Rules for every session are in `CLAUDE.md`; the de
 - Stand-ins: stage 6 is a measured placeholder (DoG + Viterbi spot finder, MS2 trace, Pol II deconvolution) until the owner's own analysis replaces it.
 - Chromatin: polychrom engine validated (11 of 12 checks; insulation 1.36-fold against a 1.5 target, left as an honest miss). The 100-simulation loop-extrusion library is finished.
 - Nearly every instrument, probe, MS2 and polymer-calibration number is a placeholder or an assumption, not a measurement.
-- Tests: 225 CPU + 7 GPU at 2026-11-10. Narrated tutorial: 38 scenes, video release `tutorial-video-2026-10-25`.
+- Tests: 225 CPU + 7 GPU at 2026-11-10. Narrated tutorial: 38 scenes, video release `tutorial-video-2026-11-26`.
 
 ## Last session
 - 2026-11-27: design document gained three generated checks with figures (blind calibration, spot precision against the Mortensen limit, MS2 samplers against the exact posterior; all pass) and the saved polymer P(s) / MSD figures. The separate `docs/manual` PDF (PR #2) was folded into it and removed, at the owner's choice.

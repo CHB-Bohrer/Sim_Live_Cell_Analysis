@@ -86,8 +86,9 @@ Segmentation here is a classical threshold + watershed baseline; Cellpose/StarDi
 ```
 configs/     YAML parameter files and sweeps
 data/        only .gitkeep placeholders. Real outputs live OUTSIDE the repo (not in git) in %SIMLIVE_DATA%,
-             default = the folder `simulation_data` next to this repo folder (set by scripts\run.cmd; on the
-             owner's PC: Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data), else C:\Users\<you>\SimLiveData:
+             default = a folder `simulation_data` next to this repo folder, else the owner's
+             %USERPROFILE%\Dropbox\Live_Cell_Microscopy_Investigations\Sim_Live_Cell_Analysis\simulation_data
+             (set by scripts\run.cmd), else C:\Users\<you>\SimLiveData:
              runs/<run_id>/stageN_<name>/, sweeps/<name>/, chromatin/ (polymer simulation library)
 scripts/     run.cmd, view_run.py, make_demo_run.py, install scripts
 src/simlive/ stage1_chromatin ... stage7_validation, calibration, io

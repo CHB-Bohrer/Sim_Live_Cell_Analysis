@@ -31,8 +31,11 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 TUT = REPO / "docs" / "tutorial"
 STAMP = TUT / "shots_stamp.json"
-_SIBLING = pathlib.Path(__file__).resolve().parents[3] / "simulation_data"
-DATA = pathlib.Path(os.environ.get("SIMLIVE_DATA", _SIBLING if _SIBLING.is_dir() else pathlib.Path.home() / "SimLiveData"))
+# Same search order as simlive.io.runs.DATA_ROOT and scripts\run.cmd (this script may run outside the simlive env).
+_DATA_CANDIDATES = (REPO.parent / "simulation_data",
+                    pathlib.Path.home() / "Dropbox" / "Live_Cell_Microscopy_Investigations" / "Sim_Live_Cell_Analysis" / "simulation_data",
+                    pathlib.Path.home() / "SimLiveData")
+DATA = pathlib.Path(os.environ.get("SIMLIVE_DATA") or next((p for p in _DATA_CANDIDATES if p.is_dir()), _DATA_CANDIDATES[-1]))
 KOKORO_PY = pathlib.Path.home() / "kokoro_tmp" / "v" / "Scripts" / "python.exe"
 PORT = 8502
 MAX_CHARS = 250

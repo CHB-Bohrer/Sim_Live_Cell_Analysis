@@ -16,10 +16,16 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-# Where simulation outputs live (runs, sweeps, chromatin library): $SIMLIVE_DATA, else the folder `simulation_data`
-# next to the repo folder (scripts\run.cmd sets the same), else <repo>/data.
-_SIBLING_DATA = REPO_ROOT.parent / "simulation_data"
-DATA_ROOT = Path(os.environ.get("SIMLIVE_DATA", _SIBLING_DATA if _SIBLING_DATA.is_dir() else REPO_ROOT / "data"))
+# Where simulation outputs live (runs, sweeps, chromatin library). First match wins; scripts\run.cmd and
+# scripts/tutorial/update_tutorial.py use the same order: $SIMLIVE_DATA; a folder `simulation_data` next to the repo
+# folder; the owner's Dropbox data folder (the repo itself lives outside Dropbox since 2026-11-27); ~/SimLiveData
+# (the old place); else <repo>/data.
+DATA_CANDIDATES = (
+    REPO_ROOT.parent / "simulation_data",
+    Path.home() / "Dropbox" / "Live_Cell_Microscopy_Investigations" / "Sim_Live_Cell_Analysis" / "simulation_data",
+    Path.home() / "SimLiveData",
+)
+DATA_ROOT = Path(os.environ.get("SIMLIVE_DATA") or next((p for p in DATA_CANDIDATES if p.is_dir()), REPO_ROOT / "data"))
 
 
 INSTRUMENTS = Path(__file__).resolve().parents[3] / "configs" / "instruments"
