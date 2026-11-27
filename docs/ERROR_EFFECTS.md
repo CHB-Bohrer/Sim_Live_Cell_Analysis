@@ -91,7 +91,7 @@ Every movie is cut into single-cell crops (true cell IDs) and analysed with the 
 - **One seed.** Differences of a few % are within the noise of a single movie.
 - **Placeholder error sizes.** They change the ranking.
 - **Bright locus spots** (600 photons per exposure x probes): hot pixels and cosmic rays barely matter here. With the old placeholder
-  finder or dim spots they did (see CLAUDE.md "Image errors").
+  finder or dim spots they did (see docs/notes/imaging.md "Image errors").
 
 | movie | analysis | wrong pick | median nm | p95 nm | distance rms nm | intensity r | intensity err % | late/early | MS2 r |
 |---|---|---|---|---|---|---|---|---|---|

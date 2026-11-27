@@ -3,7 +3,7 @@
 **Project:** Sim Live Cell Analysis. Simulated live-cell movies of chromatin loci with known ground truth, used to measure how much each step of the analysis gets wrong.
 **Updated:** 2026-11-27 (stage states as of the 2026-11-10 improvement pass; folder moved 2026-11-25)
 
-This is the short front page. The full record, with every finding and gotcha, is `CLAUDE.md`.
+This is the short front page. Rules for every session are in `CLAUDE.md`; the detailed record, with every finding and gotcha, is in `docs/notes/`.
 
 ## Where things stand
 - Built: cell motion (stage 2), microscope image model with 28 switchable error sources, 3D z-stacks, biplane and calibration (stage 3), Cellpose + Trackastra tracking (stage 4), per-cell isolation (stage 5a), tracking metrics and error propagation for 2D (stage 7).
@@ -13,10 +13,10 @@ This is the short front page. The full record, with every finding and gotcha, is
 - Tests: 225 CPU + 7 GPU at 2026-11-10. Narrated tutorial: 38 scenes, video release `tutorial-video-2026-10-25`.
 
 ## Last session
-- 2026-11-27: added this file, `THOUGHTS.md`, `scripts/thoughts.py`, `scripts/next_steps.py` and the "Owner's standing preferences" section in `CLAUDE.md`. No code or results changed.
+- 2026-11-27: `CLAUDE.md` condensed from 857 lines (118 KB) to 170 lines (17 KB). Its 22 topic sections were moved word for word into nine files under `docs/notes/`; a line-by-line check found nothing lost. The session handoff rule now points new entries to `STATUS.md` and the notes.
+- 2026-11-27: added `STATUS.md`, `THOUGHTS.md`, `scripts/thoughts.py`, `scripts/next_steps.py` and the owner's standing preferences. No code or results changed.
 
 ## Next
-- [ask] Condense `CLAUDE.md` (about 840 lines, loaded every session) into short rules plus topic files under `docs/`. Largest usage saving available; needs care so no gotcha is lost.
 - [ask] Write the paper-style design document (PDF) for this project; today the explanation is spread over `docs/*.md`.
 - [ask] Start the plain-polymer library (about 73 h of GPU).
 - [ask] Re-make and publish the tutorial MP4 (pictures changed slightly on 2026-11-10).
@@ -28,6 +28,6 @@ This is the short front page. The full record, with every finding and gotcha, is
 - `gh auth refresh -s workflow` to enable `docs/ci/syntax.yml`.
 
 ## Where to look
-- `CLAUDE.md`: full handoff record. `README.md`: how to run everything.
+- `CLAUDE.md`: rules for every session. `docs/notes/`: detailed record by topic. `README.md`: how to run everything.
 - `docs/ARCHITECTURE.md`: pipeline diagrams. `docs/tutorial/index.html`: narrated tutorial.
 - `src/simlive/stageN_*`: one subpackage per pipeline stage. `status.json`: public status page.
