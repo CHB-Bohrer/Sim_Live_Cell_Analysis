@@ -33,7 +33,10 @@ https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis, public). See README.md for
 1. rewrite `STATUS.md` (where things stand, what was done, what is next);
 2. add what changed (new commands / files, gotchas hit, findings, open questions) as a dated section at the top of the matching
    file in `docs/notes/`; a new topic gets a new file and a row in the index below;
-3. update README.md if how to run something changed; then commit and push.
+3. if code under `src/` or `configs/` changed, run `scripts\run.cmd python docs\paper\stale.py` and update only the sections and
+   checks of the design document it lists, then rebuild (`docs/paper/README.md`); a design choice gets an entry in
+   `docs/paper/sections/12-decisions.md` (what, why, what was rejected; ask if the reason is unknown, never invent one);
+4. update README.md if how to run something changed; then commit and push.
 A new session starts from this file, `STATUS.md` and the code alone, so anything not written down is lost. Keep THIS file to
 rules that apply in every session (aim: under 200 lines); results, history and one-topic gotchas belong in the notes. Delete
 stale statements rather than appending contradictions. `docs/ARCHITECTURE.md` holds Mermaid diagrams
@@ -63,7 +66,8 @@ branch, not main": that was a misreading of the user's intent.)
 | `dashboard.md` | Dashboard pages, performance, plots, walk-through and the 2026-10-20 fix round | editing `app/`, plots, pages, or chasing a dashboard crash |
 | `tutorial.md` | Narrated tutorial, voice, playback, video releases | editing the tutorial, its screenshots, voice clips or video |
 
-Longer write-ups with the numbers: `docs/ARCHITECTURE.md`, `SPOT_FINDING.md`, `EP_CURVE.md`, `ERROR_EFFECTS.md`, `IMAGE_ERRORS.md`, `CALIBRATION_AND_3D.md`,
+The design document `docs/paper/sim-live-paper.pdf` explains how every stage works and why, in plain language, with the evidence;
+its section files (`docs/paper/sections/`) are the place to read how a stage is meant to work. Longer write-ups with the numbers: `docs/ARCHITECTURE.md`, `SPOT_FINDING.md`, `EP_CURVE.md`, `ERROR_EFFECTS.md`, `IMAGE_ERRORS.md`, `CALIBRATION_AND_3D.md`,
 `MCMC_CONVERGENCE.md`, `INSTRUMENTS.md`, `chromatin_validation.md`, `PLAN_transcription.md`, `PLAN_three_signals_and_homologs.md`, `docs/tutorial/UPDATING.md`.
 
 ## Rules learned the hard way (the story behind each is in the note named)

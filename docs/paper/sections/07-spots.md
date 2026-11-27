@@ -1,0 +1,54 @@
+<!--
+Section: Spots, brightness and transcription from images (stages 5a and 6)
+Update when: isolation, the spot finder, the multi-copy linker, bleaching / flat-field correction, the MS2 trace or the deconvolution and its samplers change.
+Code: src/simlive/stage5_linking, src/simlive/stage6_analysis
+Check: none
+Sources: docs/SPOT_FINDING.md, docs/MCMC_CONVERGENCE.md, docs/notes/spot_finding.md.
+-->
+
+# From images to positions, brightness and polymerase starts
+
+::: {.box}
+**Short version.** Each cell gets its own small movie. In it, candidate spots are found with a low threshold and one best path through time is chosen per colour. Brightness is corrected for bleaching and uneven light. The MS2 trace is then turned into polymerase start times by sampling a posterior. This stage is a placeholder for the owner's own analysis, but it is a measured one.
+:::
+
+## One movie per cell
+
+`isolate_cells` cuts a fixed-size crop around each cell identity, for the true identities and for the tracker's. Running the same analysis on both is how tracking errors are carried into locus results (Section 10).
+
+## Finding the spots
+
+The method follows Chen, Levo, Zoller and Gregor (2025):
+
+1. Median filter, then a difference of Gaussians (1 and 3 pixels), with a low threshold of three times the noise. Keep up to 5 candidates per frame (8 when two copies are expected).
+2. Choose one path per cell and colour by dynamic programming (Viterbi). A step costs the negative log of the diffusion propagator. Short gaps are allowed at a fixed price. A candidate is rewarded by its signal-to-noise and by how unlikely a false candidate would be.
+3. Fit a Gaussian for the position and measure brightness in an ellipse minus a surrounding ring.
+
+The clutter term in the reward is essential. Without it the path skipped 547 of 1,914 frames that held the correct candidate.
+
+Recorded results, calibrated: 98.0% of spots found with no wrong picks and a 26 nm median error on a library run; in 3D, 100% found with an 84 nm median error.
+
+## Two copies and stray spots
+
+With two copies per cell, paths are built per colour, paired into promoter-enhancer copies using a smooth prior on their separation, and untangled where copies swap. Over 25 movies the linker got the copy number right in 100% of cells with few stray spots, 98% at 1 to 2 strays per nucleus per minute, and 90% at 4. A single path per colour gets it right in only 58%.
+
+Using spot brightness in the linking was built and tested. It gave no net gain, so it is off (Section 13).
+
+## Brightness
+
+Photobleaching is estimated from background-subtracted signal. Leaving the background in misses about 30% of the decay. Uneven illumination is fitted from the nuclei themselves and kept only if it improves prediction on held-out cells; on a run with slow cells the fit was rejected, correctly.
+
+## From MS2 trace to polymerase starts
+
+The MS2 trace is the ellipse brightness at the tracked promoter in every frame. It is modelled as a sum of identical single-polymerase kernels placed at unknown start times, with noise variance $\sigma_b^2 + \beta G$ for signal $G$. The start times are sampled from their posterior.
+
+How well the sampler converges turned out to matter:
+
+- All samplers reproduce the exactly enumerated posterior of a small problem, so the target is right.
+- The simple sampler does **not** converge on a dense, nearly noise-free gene (3 of 12 cells pass). Chains agree on the number of starts but disagree on their timing.
+- Parallel tempering fixes it (12 of 12) at 20 to 30 times the cost.
+- The default therefore checks each cell with four chains and switches to tempering only where needed. Limits ($\hat{R} < 1.05$, effective sample size at least 400) were fixed in advance.
+
+Recorded scores on the default bursty gene: 79% of true starts found within 30 s, with 0.68 false starts per true one (weak spikes in noise).
+
+**The brightness of MS2 decides everything here.** Define $R$ as one polymerase's MS2 photons divided by one nuclear pixel's photons. The correlation between measured and true trace is 0.15 at the placeholder $R = 0.8$, 0.76 at $R = 8$ and 0.95 at $R = 25$. $R$ must be measured on real data **[Assumption]**.

@@ -17,6 +17,10 @@
       "href": "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/releases/tag/tutorial-video-2026-10-25"
     },
     {
+      "label": "Read the design document (PDF)",
+      "href": "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/blob/main/docs/paper/sim-live-paper.pdf"
+    },
+    {
       "label": "How it works",
       "href": "https://github.com/CHB-Bohrer/Sim_Live_Cell_Analysis/blob/main/docs/ARCHITECTURE.md"
     },
